@@ -1,0 +1,132 @@
+:root {
+  --bg: #0a0e1a;
+  --panel: #111832;
+  --line: #2a3560;
+  --ink: #e8ecff;
+  --dim: #9aa6d0;
+  --a: #37e0ff;
+  --b: #ff5d7a;
+  --good: #52e0a0;
+  --warn: #ffcf5d;
+  --outline: #05070f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.shell {
+  max-width: 1020px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+h1 { margin: 0; font-size: 28px; letter-spacing: 1px; }
+.sub { margin: 4px 0 0; color: var(--dim); }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+button {
+  background: var(--a);
+  color: var(--outline);
+  border: 2px solid var(--outline);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:disabled { opacity: 0.4; cursor: default; }
+
+#restart-btn { background: var(--warn); }
+#pause-btn { background: var(--good); }
+
+input {
+  background: #0a0e1a;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.pills { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--dim);
+  background: #0a0e1a;
+}
+
+.hud {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.bar-block.right { text-align: right; }
+.name { font-weight: 700; }
+.tag-a { color: var(--a); }
+.tag-b { color: var(--b); }
+
+.bar {
+  height: 12px;
+  border: 1px solid var(--outline);
+  border-radius: 6px;
+  background: #05070f;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.bar.thin { height: 6px; }
+.fill { height: 100%; width: 100%; }
+.hp-a { background: var(--a); }
+.en-a { background: var(--good); }
+.hp-b { background: var(--b); }
+.en-b { background: var(--good); }
+
+#arena {
+  width: 100%;
+  height: auto;
+  border: 2px solid var(--outline);
+  border-radius: 8px;
+  background: #070b18;
+}
+
+#feed {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  max-height: 160px;
+  overflow: auto;
+  color: var(--dim);
+}

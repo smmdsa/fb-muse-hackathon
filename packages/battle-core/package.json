@@ -1,0 +1,10 @@
+{
+  "name": "@agent-wars/battle-core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "node --test ./test/determinism.test.mjs ./test/mirror.test.mjs",
+    "build": "node ./scripts/build-check.mjs"
+  }
+}

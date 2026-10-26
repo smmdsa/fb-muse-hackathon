@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Wars — S1 Arena Demo</title>
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+<main class="shell">
+<header class="top">
+<div>
+<h1>Agent Wars</h1>
+<p class="sub">S1 arena demo — SHADOW.EXE vs BREAKER.01</p>
+</div>
+<div class="pills">
+<span class="pill" id="pill-tick">tick 0</span>
+<span class="pill" id="pill-seed">seed forge-001</span>
+<span class="pill" id="pill-state">ready</span>
+</div>
+</header>
+<section class="panel" id="title-card">
+<h2>Build the brain. Enter the arena.</h2>
+<p>Two reference agents fight in THE_FORGE. The sim runs at 30 ticks per second. Covers block shots. Shields block damage.</p>
+<div class="row">
+<label for="seed">Seed</label>
+<input id="seed" name="seed" value="forge-001" maxlength="40" />
+<button id="start-btn" type="button">Start battle</button>
+<button id="restart-btn" type="button" disabled>Restart</button>
+</div>
+</section>
+<section class="panel">
+<div class="hud">
+<div class="bar-block">
+<span class="name tag-a">SHADOW.EXE</span>
+<div class="bar"><div class="fill hp-a" id="hp-a"></div></div>
+<div class="bar thin"><div class="fill en-a" id="en-a"></div></div>
+</div>
+<div class="bar-block right">
+<span class="name tag-b">BREAKER.01</span>
+<div class="bar"><div class="fill hp-b" id="hp-b"></div></div>
+<div class="bar thin"><div class="fill en-b" id="en-b"></div></div>
+</div>
+</div>
+<canvas id="arena" width="960" height="640"></canvas>
+<div class="row">
+<button id="pause-btn" type="button" disabled>Pause</button>
+<span class="pill" id="pill-winner">no winner yet</span>
+</div>
+</section>
+<section class="panel">
+<h2>Events</h2>
+<ol id="feed"></ol>
+</section>
+</main>
+<script src="./game.js"></script>
+</body>
+</html>

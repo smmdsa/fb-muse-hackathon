@@ -1,0 +1,9 @@
+{
+  "name": "@agent-wars/behavior-dna",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "node --test ./test/validate.test.mjs ./test/evaluate.test.mjs"
+  }
+}
