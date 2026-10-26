@@ -1,0 +1,9 @@
+{
+  "name": "@agent-wars/ranking",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "node --test ./test/rating.test.mjs ./test/tiers.test.mjs"
+  }
+}
