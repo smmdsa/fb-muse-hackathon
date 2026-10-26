@@ -1,0 +1,9 @@
+{
+  "name": "@agent-wars/tournaments",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "node --test ./test/registration.test.mjs ./test/bracket.test.mjs"
+  }
+}

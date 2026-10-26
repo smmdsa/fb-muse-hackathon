@@ -1,6 +1,6 @@
 # Implementation status
 
-Date: 2026-10-26. Sprint: sprint-003. This file tells the truth about what runs.
+Date: 2026-10-26. Sprint: sprint-004. This file tells the truth about what runs.
 
 ## What works
 
@@ -21,6 +21,7 @@ Date: 2026-10-26. Sprint: sprint-003. This file tells the truth about what runs.
 - S2 slice 1 done: `packages/behavior-dna` validates and evaluates policies.
 - S3 ranking slice done: `packages/ranking` moves AP ±12 to ±28, maps tiers, rejects dupes and self-matches.
 - S3 autobattle slice done: `packages/autobattle` gates matches on lease and stamina, caps defense at 3 per day, finishes in-progress matches before expiry.
+- S4 tournament slice done: `packages/tournaments` registers with cutoff and eligibility, locks versions, runs a reproducible 8-player bracket with a best-of-3 final.
 - Accounts, AI compile, and publish flow: planned for later S2 slices.
 - Ranked AP ±12 to ±28, AutoBattle leases, championships, shop (S3 and S4): planned.
 - Full acceptance suite from GDD section 14: planned. S1 covers gameplay rows only.

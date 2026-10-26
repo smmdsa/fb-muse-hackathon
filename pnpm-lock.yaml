@@ -15,3 +15,5 @@ importers:
   packages/behavior-dna: {}
 
   packages/ranking: {}
+
+  packages/tournaments: {}
