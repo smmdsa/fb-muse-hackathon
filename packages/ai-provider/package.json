@@ -1,0 +1,12 @@
+{
+  "name": "@agent-wars/ai-provider",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@agent-wars/behavior-dna": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test ./test/mock.test.mjs"
+  }
+}

@@ -8,6 +8,12 @@ importers:
 
   .: {}
 
+  packages/ai-provider:
+    dependencies:
+      '@agent-wars/behavior-dna':
+        specifier: workspace:*
+        version: link:../behavior-dna
+
   packages/autobattle: {}
 
   packages/battle-core: {}
