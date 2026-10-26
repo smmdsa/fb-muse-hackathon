@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "test": "pnpm -r test",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "demo": "node ./scripts/e2e-demo.mjs"
   }
 }

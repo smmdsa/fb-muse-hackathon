@@ -5,3 +5,4 @@ export * from "./rng.ts";
 export * from "./world.ts";
 export * from "./simulation.ts";
 export * from "./policies.ts";
+export * from "./policy-driver.ts";

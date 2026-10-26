@@ -16,7 +16,11 @@ importers:
 
   packages/autobattle: {}
 
-  packages/battle-core: {}
+  packages/battle-core:
+    dependencies:
+      '@agent-wars/behavior-dna':
+        specifier: workspace:*
+        version: link:../behavior-dna
 
   packages/behavior-dna: {}
 
