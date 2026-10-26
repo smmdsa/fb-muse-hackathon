@@ -20,6 +20,7 @@ Date: 2026-10-26. Sprint: sprint-003. This file tells the truth about what runs.
 - Manual play checks: all pass on 2026-10-26. See `docs/manual-test-s1.md`.
 - S2 slice 1 done: `packages/behavior-dna` validates and evaluates policies.
 - S3 ranking slice done: `packages/ranking` moves AP ±12 to ±28, maps tiers, rejects dupes and self-matches.
+- S3 autobattle slice done: `packages/autobattle` gates matches on lease and stamina, caps defense at 3 per day, finishes in-progress matches before expiry.
 - Accounts, AI compile, and publish flow: planned for later S2 slices.
 - Ranked AP ±12 to ±28, AutoBattle leases, championships, shop (S3 and S4): planned.
 - Full acceptance suite from GDD section 14: planned. S1 covers gameplay rows only.

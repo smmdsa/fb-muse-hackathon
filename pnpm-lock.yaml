@@ -8,6 +8,8 @@ importers:
 
   .: {}
 
+  packages/autobattle: {}
+
   packages/battle-core: {}
 
   packages/behavior-dna: {}
