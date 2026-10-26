@@ -1,6 +1,6 @@
 # Implementation status
 
-Date: 2026-10-26. Sprint: sprint-004. This file tells the truth about what runs.
+Date: 2026-10-26. Sprint: sprint-004. Economy done. This file tells the truth about what runs.
 
 ## What works
 
@@ -22,6 +22,7 @@ Date: 2026-10-26. Sprint: sprint-004. This file tells the truth about what runs.
 - S3 ranking slice done: `packages/ranking` moves AP ±12 to ±28, maps tiers, rejects dupes and self-matches.
 - S3 autobattle slice done: `packages/autobattle` gates matches on lease and stamina, caps defense at 3 per day, finishes in-progress matches before expiry.
 - S4 tournament slice done: `packages/tournaments` registers with cutoff and eligibility, locks versions, runs a reproducible 8-player bracket with a best-of-3 final.
+- S4 economy slice done: `packages/economy` runs an idempotent AC/RP ledger with a 150/day cap and a mock cosmetic shop. Real money stays locked.
 - Accounts, AI compile, and publish flow: planned for later S2 slices.
 - Ranked AP ±12 to ±28, AutoBattle leases, championships, shop (S3 and S4): planned.
 - Full acceptance suite from GDD section 14: planned. S1 covers gameplay rows only.

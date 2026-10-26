@@ -14,6 +14,8 @@ importers:
 
   packages/behavior-dna: {}
 
+  packages/economy: {}
+
   packages/ranking: {}
 
   packages/tournaments: {}
