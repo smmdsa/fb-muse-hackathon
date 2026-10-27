@@ -219,6 +219,7 @@ export default {
       return json({ leader: me, agent });
     }
     if (request.method === "POST" && url.pathname === "/v1/agents") {
+      try {
       const exists = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(me.id as string).first();
       if (exists) return json({ error: "one agent per leader in this phase" }, 409);
       const created = await readBody(request);
@@ -241,6 +242,9 @@ export default {
         "INSERT INTO agents (id, leader_id, active_version_id, name, concept, portrait_url) VALUES (?, ?, NULL, ?, ?, ?)",
       ).bind(id, me.id as string, name || null, concept || null, portraitUrl).run();
       return json({ agentId: id, portraitUrl }, 201);
+      } catch (err) {
+        return json({ error: `server error: ${(err as Error).message}` }, 500);
+      }
     }
     const dashMatch = request.method === "GET" && /^\/v1\/agents\/[^/]+\/dashboard$/.exec(url.pathname);
     if (dashMatch) {
@@ -253,6 +257,7 @@ export default {
     }
     const compileMatch = request.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/compile$/.test(url.pathname);
     if (compileMatch) {
+      try {
       const agentId = url.pathname.split("/")[3];
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
       if (!agent || agent.leader_id !== me.id) return json({ error: "agent not found for this leader" }, 404);
@@ -272,6 +277,9 @@ export default {
       ).bind(versionId, agentId, JSON.stringify(compiled.policy), hex, Date.now(), compiled.provider, compiled.isMock ? 1 : 0).run();
       await env.DB.prepare("UPDATE agents SET active_version_id = ? WHERE id = ?").bind(versionId, agentId).run();
       return json({ versionId, provider: compiled.provider, isMock: compiled.isMock }, 201);
+      } catch (err) {
+        return json({ error: `server error: ${(err as Error).message}` }, 500);
+      }
     }
     if (request.method === "POST" && url.pathname === "/v1/matches/training") {
       const body = await readBody(request);

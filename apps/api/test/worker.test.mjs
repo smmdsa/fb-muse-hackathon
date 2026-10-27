@@ -55,6 +55,25 @@ describe("worker reads", () => {
     assert.equal(res.status, 401);
   });
 
+  it("answers JSON 500 when the store breaks", async () => {
+    const bad = {
+      prepare: (query) => ({
+        bind: () => ({
+          first: async () => (String(query).includes("FROM leaders") ? { id: "l-broke", handle: "broke" } : null),
+          all: async () => ({ results: [] }),
+          run: async () => { throw new Error("disk gone"); },
+        }),
+      }),
+    };
+    const res = await entry.fetch(new Request("http://local/v1/agents", {
+      method: "POST",
+      headers: { authorization: "Bearer t", "content-type": "application/json" },
+      body: "{}",
+    }), { DB: bad, ASSETS: assetsStub });
+    assert.equal(res.status, 500);
+    assert.match((await res.json()).error, /disk gone/);
+  });
+
   it("serves the viewer shell at the root", async () => {
     const res = await entry.fetch(new Request("http://local/"), env);
     assert.equal(res.status, 200);
