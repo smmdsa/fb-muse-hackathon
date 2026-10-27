@@ -15,6 +15,12 @@ function shim(db) {
         run: async () => db.prepare(query).run(...values),
       }),
     }),
+    batch: async (stmts) => {
+      // No concurrent writers in one event: run the batch in order.
+      const out = [];
+      for (const s of stmts) out.push(await s.run());
+      return out;
+    },
   };
 }
 
@@ -89,16 +95,8 @@ describe("worker writes", () => {
     db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
-    const shimmed = {
-      prepare: (query) => ({
-        bind: (...values) => ({
-          first: async () => db.prepare(query).get(...values) ?? null,
-          all: async () => ({ results: db.prepare(query).all(...values) }),
-          run: async () => db.prepare(query).run(...values),
-        }),
-      }),
-    };
-    const wenv = { DB: shimmed, ASSETS: assetsStub };
+    // Reuse the shared shim: it carries batch, like the real D1 binding.
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
     const call = (method, path, body, token) => {
       if (method !== "POST") throw new Error("writes only");
       return entry.fetch(

@@ -134,15 +134,17 @@ async function replay(env: WorkerEnv, id: string): Promise<Response> {
   return json({ stored: match, recomputed: { winner: again.winner, ticks: again.ticks, checksum: again.checksum }, replay, identical: again.checksum === match.checksum });
 }
 
-async function pay(
+// One settlement writes as one batch. Reads stay ahead; every write below
+// lands atomically, so a concurrent duplicate settles zero or one fights.
+async function planPay(
   env: WorkerEnv,
   leaderId: string,
   matchKey: string,
   side: string,
   kind: "win" | "loss" | "no-contest",
-): Promise<number> {
+): Promise<{ stmts: unknown[]; credited: number }> {
   const row = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>();
-  if (!row) return 0;
+  if (!row) return { stmts: [], credited: 0 };
   const wallet = createWallet(leaderId, 0);
   wallet.ac = row.ac as number;
   wallet.rp = row.rp as number;
@@ -151,14 +153,18 @@ async function pay(
   const key = `${matchKey}-${side}`;
   const before = wallet.txns.length;
   const res = earnAc(wallet, { key, kind, suspicious: false, now: Date.now() });
-  await env.DB.prepare("INSERT OR IGNORE INTO wallet_keys (wallet_id, key) VALUES (?, ?)").bind(leaderId, key).run();
+  const stmts: unknown[] = [
+    env.DB.prepare("INSERT OR IGNORE INTO wallet_keys (wallet_id, key) VALUES (?, ?)").bind(leaderId, key),
+  ];
   for (const t of wallet.txns.slice(before)) {
-    await env.DB.prepare(
-      "INSERT INTO wallet_txns (wallet_id, idem_key, currency, delta, reason, at) VALUES (?, ?, ?, ?, ?, ?)",
-    ).bind(leaderId, t.idempotencyKey, t.currency, t.delta, t.reason, t.at).run();
+    stmts.push(
+      env.DB.prepare(
+        "INSERT INTO wallet_txns (wallet_id, idem_key, currency, delta, reason, at) VALUES (?, ?, ?, ?, ?, ?)",
+      ).bind(leaderId, t.idempotencyKey, t.currency, t.delta, t.reason, t.at),
+    );
   }
-  await env.DB.prepare("UPDATE leaders SET ac = ?, rp = ? WHERE id = ?").bind(wallet.ac, wallet.rp, leaderId).run();
-  return res.credited;
+  stmts.push(env.DB.prepare("UPDATE leaders SET ac = ?, rp = ? WHERE id = ?").bind(wallet.ac, wallet.rp, leaderId));
+  return { stmts, credited: res.credited };
 }
 
 // Energy reads the persisted machine, refreshes regen, and saves it back.
@@ -265,26 +271,6 @@ async function findHumanOpponent(env: WorkerEnv, leaderId: string, now: number):
   return best;
 }
 
-async function creditAc(env: WorkerEnv, leaderId: string, matchKey: string, side: string, kind: string): Promise<number> {
-  const row = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>();
-  if (!row) return 0;
-  const wallet = createWallet(leaderId, 0);
-  wallet.ac = row.ac as number;
-  wallet.rp = row.rp as number;
-  const keys = await env.DB.prepare("SELECT key FROM wallet_keys WHERE wallet_id = ?").bind(leaderId).all<{ key: string }>();
-  for (const k of keys.results) wallet.keys.add(k.key);
-  const before = wallet.txns.length;
-  const res = earnAc(wallet, { key: `${matchKey}-${side}`, kind: kind as "win" | "loss" | "no-contest", suspicious: false, now: Date.now() });
-  await env.DB.prepare("INSERT OR IGNORE INTO wallet_keys (wallet_id, key) VALUES (?, ?)").bind(leaderId, `${matchKey}-${side}`).run();
-  for (const t of wallet.txns.slice(before)) {
-    await env.DB.prepare("INSERT INTO wallet_txns (wallet_id, idem_key, currency, delta, reason, at) VALUES (?, ?, ?, ?, ?, ?)").bind(
-      leaderId, t.idempotencyKey, t.currency, t.delta, t.reason, t.at,
-    ).run();
-  }
-  await env.DB.prepare("UPDATE leaders SET ac = ?, rp = ? WHERE id = ?").bind(wallet.ac, wallet.rp, leaderId).run();
-  return res.credited;
-}
-
 async function runCasualD1(
   env: WorkerEnv,
   input: { aVersionId: string; bVersionId?: string; leaderId: string; useBot: boolean; seed: string },
@@ -305,12 +291,16 @@ async function runCasualD1(
   }
   const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, foePolicy, input.seed);
   const id = mintId("m");
-  await env.DB.prepare(
-    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)"
-  ).bind(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })).run();
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
-  const paid = await creditAc(env, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
-  return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !input.bVersionId, paid };
+  const plan = await planPay(env, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
+  const writes: unknown[] = [
+    env.DB.prepare(
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+    ).bind(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
+    ...plan.stmts,
+  ];
+  await env.DB.batch(writes as never[]);
+  return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !input.bVersionId, paid: plan.credited };
 }
 
 async function settleTicketD1(env: WorkerEnv, ticket: Record<string, unknown>, foeVersion: string | null): Promise<Record<string, unknown>> {
@@ -367,17 +357,33 @@ async function settleRankedD1(
     winner: winner as "A" | "B" | "DRAW",
     rated: true,
   });
+  const writes: unknown[] = [];
   for (const [id, st] of ledger.ratings) {
-    await env.DB.prepare("UPDATE leaders SET rating_milli = ?, ap = ?, placement = ?, placed = ? WHERE id = ?").bind(
-      st.ratingMilli, st.ap, st.placementGames, st.placed ? 1 : 0, id,
-    ).run();
+    writes.push(
+      env.DB.prepare("UPDATE leaders SET rating_milli = ?, ap = ?, placement = ?, placed = ? WHERE id = ?").bind(
+        st.ratingMilli, st.ap, st.placementGames, st.placed ? 1 : 0, id,
+      ),
+    );
   }
-  const paidA = await pay(env, aAgent.leader_id as string, input.key, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
-  const paidB = await pay(env, bAgent.leader_id as string, input.key, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
-  await env.DB.prepare(
-    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)"
-  ).bind(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })).run();
-  return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA, paidB };
+  const planA = await planPay(env, aAgent.leader_id as string, input.key, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
+  const planB = await planPay(env, bAgent.leader_id as string, input.key, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
+  writes.push(
+    ...planA.stmts,
+    ...planB.stmts,
+    env.DB.prepare(
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
+    ).bind(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
+  );
+  try {
+    await env.DB.batch(writes as never[]);
+  } catch {
+    // The row insert lost a race: this fight already settles. Rebuild the
+    // stored result instead of leaving a partial duplicate.
+    const stored = await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(input.key).first<Record<string, unknown>>();
+    if (!stored) throw new Error("settle failed");
+    return settledResultD1(env, stored as Record<string, number | string>);
+  }
+  return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA: planA.credited, paidB: planB.credited };
 }
 
 async function requestMatchD1(
@@ -421,6 +427,24 @@ async function readTicketD1(
   if (ticket.mode === "casual") return withMatchD1(env, await settleTicketD1(env, ticket, null));
   await env.DB.prepare("UPDATE tickets SET status = 'expired' WHERE id = ?").bind(input.ticketId).run();
   return (await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(input.ticketId).first<Record<string, unknown>>()) as Record<string, unknown>;
+}
+
+async function settledResultD1(env: WorkerEnv, row: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const credited = async (side: string): Promise<number> => {
+    const r = await env.DB.prepare("SELECT SUM(delta) AS total FROM wallet_txns WHERE idem_key = ?").bind(`${row.id}-${side}`).first<Record<string, unknown>>();
+    return (r?.total as number) ?? 0;
+  };
+  return {
+    matchId: row.id,
+    winner: row.winner,
+    ticks: row.ticks,
+    checksum: row.checksum,
+    deltaA: row.delta_a,
+    deltaB: row.delta_b,
+    paidA: await credited("a"),
+    paidB: await credited("b"),
+    deduped: true,
+  };
 }
 
 async function withMatchD1(env: WorkerEnv, ticket: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -569,7 +593,7 @@ export default {
       const key = typeof body.key === "string" && body.key ? body.key : mintId("m");
       if (!aVersionId || !bVersionId) return json({ error: "aVersionId and bVersionId are required" }, 400);
       const dup = await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(key).first<Record<string, unknown>>();
-      if (dup) return json({ ...dup, deduped: true }, 201);
+      if (dup) return json(await settledResultD1(env, dup), 201);
       const a = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(aVersionId).first<Record<string, unknown>>();
       const b = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(bVersionId).first<Record<string, unknown>>();
       if (!a || !b) return json({ error: "unknown version" }, 404);

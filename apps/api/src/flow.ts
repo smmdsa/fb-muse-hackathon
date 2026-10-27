@@ -70,7 +70,7 @@ export function runRanked(
   input: { aVersionId: string; bVersionId: string; seed: string; key: string },
 ): Record<string, unknown> {
   const dup = store.db.prepare("SELECT * FROM matches WHERE id = ?").get(input.key) as Record<string, unknown> | null;
-  if (dup) return { ...dup, deduped: true };
+  if (dup) return settledResult(store, dup);
   const a = getVersion(store, input.aVersionId);
   const b = getVersion(store, input.bVersionId);
   if (!a || !b) throw new Error("unknown version");
@@ -79,6 +79,10 @@ export function runRanked(
   if (aAgent.leader_id === bAgent.leader_id) throw new Error("self match denied");
   const out = fightPolicies(a.policy, b.policy, input.seed);
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
+  let applied = { deltaA: 0, deltaB: 0 };
+  let paidA = 0;
+  let paidB = 0;
+  const settle = (): void => {
   const ledger = createLedger("local-s1");
   for (const row of store.db.prepare("SELECT * FROM leaders").all() as Record<string, unknown>[]) {
     const r = ratingFor(ledger, row.id as string);
@@ -86,24 +90,69 @@ export function runRanked(
     r.placementGames = row.placement as number;
     r.placed = (row.placed as number) === 1;
   }
-  const applied = applyRanked(ledger, {
+  const res = applyRanked(ledger, {
     matchId: input.key,
     leaderA: aAgent.leader_id as string,
     leaderB: bAgent.leader_id as string,
     winner: winner as "A" | "B" | "DRAW",
     rated: true,
   });
+  applied = { deltaA: res.deltaA, deltaB: res.deltaB };
   for (const [id, st] of ledger.ratings) {
     store.db.prepare("UPDATE leaders SET rating_milli = ?, ap = ?, placement = ?, placed = ? WHERE id = ?").run(
       st.ratingMilli, st.ap, st.placementGames, st.placed ? 1 : 0, id,
     );
   }
-  const paidA = creditAc(store, aAgent.leader_id as string, input.key, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
-  const paidB = creditAc(store, bAgent.leader_id as string, input.key, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
+  paidA = creditAc(store, aAgent.leader_id as string, input.key, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
+  paidB = creditAc(store, bAgent.leader_id as string, input.key, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
   store.db.prepare(
     "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
   ).run(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
+  };
+  try {
+    transact(store, settle);
+  } catch (err) {
+    const dupe = store.db.prepare("SELECT * FROM matches WHERE id = ?").get(input.key) as Record<string, unknown> | null;
+    if (dupe && /constraint|UNIQUE|PRIMARY/i.test((err as Error).message)) return settledResult(store, dupe);
+    throw err;
+  }
   return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA, paidB };
+}
+
+// A settled row replays as the original result shape, never the raw row.
+function settledResult(store: Store, row: Record<string, unknown>): Record<string, unknown> {
+  const credited = (side: string): number => {
+    const r = store.db.prepare("SELECT SUM(delta) AS total FROM wallet_txns WHERE idem_key = ?").get(`${row.id}-${side}`) as Record<string, unknown> | null;
+    return (r?.total as number) ?? 0;
+  };
+  return {
+    matchId: row.id,
+    winner: row.winner,
+    ticks: row.ticks,
+    checksum: row.checksum,
+    deltaA: row.delta_a,
+    deltaB: row.delta_b,
+    paidA: credited("a"),
+    paidB: credited("b"),
+    deduped: true,
+  };
+}
+
+// One transaction. BEGIN IMMEDIATE serializes concurrent settlers on the
+// same key; the second blocks, hits the primary key, and dedupes below.
+export function transact(store: Store, fn: () => void): void {
+  store.db.exec("BEGIN IMMEDIATE");
+  try {
+    fn();
+    store.db.exec("COMMIT");
+  } catch (err) {
+    try {
+      store.db.exec("ROLLBACK");
+    } catch {
+      // The rollback itself failed; surface the original error.
+    }
+    throw err;
+  }
 }
 
 // One AC credit. Idempotent per match key and side; the daily cap lives in the ledger.
@@ -326,11 +375,15 @@ export function runCasual(
   if (!foePolicy) throw new Error("unknown foe version");
   const out = fightPolicies(found.policy, foePolicy, input.seed);
   const id = mintId("m");
-  store.db.prepare(
-    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)"
-  ).run(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
-  const paid = creditAc(store, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
+  // One write block: the match row and the wallet credit land together.
+  let paid = 0;
+  transact(store, () => {
+    store.db.prepare(
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)"
+    ).run(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
+    paid = creditAc(store, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
+  });
   return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !!bot, paid };
 }
 
