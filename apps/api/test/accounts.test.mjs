@@ -159,6 +159,17 @@ describe("accounts", () => {
     }
   });
 
+  it("reads back frozen season archives", async () => {
+    keys.store.db.prepare("INSERT INTO season_archives (season_id, closed_at, archive_json) VALUES (?, ?, ?)").run(
+      "s0", 1000, JSON.stringify({ rows: [{ rank: 1, leaderId: "l-old", ap: 640 }] }),
+    );
+    const r = await call("GET", "/v1/seasons", null, keys.commander);
+    assert.equal(r.status, 200);
+    assert.equal(r.json.seasons.length, 1);
+    assert.equal(r.json.seasons[0].seasonId, "s0");
+    assert.equal(r.json.seasons[0].rows[0].ap, 640);
+  });
+
   it("walks a fresh leader through the whole breed station", async () => {
     const s = await call("POST", "/v1/auth/session", { handle: "station" });
     const before = await call("GET", "/v1/me", null, s.json.token);

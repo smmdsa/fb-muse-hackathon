@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, equipItem, getLeader, getTournament, getVersion, installVersion, listTournaments, optInAutobattle, pauseAutobattle, readTicket, registerTournament, requestMatch, retryPortrait, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
+import { armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, equipItem, getLeader, getTournament, getVersion, installVersion, listTournaments, optInAutobattle, pauseAutobattle, readTicket, registerTournament, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -310,6 +310,10 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         } catch (err) {
           send(res, 404, { error: (err as Error).message });
         }
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/v1/seasons") {
+        send(res, 200, { seasons: seasonHistory(ctx.store) });
         return;
       }
       if (req.method === "GET" && url.pathname === "/v1/armory") {

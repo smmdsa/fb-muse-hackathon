@@ -84,6 +84,11 @@ export function openStore(path: string): Store {
       games_json TEXT NOT NULL DEFAULT '{}',
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS season_archives (
+      season_id TEXT PRIMARY KEY,
+      closed_at INTEGER NOT NULL,
+      archive_json TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS wallet_txns (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       wallet_id TEXT NOT NULL,

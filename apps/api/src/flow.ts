@@ -879,6 +879,16 @@ export function equipItem(store: Store, leaderId: string, slot: string, itemId: 
   return armoryView(store, leaderId);
 }
 
+// Past seasons, newest first. Rollover writes; this only reads.
+export function seasonHistory(store: Store): Record<string, unknown>[] {
+  const rows = store.db.prepare("SELECT * FROM season_archives ORDER BY closed_at DESC").all() as Record<string, unknown>[];
+  return rows.map((r) => ({
+    seasonId: r.season_id,
+    closedAt: r.closed_at,
+    ...((JSON.parse(r.archive_json as string) as object) ?? {}),
+  }));
+}
+
 // Cancel drops a queued ticket and returns its charge. Settled stays final.
 export function cancelTicket(
   store: Store,

@@ -965,6 +965,16 @@ export default {
       equipped,
       catalog: CATALOG.map((c) => ({ ...c, owned: owned.includes(c.id) })),
     });
+    if (request.method === "GET" && url.pathname === "/v1/seasons") {
+      const { results: seasons } = await env.DB.prepare("SELECT * FROM season_archives ORDER BY closed_at DESC").bind().all<Record<string, unknown>>();
+      return json({
+        seasons: seasons.map((r) => ({
+          seasonId: r.season_id,
+          closedAt: r.closed_at,
+          ...((JSON.parse(r.archive_json as string) as object) ?? {}),
+        })),
+      }, 200);
+    }
     if (request.method === "GET" && url.pathname === "/v1/armory") {
       const { leader, owned, equipped } = await readCloset();
       return json(armoryJson(leader, owned, equipped), 200);

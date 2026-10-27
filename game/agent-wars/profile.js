@@ -89,6 +89,25 @@ async function refresh() {
     ? `energy ${d.energy.energy}/${d.energy.energyMax} — full`
     : `energy ${d.energy.energy}/${d.energy.energyMax} — +1 in ${mins || 1} min`;
   await renderDash(d);
+  await renderSeasons();
+}
+
+async function renderSeasons() {
+  const r = await call("GET", "/v1/seasons");
+  const box = $("seasons");
+  box.textContent = "";
+  const rows = (r.status === 200 && r.data.seasons) || [];
+  if (!rows.length) {
+    box.innerHTML = "<p class='sub'>Season one still runs. Archives land here at rollover.</p>";
+  }
+  for (const s of rows) {
+    const p = document.createElement("p");
+    p.className = "sub";
+    const top = (s.rows || []).slice(0, 3).map((x) => `#${x.rank} ${x.ap} AP`).join(", ");
+    p.textContent = `${s.seasonId} closed ${new Date(s.closedAt).toLocaleDateString()} — ${top}`;
+    box.appendChild(p);
+  }
+  show($("season-card"), true);
 }
 
 async function renderDash(d) {
