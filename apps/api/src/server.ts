@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, fightPolicies } from "@agent-wars/battle-core";
-import { board, compileAndPublish, createAgent, dashboard, getLeader, getVersion, runRanked, runTraining } from "./flow.ts";
+import { board, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, runRanked, runTraining, spendEnergy, validateRanked } from "./flow.ts";
 
 type Ctx = { store: Store };
 
@@ -81,7 +81,8 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
       }
       if (req.method === "GET" && url.pathname === "/v1/me") {
         const agent = ctx.store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(me.id as string);
-        send(res, 200, { leader: me, agent });
+        const energy = energyView(energyFor(ctx.store, me.id as string));
+        send(res, 200, { leader: me, agent, energy });
         return;
       }
       if (req.method === "POST" && url.pathname === "/v1/agents") {
@@ -148,6 +149,23 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const key = typeof body.key === "string" && body.key ? body.key : mintId("m");
         if (!aVersionId || !bVersionId) {
           send(res, 400, { error: "aVersionId and bVersionId are required" });
+          return;
+        }
+        const duped = ctx.store.db.prepare("SELECT * FROM matches WHERE id = ?").get(key) as Record<string, unknown> | null;
+        if (duped) {
+          send(res, 201, { ...duped, deduped: true });
+          return;
+        }
+        try {
+          validateRanked(ctx.store, { aVersionId, bVersionId });
+        } catch (err) {
+          const msg = (err as Error).message;
+          send(res, msg.includes("self match") ? 422 : 404, { error: msg });
+          return;
+        }
+        const spent = spendEnergy(ctx.store, me.id as string);
+        if (!spent.ok) {
+          send(res, 409, { error: spent.reason });
           return;
         }
         try {

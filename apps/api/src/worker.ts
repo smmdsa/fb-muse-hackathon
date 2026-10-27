@@ -1,6 +1,8 @@
 // Cloudflare Worker entry. Full API on D1: auth, publish, fights, replay.
 
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
+import { draft, refresh, spendManualMatch, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
+import type { Status } from "@agent-wars/autobattle";
 import { BENCH_POLICY, fightPolicies } from "@agent-wars/battle-core";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
@@ -128,6 +130,30 @@ async function pay(
   return res.credited;
 }
 
+// Energy reads the persisted machine, refreshes regen, and saves it back.
+async function energyFor(env: WorkerEnv, leaderId: string, now = Date.now()): Promise<Status> {
+  const row = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>();
+  if (!row) throw new Error("unknown leader");
+  const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(leaderId).first<Record<string, unknown>>();
+  let st: Status = row.autobattle_json ? (JSON.parse(row.autobattle_json as string) as Status) : draft(leaderId, now);
+  st = { ...st, leaderId, published: !!agent?.active_version_id };
+  st = refresh(st, now);
+  await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(st), leaderId).run();
+  return st;
+}
+
+function energyView(st: Status, now = Date.now()): { energy: number; energyMax: number; nextRegenMs: number } {
+  const nextRegenMs = st.stamina >= st.staminaMax ? 0 : Math.max(0, st.lastStaminaAt + REGEN_MS - now);
+  return { energy: st.stamina, energyMax: st.staminaMax ?? STAMINA_MAX, nextRegenMs };
+}
+
+async function spendEnergy(env: WorkerEnv, leaderId: string, now = Date.now()): Promise<{ ok: boolean; reason?: string }> {
+  const cur = await energyFor(env, leaderId, now);
+  const r = spendManualMatch(cur, now);
+  await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(r.status), leaderId).run();
+  return r.guard.ok ? { ok: true } : { ok: false, reason: (r.guard as { reason: string }).reason };
+}
+
 // The dashboard serves one hero with chip stats per version.
 async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string): Promise<Record<string, unknown>> {
   const agent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
@@ -171,6 +197,7 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
   return {
     agent: { id: agent.id, name: agent.name ?? null, concept: agent.concept ?? null, portraitUrl: agent.portrait_url ?? null, activeVersionId: agent.active_version_id ?? null },
     leader: { handle: leader.handle, ap: leader.ap, ac: leader.ac, tier: rank.tier, division: rank.division },
+    energy: energyView(await energyFor(env, leaderId)),
     versions,
   };
 }
@@ -216,7 +243,8 @@ export default {
     if (!me) return json({ error: "bearer token is required: call POST /v1/auth/session first" }, 401);
     if (request.method === "GET" && url.pathname === "/v1/me") {
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(me.id as string).first<Record<string, unknown>>();
-      return json({ leader: me, agent });
+      const energy = energyView(await energyFor(env, me.id as string));
+      return json({ leader: me, agent, energy });
     }
     if (request.method === "POST" && url.pathname === "/v1/agents") {
       try {
@@ -313,6 +341,8 @@ export default {
       const bAgent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(b.agent_id as string).first<Record<string, unknown>>();
       if (!aAgent || !bAgent) return json({ error: "unknown agent" }, 404);
       if (aAgent.leader_id === bAgent.leader_id) return json({ error: "self match denied" }, 422);
+      const spent = await spendEnergy(env, me.id as string);
+      if (!spent.ok) return json({ error: spent.reason }, 409);
       const out = fightPolicies(
         JSON.parse(a.policy_json as string) as AgentPolicy,
         JSON.parse(b.policy_json as string) as AgentPolicy,

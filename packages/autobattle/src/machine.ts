@@ -82,6 +82,27 @@ export function startOwnerMatch(status: Status, now: number): { status: Status; 
   return { status: next, guard: { ok: true } };
 }
 
+// Manual match. It spends one energy charge with no lease or opt-in gates.
+// The player sits at the screen, so only stamina and the daily cap guard.
+export function spendManualMatch(status: Status, now: number): { status: Status; guard: Guard } {
+  const cur = refresh(status, now);
+  if (!cur.published) {
+    return { status: cur, guard: { ok: false, reason: "no published version" } };
+  }
+  if (cur.stamina < 1) {
+    return { status: { ...cur, state: "IDLE_ENERGY" }, guard: { ok: false, reason: "energy empty" } };
+  }
+  if (cur.attackAt.length >= MAX_ATTACK_PER_DAY) {
+    return { status: cur, guard: { ok: false, reason: "daily match cap reached" } };
+  }
+  const next: Status = {
+    ...cur,
+    stamina: cur.stamina - 1,
+    attackAt: [...cur.attackAt, now],
+  };
+  return { status: next, guard: { ok: true } };
+}
+
 // Match end. Expiry wins over a return to ready.
 export function finishMatch(status: Status, now: number): Status {
   if (status.state !== "IN_MATCH") return refresh(status, now);

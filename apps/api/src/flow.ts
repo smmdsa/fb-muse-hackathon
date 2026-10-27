@@ -8,6 +8,8 @@ import { applyRanked, createLedger, ratingFor } from "@agent-wars/ranking";
 import { rankFor } from "@agent-wars/ranking";
 import { buildStandings } from "@agent-wars/leaderboard";
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
+import { draft, refresh, spendManualMatch, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
+import type { Status } from "@agent-wars/autobattle";
 import type { Store } from "./store.ts";
 import { mintId } from "./store.ts";
 
@@ -43,6 +45,20 @@ export function runTraining(
     "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
   ).run(id, input.seed, input.versionId, "benchmark-v1", out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
   return { matchId: id, ...out };
+}
+
+// Ranked pre-checks. The route spends energy only after this passes.
+export function validateRanked(
+  store: Store,
+  input: { aVersionId: string; bVersionId: string },
+): void {
+  const a = getVersion(store, input.aVersionId);
+  const b = getVersion(store, input.bVersionId);
+  if (!a || !b) throw new Error("unknown version");
+  const aAgent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(a.agentId) as Record<string, unknown>;
+  const bAgent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(b.agentId) as Record<string, unknown>;
+  if (!aAgent || !bAgent) throw new Error("unknown agent");
+  if (aAgent.leader_id === bAgent.leader_id) throw new Error("self match denied");
 }
 
 // Ranked settles AP and AC for both leaders. One key counts once.
@@ -172,6 +188,32 @@ export async function compileAndPublish(
   return { versionId, errors: [], provider: compiled.provider, isMock: compiled.isMock };
 }
 
+// Energy reads the persisted machine, refreshes regen, and saves it back.
+// The machine is the single source: stamina, caps, and next recharge.
+export function energyFor(store: Store, leaderId: string, now = Date.now()): Status {
+  const row = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown> | null;
+  if (!row) throw new Error("unknown leader");
+  const agent = store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(leaderId) as Record<string, unknown> | null;
+  let st: Status = row.autobattle_json ? (JSON.parse(row.autobattle_json as string) as Status) : draft(leaderId, now);
+  st = { ...st, leaderId, published: !!agent?.active_version_id };
+  st = refresh(st, now);
+  store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(st), leaderId);
+  return st;
+}
+
+export function energyView(st: Status, now = Date.now()): { energy: number; energyMax: number; nextRegenMs: number } {
+  const nextRegenMs = st.stamina >= st.staminaMax ? 0 : Math.max(0, st.lastStaminaAt + REGEN_MS - now);
+  return { energy: st.stamina, energyMax: st.staminaMax ?? STAMINA_MAX, nextRegenMs };
+}
+
+// A manual match spends one charge. Training never calls this function.
+export function spendEnergy(store: Store, leaderId: string, now = Date.now()): { ok: boolean; reason?: string; status: Status } {
+  const cur = energyFor(store, leaderId, now);
+  const r = spendManualMatch(cur, now);
+  store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(r.status), leaderId);
+  return r.guard.ok ? { ok: true, status: r.status } : { ok: false, reason: (r.guard as { reason: string }).reason, status: r.status };
+}
+
 // The dashboard shows one hero: portrait, ELO, every version with its chips,
 // and each chip with its trigger totals across all fights of that version.
 export function dashboard(store: Store, agentId: string, leaderId: string): Record<string, unknown> {
@@ -214,6 +256,7 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
   return {
     agent: { id: agent.id, name: agent.name ?? null, concept: agent.concept ?? null, portraitUrl: agent.portrait_url ?? null, activeVersionId: agent.active_version_id ?? null },
     leader: { handle: leader.handle, ap: leader.ap, ac: leader.ac, tier: rank.tier, division: rank.division },
+    energy: energyView(energyFor(store, leaderId)),
     versions,
   };
 }

@@ -9,6 +9,7 @@ import {
   pause,
   recordDefense,
   refresh,
+  spendManualMatch,
   startOwnerMatch,
   LEASE_MS,
   REGEN_MS,
@@ -100,6 +101,33 @@ describe("stamina", () => {
     }
     const over = startOwnerMatch(s, 11 * 1000);
     assert.equal(over.guard.ok, false);
+  });
+});
+
+describe("manual matches", () => {
+  it("spends energy with no lease or opt-in", () => {
+    const d = draft("leader-1", 0);
+    d.published = true;
+    const r = spendManualMatch(d, 1000);
+    assert.equal(r.guard.ok, true);
+    assert.equal(r.status.stamina, 9);
+  });
+
+  it("denies drafts with no published version", () => {
+    const r = spendManualMatch(draft("leader-1", 0), 1000);
+    assert.equal(r.guard.ok, false);
+  });
+
+  it("denies empty energy and caps the day", () => {
+    const d = draft("leader-1", 0);
+    d.published = true;
+    d.stamina = 0;
+    const empty = spendManualMatch(d, 1000);
+    assert.equal(empty.guard.ok, false);
+    assert.equal(empty.status.state, "IDLE_ENERGY");
+    let s = { ...draft("leader-1", 0), published: true };
+    for (let i = 0; i < 10; i += 1) s = spendManualMatch(s, i * 1000).status;
+    assert.equal(spendManualMatch(s, 11 * 1000).guard.ok, false);
   });
 });
 

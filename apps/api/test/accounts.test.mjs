@@ -58,5 +58,6 @@ describe("accounts", () => {
     const r = await call("GET", "/v1/me", null, keys.commander);
     assert.equal(r.status, 200);
     assert.ok(r.json.agent);
+    assert.equal(r.json.energy.energy, 10);
   });
 });

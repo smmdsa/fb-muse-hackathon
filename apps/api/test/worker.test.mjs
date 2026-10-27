@@ -129,6 +129,10 @@ describe("worker writes", () => {
     const r = await call("POST", "/v1/matches/ranked", { aVersionId: va.json.versionId, bVersionId: vb.json.versionId, seed: "wr-1", key: "wr-1" }, sa.json.token);
     assert.equal(r.status, 201);
     assert.equal(r.json.deltaB, -r.json.deltaA);
+    const me = await entry.fetch(new Request("http://local/v1/me", {
+      headers: { authorization: `Bearer ${sa.json.token}` },
+    }), wenv);
+    assert.equal((await me.json()).energy.energy, 9);
     const replay = await entry.fetch(new Request("http://local/v1/matches/wr-1/replay"), wenv);
     assert.equal(replay.status, 200);
     assert.equal((await replay.json()).identical, true);
