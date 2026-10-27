@@ -1,6 +1,7 @@
 name = "agent-wars-api"
 main = "apps/api/src/worker.ts"
 compatibility_date = "2026-10-26"
+compatibility_flags = ["nodejs_compat"]
 
 [vars]
 SEASON_ID = "local-s1"
