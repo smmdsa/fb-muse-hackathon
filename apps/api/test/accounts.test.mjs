@@ -66,6 +66,7 @@ describe("accounts", () => {
       assert.equal(a.status, 201);
       assert.equal(a.json.portraitStatus, "failed");
       assert.equal(a.json.portraitUrl, null);
+      assert.match(a.json.error, /status 500/);
       keys.rust = a.json.agentId;
     } finally {
       globalThis.fetch = realFetch;

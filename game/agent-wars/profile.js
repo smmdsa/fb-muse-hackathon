@@ -419,6 +419,10 @@ $("retry-btn").addEventListener("click", async () => {
     $("hero-art-status").textContent = `Retry failed: ${r.data.error || r.status}.`;
     return;
   }
+  if (r.data.portraitStatus === "failed") {
+    $("hero-art-status").textContent = `Portrait paint failed: ${r.data.error || "unknown image error"}.`;
+    return;
+  }
   await refresh();
 });
 

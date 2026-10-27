@@ -51,13 +51,28 @@ function usageOf(body: unknown): number {
   return typeof total === "number" ? total : 0;
 }
 
-function imageUrlOf(body: unknown): string | null {
+// Meta answers portraits two ways: a CDN url, or inline b64_json.
+// The inline bytes carry no mime, so the base64 prefix names the format:
+// JPEG, PNG, and GIF open with fixed magic; WebP opens with RIFF.
+function sniffMime(b64: string): string | null {
+  if (b64.startsWith("/9j/")) return "image/jpeg";
+  if (b64.startsWith("iVBORw0KGgo")) return "image/png";
+  if (b64.startsWith("UklGR")) return "image/webp";
+  if (b64.startsWith("R0lGOD")) return "image/gif";
+  return null;
+}
+
+function imageContentOf(body: unknown): string | null {
   const root = asRecord(body);
   const data = Array.isArray(root?.data) ? (root.data as unknown[]) : [];
   const first = asRecord(data[0]);
   const url = first?.url;
   if (typeof url === "string" && url.length > 0) return url;
-  return null;
+  const b64 = first?.b64_json;
+  if (typeof b64 !== "string" || b64.length === 0) return null;
+  const mime = sniffMime(b64);
+  if (!mime) return null;
+  return `data:${mime};base64,${b64}`;
 }
 
 export type MetaEnv = {
@@ -169,8 +184,8 @@ export function createMetaProvider(env: MetaEnv, fetchFn: FetchFn = defaultFetch
       }),
     });
     if (!res.ok) throw new Error(`meta image call failed with status ${res.status}`);
-    const url = imageUrlOf(await res.json());
-    if (!url) throw new Error("the meta image reply held no url");
+    const url = imageContentOf(await res.json());
+    if (!url) throw new Error("the meta image reply held no usable image");
     return { provider: "meta", url, model: resolveModel("portrait", env), latencyMs: Date.now() - started };
   };
 
