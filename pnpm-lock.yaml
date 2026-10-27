@@ -26,6 +26,12 @@ importers:
 
   packages/economy: {}
 
+  packages/leaderboard:
+    dependencies:
+      '@agent-wars/ranking':
+        specifier: workspace:*
+        version: link:../ranking
+
   packages/matchmaker: {}
 
   packages/ranking: {}
