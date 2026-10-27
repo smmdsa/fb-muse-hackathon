@@ -78,7 +78,7 @@ Deferred with reasons:
 
 - T005 live Spark plus T006 live portraits: blocked on the user moving both Meta secrets to worker `fb-muse-hackathon` and redeploying.
 - T019 arena polish, T025 screenshots, T017 Playwright trace: no screenshot or browser tool in this shell. Needs user eyes or a capable session.
-- T029 Swiss: needs live traffic. Not started.
+- T029 Swiss engine: done this slice. New isolated `packages/swiss` (zero deps, pure pairing + Buchholz standings + result applier). Score-group pairing, no rematches when avoidable, bye rotation, deterministic per seed, forced repeats counted not hidden. 6 fairness tests green. Never touches the single-elim bracket. API suite fixed to `test/*.test.mjs` so new slices run in `pnpm test`: API 86/86, tournaments 14/14, swiss 6/6.
 - T022 organizer admin: done this slice. `ADMIN_KEY` secret gates `POST /v1/admin/events` + transition; no key means 503, wrong key means 401, leader tokens never pass. Chain DRAFT→ANNOUNCED→REGISTRATION_OPEN→LOCKED→LIVE→COMPLETED enforced in the package, locks freeze versions, live auto-seeds. Cup keeps its auto-play; other events lock + seed. Organizer console on the cup page (key in tab memory only). API 86/86, tournaments 14/14, `pnpm e2e:path` green.
 - T020 battle analysis + Evolution Lab: done this slice. Mock-first grounded explanations (Spark upgrades prose, never facts; ungrounded replies fall back). Lab runs honest A/B vs benchmark, refuses verdicts under 10 bouts. API 76/76, provider 28/28, `pnpm e2e:path` green.
 - T021 armory shop, T023 defense audit, T024 observability, T026 seasons rotation, T027 public profiles, T028 skins: done this session (slices 42cf9aa back through the armory commit). API 70/70, `pnpm e2e:path` green.

@@ -75,4 +75,6 @@ importers:
         specifier: workspace:*
         version: link:../ranking
 
+  packages/swiss: {}
+
   packages/tournaments: {}
