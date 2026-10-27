@@ -43,9 +43,60 @@ describe("worker reads", () => {
     assert.deepEqual(body.rows.map((r) => r.leaderId), ["l1"]);
   });
 
-  it("404s unknown routes", async () => {
+  it("denies unknown routes without a token", async () => {
     const res = await entry.fetch(new Request("http://local/v1/secret"), env);
-    assert.equal(res.status, 404);
+    assert.equal(res.status, 401);
+  });
+});
+
+describe("worker writes", () => {
+  it("runs auth, agent, compile, training, and ranked end to end", async () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
+    const shimmed = {
+      prepare: (query) => ({
+        bind: (...values) => ({
+          first: async () => db.prepare(query).get(...values) ?? null,
+          all: async () => ({ results: db.prepare(query).all(...values) }),
+          run: async () => db.prepare(query).run(...values),
+        }),
+      }),
+    };
+    const wenv = { DB: shimmed };
+    const call = (method, path, body, token) => {
+      if (method !== "POST") throw new Error("writes only");
+      return entry.fetch(
+        new Request(`http://local${path}`, {
+          method,
+          headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+          body: body ? JSON.stringify(body) : undefined,
+        }),
+        wenv,
+      ).then(async (r) => ({ status: r.status, json: await r.json() }));
+    };
+    const sa = await call("POST", "/v1/auth/session", { handle: "wa" });
+    assert.equal(sa.status, 200);
+    const sb = await call("POST", "/v1/auth/session", { handle: "wb" });
+    const aa = await call("POST", "/v1/agents", {}, sa.json.token);
+    assert.equal(aa.status, 201);
+    const dup = await call("POST", "/v1/agents", {}, sa.json.token);
+    assert.equal(dup.status, 409);
+    const ab = await call("POST", "/v1/agents", {}, sb.json.token);
+    const va = await call("POST", `/v1/agents/${aa.json.agentId}/policies/compile`, { prompt: "rush them down up close" }, sa.json.token);
+    assert.equal(va.status, 201);
+    const vb = await call("POST", `/v1/agents/${ab.json.agentId}/policies/compile`, { prompt: "evade and stay far away" }, sb.json.token);
+    assert.equal(vb.status, 201);
+    const t = await call("POST", "/v1/matches/training", { versionId: va.json.versionId, seed: "wt-1" }, sa.json.token);
+    assert.equal(t.status, 201);
+    assert.ok(t.json.checksum);
+    const r = await call("POST", "/v1/matches/ranked", { aVersionId: va.json.versionId, bVersionId: vb.json.versionId, seed: "wr-1", key: "wr-1" }, sa.json.token);
+    assert.equal(r.status, 201);
+    assert.equal(r.json.deltaB, -r.json.deltaA);
+    const replay = await entry.fetch(new Request("http://local/v1/matches/wr-1/replay"), wenv);
+    assert.equal(replay.status, 200);
+    assert.equal((await replay.json()).identical, true);
+    const self = await call("POST", "/v1/matches/ranked", { aVersionId: va.json.versionId, bVersionId: va.json.versionId, seed: "ws-1", key: "ws-1" }, sa.json.token);
+    assert.equal(self.status, 422);
   });
 });
 

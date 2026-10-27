@@ -2,8 +2,40 @@
 
 import { evaluate } from "@agent-wars/behavior-dna";
 import type { AgentPolicy, Observation } from "@agent-wars/behavior-dna";
+import { checksum, createBattle, DEFAULT_BATTLE, stepBattle } from "./simulation.ts";
 import { segmentHitsBox } from "./world.ts";
 import type { AgentAction, AgentId, BattleConfig, BattleState, Vec2 } from "./types.ts";
+
+// The reference brain for training-grade fights. Both servers use this copy.
+export const BENCH_POLICY: AgentPolicy = {
+  schemaVersion: 1,
+  agentVersionId: "benchmark-v1",
+  dna: { aggression: 55, evasion: 55, preferredDistance: 45, energyConservation: 50 },
+  rules: [
+    { id: "b-close", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true },
+    { id: "b-far", when: { operand: "distFoe", op: "gte", value: 6 }, move: "APPROACH" },
+  ],
+};
+
+// The runner fights two policies to the end. Same seed, same checksum.
+export function fightPolicies(
+  a: AgentPolicy,
+  b: AgentPolicy,
+  seed: string,
+): { winner: string; ticks: number; checksum: string } {
+  const cfg = { ...DEFAULT_BATTLE, seed };
+  let state = createBattle(cfg);
+  let guard = 0;
+  while (!state.over && guard < cfg.world.maxTicks) {
+    state = stepBattle(
+      state,
+      { A: drive(state, a, "A", cfg), B: drive(state, b, "B", cfg) },
+      cfg,
+    );
+    guard += 1;
+  }
+  return { winner: state.winner ?? "DRAW", ticks: state.tick, checksum: checksum(state) };
+}
 
 function dir(from: Vec2, to: Vec2): Vec2 {
   const dx = to.x - from.x;

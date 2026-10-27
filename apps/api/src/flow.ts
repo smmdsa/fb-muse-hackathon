@@ -1,6 +1,6 @@
 // Engine glue. Pure packages decide. This file persists the results.
 
-import { createBattle, DEFAULT_BATTLE, drive, stepBattle, checksum } from "@agent-wars/battle-core";
+import { BENCH_POLICY, fightPolicies } from "@agent-wars/battle-core";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
 import { earnAc, createWallet } from "@agent-wars/economy";
@@ -11,17 +11,6 @@ import { compileMock } from "@agent-wars/ai-provider";
 import type { Store } from "./store.ts";
 import { mintId } from "./store.ts";
 
-// A fixed benchmark brain for training fights.
-export const BENCH_POLICY: AgentPolicy = {
-  schemaVersion: 1,
-  agentVersionId: "benchmark-v1",
-  dna: { aggression: 55, evasion: 55, preferredDistance: 45, energyConservation: 50 },
-  rules: [
-    { id: "b-close", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true },
-    { id: "b-far", when: { operand: "distFoe", op: "gte", value: 6 }, move: "APPROACH" },
-  ],
-};
-
 export function getLeader(store: Store, token: string): Record<string, unknown> | null {
   return store.db.prepare("SELECT * FROM leaders WHERE token = ?").get(token) as Record<string, unknown> | null;
 }
@@ -30,18 +19,6 @@ export function getVersion(store: Store, versionId: string): { policy: AgentPoli
   const row = store.db.prepare("SELECT * FROM versions WHERE id = ?").get(versionId) as Record<string, unknown> | null;
   if (!row) return null;
   return { policy: JSON.parse(row.policy_json as string) as AgentPolicy, agentId: row.agent_id as string };
-}
-
-// The fighter runs one deterministic battle between two policies.
-export function fightPolicies(a: AgentPolicy, b: AgentPolicy, seed: string): { winner: string; ticks: number; checksum: string } {
-  const cfg = { ...DEFAULT_BATTLE, seed };
-  let state = createBattle(cfg);
-  let guard = 0;
-  while (!state.over && guard < cfg.world.maxTicks) {
-    state = stepBattle(state, { A: drive(state, a, "A", cfg), B: drive(state, b, "B", cfg) }, cfg);
-    guard += 1;
-  }
-  return { winner: state.winner ?? "DRAW", ticks: state.tick, checksum: checksum(state) };
 }
 
 // Training settles nothing. It returns the receipt only.
