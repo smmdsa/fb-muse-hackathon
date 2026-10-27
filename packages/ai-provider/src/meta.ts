@@ -19,14 +19,23 @@ const defaultFetch = (url: string, init: Record<string, unknown>) => {
 };
 
 // The system brief pins the exact policy JSON the model must return.
+// It names every legal operand, operator, and move, because anything
+// else rejects the whole draft at validation.
 const COMPILE_SYSTEM = [
   "You draft fighting-robot policies for the game AGENT WARS.",
   "Reply with one JSON object and nothing else.",
   "Shape: {\"schemaVersion\":1,\"agentVersionId\":\"<id>\",",
   "\"dna\":{\"aggression\":0-100,\"evasion\":0-100,\"preferredDistance\":0-100,\"energyConservation\":0-100},",
-  "\"rules\":[{\"id\":\"<slug>\",\"when\":{...},\"move\":\"APPROACH|RETREAT|STRAFE|KITE|CAPTURE|SEEK_COVER\",",
+  "\"rules\":[{\"id\":\"<slug>\",\"when\":{...},\"move\":\"<MOVE>\",",
   "\"fire\":true|false,\"shield\":true|false,\"dash\":true|false}]}.",
-  "Send 2 to 6 rules. Keep every trait 0-100. Match the prompt mood: rush means high aggression,",
+  "Send 2 to 6 rules. Keep every trait an integer 0-100.",
+  "The brief can run paragraphs long. Read it whole, distill the overall battle plan, then mint rules that together express it.",
+  "Operands, exactly these: ownHpPct, energy, distFoe, projectileTti, coverDist, lineOfSight, dashReady, shieldReady, foeLastSeenAge, objectiveDist, timeLeft, edgeDist.",
+  "Operators, exactly these: gt, gte, lt, lte, eq. Value is a number; eq also takes true or false for lineOfSight, dashReady, shieldReady.",
+  "Moves, exactly these: APPROACH, RETREAT, STRAFE, KITE, CAPTURE, SEEK_COVER.",
+  "Combine tests with {\"all\":[...]} or {\"any\":[...]}. Example: {\"operand\":\"distFoe\",\"op\":\"lt\",\"value\":6}.",
+  "Any other operand, operator, or move rejects the whole draft.",
+  "Match the prompt mood: rush means high aggression,",
   "evade means high evasion, far means high preferredDistance, patient means high energyConservation.",
 ].join(" ");
 

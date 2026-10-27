@@ -6,7 +6,7 @@ import { timingSafeEqual } from "node:crypto";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, createTournament, dashboard, energyFor, energyView, equipItem, evolutionLab, getLeader, getTournament, getVersion, installVersion, listTournaments, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
+import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, createTournament, dashboard, energyFor, energyView, equipItem, evolutionLab, getLeader, getTournament, getVersion, installVersion, listTournaments, MAX_PROMPT, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -223,6 +223,10 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const prompt = typeof body.prompt === "string" ? body.prompt : "";
         if (!prompt) {
           send(res, 400, { error: "prompt is required" });
+          return;
+        }
+        if (prompt.trim().length > MAX_PROMPT) {
+          send(res, 400, { error: `prompt must stay under ${MAX_PROMPT} characters` });
           return;
         }
         const out = await compileAndPublish(ctx.store, process.env, { agentId, prompt });

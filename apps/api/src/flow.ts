@@ -273,9 +273,12 @@ export async function evolutionLab(
 ): Promise<Record<string, unknown>> {
   const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
   if (!agent || agent.leader_id !== input.leaderId) throw new Error("agent not found for this leader");
-  const promptA = input.promptA.trim().slice(0, 280);
-  const promptB = input.promptB.trim().slice(0, 280);
+  const promptA = input.promptA.trim();
+  const promptB = input.promptB.trim();
   if (!promptA || !promptB) throw new Error("two prompts are required");
+  if (promptA.length > MAX_PROMPT || promptB.length > MAX_PROMPT) {
+    throw new Error(`each prompt must stay under ${MAX_PROMPT} characters`);
+  }
   const bouts = Math.min(20, Math.max(4, Math.floor(input.bouts ?? 10)));
   const runId = mintId("lab");
   const draftA = await compileAndPublish(store, env, { agentId: input.agentId, prompt: promptA });
@@ -350,6 +353,10 @@ export async function retryPortrait(
 }
 
 // Compile saves a draft. Nothing activates until the player installs it.
+// Briefs run long on purpose: paragraphs decide fights. The cap bounds
+// model spend, never expression.
+export const MAX_PROMPT = 2000;
+
 export async function compileAndPublish(
   store: Store,
   env: FlowEnv,
@@ -357,8 +364,12 @@ export async function compileAndPublish(
 ): Promise<{ versionId: string; errors: string[]; provider: string; isMock: boolean; tokens: number; latencyMs: number }> {
   const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
   if (!agent) throw new Error("unknown agent");
+  const brief = input.prompt.trim();
+  if (brief.length > MAX_PROMPT) {
+    return { versionId: "", errors: [`prompt must stay under ${MAX_PROMPT} characters`], provider: "mock", isMock: true, tokens: 0, latencyMs: 0 };
+  }
   const versionId = mintId("v");
-  const compiled = await providerFromEnv(env).compileStrategy({ prompt: input.prompt, agentVersionId: versionId });
+  const compiled = await providerFromEnv(env).compileStrategy({ prompt: brief, agentVersionId: versionId });
   // Every draft carries its spend, mock or Meta: the audit never goes blind.
   const spent = { tokens: compiled.promptTokens, latencyMs: compiled.latencyMs };
   if (!compiled.policy) return { versionId: "", errors: compiled.errors, provider: compiled.provider, isMock: compiled.isMock, ...spent };

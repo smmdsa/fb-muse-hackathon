@@ -30,6 +30,9 @@ import { createWallet, earnAc } from "@agent-wars/economy";
 import { buildStandings } from "@agent-wars/leaderboard";
 import { applyRanked, createLedger, rankFor, ratingFor } from "@agent-wars/ranking";
 
+// Brief cap. Kept in sync with MAX_PROMPT in flow.ts: paragraphs welcome, spend bounded.
+const MAX_PROMPT = 2000;
+
 export type WorkerEnv = {
   DB: D1Database;
   ASSETS: { fetch: (request: Request) => Promise<Response> };
@@ -869,8 +872,9 @@ export default {
       if (body === null) return json({ error: "bad json" }, 400);
       const prompt = typeof body.prompt === "string" ? body.prompt : "";
       if (!prompt) return json({ error: "prompt is required" }, 400);
+      if (prompt.trim().length > MAX_PROMPT) return json({ error: `prompt must stay under ${MAX_PROMPT} characters` }, 400);
       const versionId = mintId("v");
-      const compiled = await providerFromEnv(env).compileStrategy({ prompt, agentVersionId: versionId });
+      const compiled = await providerFromEnv(env).compileStrategy({ prompt: prompt.trim(), agentVersionId: versionId });
       const spent = { tokens: compiled.promptTokens, latencyMs: compiled.latencyMs };
       if (!compiled.policy) return json({ error: "draft failed validation", errors: compiled.errors, provider: compiled.provider, isMock: compiled.isMock, ...spent }, 422);
       const check = validatePolicy(compiled.policy);
@@ -951,11 +955,14 @@ export default {
       const promptB = typeof body.promptB === "string" ? body.promptB : "";
       const bouts = Math.min(20, Math.max(4, Math.floor(typeof body.bouts === "number" ? body.bouts : 10)));
       if (!agentId || !promptA || !promptB) return json({ error: "agentId, promptA, and promptB are required" }, 400);
+      if (promptA.trim().length > MAX_PROMPT || promptB.trim().length > MAX_PROMPT) {
+        return json({ error: `each prompt must stay under ${MAX_PROMPT} characters` }, 400);
+      }
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
       if (!agent || agent.leader_id !== me.id) return json({ error: "agent not found for this leader" }, 404);
       const runId = mintId("lab");
       const drafts: string[] = [];
-      for (const prompt of [promptA.trim().slice(0, 280), promptB.trim().slice(0, 280)]) {
+      for (const prompt of [promptA.trim(), promptB.trim()]) {
         const versionId = mintId("v");
         const compiled = await providerFromEnv(env).compileStrategy({ prompt, agentVersionId: versionId });
         if (!compiled.policy) return json({ error: `draft failed: ${compiled.errors.join("; ")}` }, 422);
