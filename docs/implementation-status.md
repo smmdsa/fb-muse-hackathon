@@ -50,3 +50,40 @@ Date: 2026-10-26. Sprint: sprint-006. This file tells the truth about what runs.
 - The viewer uses a small standalone sim. The canonical sim lives in `packages/battle-core`.
 - `pnpm --version` fails on this drive with `EISDIR`. The repo uses npm workspaces until that is fixed.
 - Git global config denies writes in this shell. The `safe.directory` fix needs a user shell.
+
+## Handoff v1.1 close-out, 2026-10-27
+
+Done and committed on `feat/agent-wars-s1`, full workspace suite green:
+
+- T001 audit recorded in `work/sprints/sprint-009/epic-17-handoff-foundation/done/`.
+- T002 canonical replay: `buildReplay` snapshots every 9 ticks, server recompute, bot replays.
+- T003 crypto ids and tokens, ownership 404s, sliding throttles, static-only innerHTML.
+- T004 atomic settlement: local `transact`, worker D1 `batch`, sabotage and dual-invocation tests.
+- T005 compile cost audit: `tokens` and `latency_ms` on every version (migration 0004). Live Spark proof still needs `META_SPARK_KEY` on worker `fb-muse-hackathon`.
+- T006 portrait pipeline: `ready`/`failed`/`faceless` statuses, retry route, contract canon style lock, 10-prompt QA test, seeded silhouette fallback.
+- T007 breed station: fresh-leader loop test (one hero, second denied, dashboard round-trip).
+- T008 chip workbench: DNA traits on every dashboard version plus workbench card.
+- T009 explicit install: compile saves drafts, install route activates, queue takes the active version.
+- T010 lobby shell: nav, agent card, mobile rules. Lab moved below the fold.
+- T011 one open ticket per mode per leader, both stacks.
+- T012 refunds: machine `refundManualMatch`, cancel route, ranked expiry refund, viewer copy and cancel button.
+- T013 server arena replay: checksum-gated playback, econ end card, `?replay=` deep links.
+- T014/T015 autobattle: 24h lease opt-in, bounded background pass (ranked vs humans, bots alone), return digest, profile panel, lobby line. Reads never renew.
+- T016 championship: `s1-kickoff` 8-agent cup, frozen policies, auto-played bracket to champion, game replays, cup page (migration 0007).
+- T017 smoke: `pnpm e2e:path` walks the whole user path over real HTTP and verifies the replay checksum. Green locally.
+- T018 rank and history: dashboard history with deltas, payouts, foes, replay links.
+- T025 minimum: focus-visible on buttons, links, inputs; arena canvas labelled.
+
+Deferred with reasons:
+
+- T005 live Spark plus T006 live portraits: blocked on the user moving both Meta secrets to worker `fb-muse-hackathon` and redeploying.
+- T019 arena polish, T025 screenshots, T017 Playwright trace: no screenshot or browser tool in this shell. Needs user eyes or a capable session.
+- T020 evolution lab, T021 armory shop, T022 admin auth, T023 defense audit, T024 observability, T026 seasons rotation, T027 public profiles, T028 skins, T029 Swiss: need R2, cron triggers, admin auth, or live traffic. None started.
+- T030 paid RP: blocked by policy. Never build without explicit user approval plus payments review.
+
+User checklist before the next session:
+
+- Move `META_SPARK_KEY` plus `META_IMAGE_KEY` to worker `fb-muse-hackathon`, then re-probe compile and breeding.
+- Apply D1 migrations 0004 to 0007 on the production database, then deploy.
+- Run `pnpm e2e:path` against the local API, plus the 16 hand checks in `docs/manual-test-profile.md`.
+- Push `feat/agent-wars-s1` when ready.

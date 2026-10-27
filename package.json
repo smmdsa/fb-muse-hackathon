@@ -12,6 +12,7 @@
     "test": "pnpm -r test",
     "build": "pnpm -r build",
     "demo": "node ./scripts/e2e-demo.mjs",
+    "e2e:path": "node ./scripts/e2e-path.mjs",
     "bench": "node ./scripts/bench.mjs"
   }
 }
