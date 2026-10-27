@@ -45,6 +45,10 @@ async function refresh() {
   show($("hero-shield"), true);
   $("hero-ap").textContent = `${d.leader.ap} AP — ${d.leader.tier}${d.leader.division ? " " + d.leader.division : ""}`;
   $("hero-ac").textContent = `${d.leader.ac} AC in the wallet`;
+  const mins = Math.ceil(d.energy.nextRegenMs / 60000);
+  $("hero-energy").textContent = d.energy.energy >= d.energy.energyMax
+    ? `energy ${d.energy.energy}/${d.energy.energyMax} — full`
+    : `energy ${d.energy.energy}/${d.energy.energyMax} — +1 in ${mins || 1} min`;
   renderDash(d);
 }
 
