@@ -4,8 +4,10 @@ const qmStatus = document.getElementById("qm-status");
 const qmResult = document.getElementById("qm-result");
 const qmEnergy = document.getElementById("qm-energy");
 const qmFind = document.getElementById("qm-find");
+const qmCancel = document.getElementById("qm-cancel");
 const qmCasual = document.getElementById("qm-casual");
 const qmRanked = document.getElementById("qm-ranked");
+let qmTicket = "";
 
 let qmMode = "casual";
 let qmToken = localStorage.getItem("aw_token") || "";
@@ -74,6 +76,8 @@ async function qmPoll(ticketId, left) {
   if (left <= 0) {
     qmSay("Still waiting. The ticket stays open — check back soon.");
     qmFind.disabled = false;
+    if (qmCancel) qmCancel.hidden = true;
+    qmTicket = "";
     return;
   }
   const r = await qmCall("GET", `/v1/matchmaking/${ticketId}`);
@@ -89,12 +93,17 @@ async function qmPoll(ticketId, left) {
     qmResult.textContent = `${m.winner} wins in ${m.ticks} ticks vs ${foe}. ${m.rated ? "Rated." : "Unrated."} Details on the profile dashboard.`;
     qmSay("Fight settled.");
     qmFind.disabled = false;
+    if (qmCancel) qmCancel.hidden = true;
+    qmTicket = "";
     qmBoot();
     return;
   }
   if (r.data.status === "expired") {
-    qmSay("No humans queued in ten minutes. Ticket expired — energy stays spent.");
+    qmSay("No humans queued in ten minutes. Ticket expired — the charge is refunded.");
     qmFind.disabled = false;
+    if (qmCancel) qmCancel.hidden = true;
+    qmTicket = "";
+    qmBoot();
     return;
   }
   if (qmMode === "casual" && r.data.settle_at) {
@@ -138,8 +147,27 @@ qmFind.addEventListener("click", async () => {
     qmBoot();
     return;
   }
+  qmTicket = r.data.id || "";
+  if (qmCancel && qmTicket) qmCancel.hidden = false;
   qmPoll(r.data.id, qmMode === "casual" ? 8 : 40);
 });
+
+if (qmCancel) {
+  qmCancel.addEventListener("click", async () => {
+    if (!qmTicket) return;
+    clearTimeout(qmTimer);
+    const r = await qmCall("POST", `/v1/matchmaking/${qmTicket}/cancel`);
+    qmTicket = "";
+    qmCancel.hidden = true;
+    qmFind.disabled = false;
+    if (r.status === 200) {
+      qmSay("Ticket canceled — the charge is refunded. Queue again when ready.");
+      qmBoot();
+    } else {
+      qmSay(`Cancel failed: ${r.data.error || r.status}.`);
+    }
+  });
+}
 
 qmPick("casual");
 qmBoot();

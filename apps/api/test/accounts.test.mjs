@@ -105,6 +105,31 @@ describe("accounts", () => {
     assert.equal(r.status, 404);
   });
 
+  it("cancels a queued ticket over HTTP and refunds the charge", async () => {
+    const solo = openStore(":memory:");
+    const soloCall = makeCaller(buildRouter({ store: solo }));
+    try {
+      const s = await soloCall("POST", "/v1/auth/session", { handle: "quitter" });
+      const a = await soloCall("POST", "/v1/agents", { name: "Q", concept: "waits" }, s.json.token);
+      const v = await soloCall("POST", `/v1/agents/${a.json.agentId}/policies/compile`, { prompt: "hold the center patiently" }, s.json.token);
+      await soloCall("POST", `/v1/agents/${a.json.agentId}/policies/install`, { versionId: v.json.versionId }, s.json.token);
+      const q = await soloCall("POST", "/v1/matchmaking/request", { versionId: v.json.versionId, mode: "ranked" }, s.json.token);
+      assert.equal(q.status, 201);
+      assert.equal(q.json.status, "queued");
+      const spent = await soloCall("GET", "/v1/me", null, s.json.token);
+      assert.equal(spent.json.energy.energy, 9);
+      const out = await soloCall("POST", `/v1/matchmaking/${q.json.id}/cancel`, {}, s.json.token);
+      assert.equal(out.status, 200);
+      assert.equal(out.json.status, "canceled");
+      const back = await soloCall("GET", "/v1/me", null, s.json.token);
+      assert.equal(back.json.energy.energy, 10);
+      const twice = await soloCall("POST", `/v1/matchmaking/${q.json.id}/cancel`, {}, s.json.token);
+      assert.equal(twice.status, 404);
+    } finally {
+      solo.close();
+    }
+  });
+
   it("walks a fresh leader through the whole breed station", async () => {
     const s = await call("POST", "/v1/auth/session", { handle: "station" });
     const before = await call("GET", "/v1/me", null, s.json.token);

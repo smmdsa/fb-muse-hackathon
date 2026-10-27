@@ -103,6 +103,15 @@ export function spendManualMatch(status: Status, now: number): { status: Status;
   return { status: next, guard: { ok: true } };
 }
 
+// Refund. A reservation that never started returns one charge.
+// One attack slot leaves with it, so the daily count stays honest.
+export function refundManualMatch(status: Status, now: number): Status {
+  const cur = refresh(status, now);
+  const attackAt = cur.attackAt.slice(0, -1);
+  const stamina = Math.min(cur.staminaMax, cur.stamina + 1);
+  return { ...cur, attackAt, stamina };
+}
+
 // Match end. Expiry wins over a return to ready.
 export function finishMatch(status: Status, now: number): Status {
   if (status.state !== "IN_MATCH") return refresh(status, now);

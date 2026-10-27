@@ -1,7 +1,7 @@
 // Cloudflare Worker entry. Full API on D1: auth, publish, fights, replay.
 
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
-import { draft, refresh, spendManualMatch, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
+import { draft, refresh, refundManualMatch, spendManualMatch, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies, pickBot } from "@agent-wars/battle-core";
 import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
@@ -189,6 +189,13 @@ async function spendEnergy(env: WorkerEnv, leaderId: string, now = Date.now()): 
   const r = spendManualMatch(cur, now);
   await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(r.status), leaderId).run();
   return r.guard.ok ? { ok: true } : { ok: false, reason: (r.guard as { reason: string }).reason };
+}
+
+// A canceled or expired ticket returns its charge. Settled fights keep it.
+async function refundEnergy(env: WorkerEnv, leaderId: string, now = Date.now()): Promise<void> {
+  const cur = await energyFor(env, leaderId, now);
+  const next = refundManualMatch(cur, now);
+  await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(next), leaderId).run();
 }
 
 // The dashboard serves one hero with chip stats per version.
@@ -428,7 +435,9 @@ async function readTicketD1(
     return { ...ticket };
   }
   if (ticket.mode === "casual") return withMatchD1(env, await settleTicketD1(env, ticket, null));
+  // Ranked expiry with no foe: no fight started, so the charge returns.
   await env.DB.prepare("UPDATE tickets SET status = 'expired' WHERE id = ?").bind(input.ticketId).run();
+  await refundEnergy(env, input.leaderId, now);
   return (await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(input.ticketId).first<Record<string, unknown>>()) as Record<string, unknown>;
 }
 
@@ -683,6 +692,21 @@ export default {
       const ticketId = url.pathname.split("/")[3];
       try {
         return json(await readTicketD1(env, { ticketId, leaderId: me.id as string }, Date.now()));
+      } catch (err) {
+        return json({ error: (err as Error).message }, 404);
+      }
+    }
+    const cancelMatch = request.method === "POST" && /^\/v1\/matchmaking\/[^/]+\/cancel$/.test(url.pathname);
+    if (cancelMatch) {
+      const ticketId = url.pathname.split("/")[3];
+      try {
+        const ticket = await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(ticketId).first<Record<string, unknown>>();
+        if (!ticket || ticket.leader_id !== me.id) return json({ error: "unknown ticket" }, 404);
+        if (ticket.status !== "queued") return json({ error: `ticket is ${ticket.status}, nothing to cancel` }, 404);
+        await env.DB.prepare("UPDATE tickets SET status = 'canceled' WHERE id = ?").bind(ticketId).run();
+        await refundEnergy(env, me.id as string, Date.now());
+        const row = await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(ticketId).first<Record<string, unknown>>();
+        return json(row, 200);
       } catch (err) {
         return json({ error: (err as Error).message }, 404);
       }

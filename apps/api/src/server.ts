@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { board, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, installVersion, readTicket, requestMatch, retryPortrait, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
+import { board, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, installVersion, readTicket, requestMatch, retryPortrait, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -250,6 +250,16 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const ticketId = url.pathname.split("/")[3];
         try {
           send(res, 200, readTicket(ctx.store, { ticketId, leaderId: me.id as string }));
+        } catch (err) {
+          send(res, 404, { error: (err as Error).message });
+        }
+        return;
+      }
+      const cancelMatch = req.method === "POST" && /^\/v1\/matchmaking\/[^/]+\/cancel$/.test(url.pathname);
+      if (cancelMatch) {
+        const ticketId = url.pathname.split("/")[3];
+        try {
+          send(res, 200, cancelTicket(ctx.store, { ticketId, leaderId: me.id as string }));
         } catch (err) {
           send(res, 404, { error: (err as Error).message });
         }

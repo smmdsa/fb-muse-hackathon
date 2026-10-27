@@ -2,6 +2,7 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "../src/index.ts";
 import {
+  cancelTicket,
   compileAndPublish,
   createAgent,
   findHumanOpponent,
@@ -118,7 +119,28 @@ describe("matchmaking queue", () => {
     const late = readTicket(alone, { ticketId: q.id, leaderId: "l-alone" }, t0 + 10 * 60_000 + 1);
     assert.equal(late.status, "expired");
     const kept = alone.db.prepare("SELECT * FROM leaders WHERE id = ?").get("l-alone");
-    assert.equal(JSON.parse(kept.autobattle_json).stamina, 9);
+    assert.equal(JSON.parse(kept.autobattle_json).stamina, 10);
+  });
+
+  it("cancels a queued ticket and returns the charge", () => {
+    const arena = openStore(":memory:");
+    const t0 = 980_000;
+    arena.db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l-quit", "quitter", "t-quit");
+    const a = { id: "a-quit" };
+    arena.db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run(a.id, "l-quit", "v-quit");
+    arena.db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v-quit", a.id, JSON.stringify({ schemaVersion: 1, agentVersionId: "v-quit", dna: { aggression: 50, evasion: 50, preferredDistance: 50, energyConservation: 50 }, rules: [] }), "shim", t0,
+    );
+    const q = requestMatch(arena, { leaderId: "l-quit", versionId: "v-quit", mode: "ranked" }, t0);
+    assert.equal(q.status, "queued");
+    const spent = arena.db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get("l-quit");
+    assert.equal(JSON.parse(spent.autobattle_json).stamina, 9);
+    const out = cancelTicket(arena, { ticketId: q.id, leaderId: "l-quit" }, t0 + 1);
+    assert.equal(out.status, "canceled");
+    const back = arena.db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get("l-quit");
+    assert.equal(JSON.parse(back.autobattle_json).stamina, 10);
+    assert.throws(() => cancelTicket(arena, { ticketId: q.id, leaderId: "l-quit" }, t0 + 2), /nothing to cancel/);
+    arena.close();
   });
 
   it("denies the queue at zero energy", async () => {

@@ -8,7 +8,7 @@ import { applyRanked, createLedger, ratingFor } from "@agent-wars/ranking";
 import { rankFor } from "@agent-wars/ranking";
 import { buildStandings } from "@agent-wars/leaderboard";
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
-import { draft, refresh, spendManualMatch, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
+import { draft, refresh, refundManualMatch, spendManualMatch, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
 import { pickBot } from "@agent-wars/battle-core";
 import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
@@ -316,6 +316,14 @@ export function energyView(st: Status, now = Date.now()): { energy: number; ener
   return { energy: st.stamina, energyMax: st.staminaMax ?? STAMINA_MAX, nextRegenMs };
 }
 
+// A canceled or expired ticket returns its charge. Settled fights keep it.
+export function refundEnergy(store: Store, leaderId: string, now = Date.now()): Status {
+  const cur = energyFor(store, leaderId, now);
+  const next = refundManualMatch(cur, now);
+  store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(next), leaderId);
+  return next;
+}
+
 // A manual match spends one charge. Training never calls this function.
 export function spendEnergy(store: Store, leaderId: string, now = Date.now()): { ok: boolean; reason?: string; status: Status } {
   const cur = energyFor(store, leaderId, now);
@@ -532,8 +540,24 @@ export function readTicket(
     const settled = settleTicket(store, ticket, null, now);
     return withMatch(store, settled);
   }
+  // Ranked expiry with no foe: no fight started, so the charge returns.
   store.db.prepare("UPDATE tickets SET status = 'expired' WHERE id = ?").run(input.ticketId);
+  refundEnergy(store, input.leaderId, now);
   return { ...(store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(input.ticketId) as Record<string, unknown>) };
+}
+
+// Cancel drops a queued ticket and returns its charge. Settled stays final.
+export function cancelTicket(
+  store: Store,
+  input: { ticketId: string; leaderId: string },
+  now = Date.now(),
+): Record<string, unknown> {
+  const ticket = store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(input.ticketId) as Record<string, unknown> | null;
+  if (!ticket || ticket.leader_id !== input.leaderId) throw new Error("unknown ticket");
+  if (ticket.status !== "queued") throw new Error(`ticket is ${ticket.status}, nothing to cancel`);
+  store.db.prepare("UPDATE tickets SET status = 'canceled' WHERE id = ?").run(input.ticketId);
+  refundEnergy(store, input.leaderId, now);
+  return store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(input.ticketId) as Record<string, unknown>;
 }
 
 export function withMatch(store: Store, ticket: Record<string, unknown>): Record<string, unknown> & { match?: Record<string, unknown> } {
