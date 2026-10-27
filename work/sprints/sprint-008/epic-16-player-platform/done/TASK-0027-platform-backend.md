@@ -39,3 +39,6 @@ The keycheck rows stay in prod until asked to clean.
 
 - 2026-10-27 done: backend plus routes land. battle-core 12/12,
   ai-provider 22/22, API 17/17, full suite green, dry-run clean.
+- 2026-10-27 fix: prod D1 misses migration 0002, so breeding and
+  compile throw. Agents plus compile routes now answer JSON 500s.
+  Run `npx wrangler d1 migrations apply agent-wars --remote`, redeploy.
