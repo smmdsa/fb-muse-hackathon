@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { board, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, readTicket, requestMatch, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
+import { board, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, readTicket, requestMatch, retryPortrait, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -110,6 +110,16 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const concept = typeof body.concept === "string" ? body.concept.slice(0, 280) : "";
         const bred = await createAgent(ctx.store, process.env, { leaderId: me.id as string, name, concept });
         send(res, 201, { agentId: bred.agentId, portraitUrl: bred.portraitUrl, portraitStatus: bred.portraitStatus });
+        return;
+      }
+      const retryMatch = req.method === "POST" && /^\/v1\/agents\/[^/]+\/portrait\/retry$/.test(url.pathname);
+      if (retryMatch) {
+        const agentId = url.pathname.split("/")[3];
+        try {
+          send(res, 200, await retryPortrait(ctx.store, process.env, { agentId, leaderId: me.id as string }));
+        } catch (err) {
+          send(res, 404, { error: (err as Error).message });
+        }
         return;
       }
       const dashMatch = req.method === "GET" && /^\/v1\/agents\/[^/]+\/dashboard$/.test(url.pathname);

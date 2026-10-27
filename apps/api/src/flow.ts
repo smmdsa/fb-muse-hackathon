@@ -231,6 +231,36 @@ export async function createAgent(
   return { agentId: id, portraitUrl, portraitStatus };
 }
 
+// A retry repaints one hero. It never breeds a second agent.
+// A ready portrait returns untouched, with no new model call.
+export async function retryPortrait(
+  store: Store,
+  env: FlowEnv,
+  input: { agentId: string; leaderId: string },
+): Promise<{ portraitUrl: string | null; portraitStatus: string; retried: boolean }> {
+  const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
+  if (!agent || agent.leader_id !== input.leaderId) throw new Error("agent not found for this leader");
+  if (agent.portrait_status === "ready" && agent.portrait_url) {
+    return { portraitUrl: agent.portrait_url as string, portraitStatus: "ready", retried: false };
+  }
+  let portraitUrl: string | null = null;
+  let portraitStatus = "faceless";
+  if (hasKey("portrait", env)) {
+    try {
+      const art = await portraitFromEnv(env).generatePortrait({
+        prompt: portraitPromptFor(`${(agent.name as string) || "arena robot"}: ${(agent.concept as string) || "arena fighter"}`),
+      });
+      portraitUrl = art.url;
+      portraitStatus = "ready";
+    } catch {
+      portraitUrl = null;
+      portraitStatus = "failed";
+    }
+  }
+  store.db.prepare("UPDATE agents SET portrait_url = ?, portrait_status = ? WHERE id = ?").run(portraitUrl, portraitStatus, input.agentId);
+  return { portraitUrl, portraitStatus, retried: true };
+}
+
 // Compile plus validate plus publish in one honest step for the milestone.
 export async function compileAndPublish(
   store: Store,

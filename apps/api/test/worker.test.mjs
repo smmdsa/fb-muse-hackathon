@@ -129,6 +129,12 @@ describe("worker writes", () => {
     assert.ok(va.json.tokens > 0);
     const vb = await call("POST", `/v1/agents/${ab.json.agentId}/policies/compile`, { prompt: "evade and stay far away" }, sb.json.token);
     assert.equal(vb.status, 201);
+    const retry = await call("POST", `/v1/agents/${aa.json.agentId}/portrait/retry`, {}, sa.json.token);
+    assert.equal(retry.status, 200);
+    assert.equal(retry.json.retried, true);
+    assert.equal(retry.json.portraitStatus, "faceless");
+    const alienRetry = await call("POST", `/v1/agents/${aa.json.agentId}/portrait/retry`, {}, sb.json.token);
+    assert.equal(alienRetry.status, 404);
     const t = await call("POST", "/v1/matches/training", { versionId: va.json.versionId, seed: "wt-1" }, sa.json.token);
     assert.equal(t.status, 201);
     assert.ok(t.json.checksum);

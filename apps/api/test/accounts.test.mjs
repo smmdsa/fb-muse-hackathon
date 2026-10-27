@@ -61,14 +61,48 @@ describe("accounts", () => {
     globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
     try {
       const s = await call("POST", "/v1/auth/session", { handle: "unlucky" });
+      keys.unlucky = s.json.token;
       const a = await call("POST", "/v1/agents", { name: "Rust", concept: "junk brawler" }, s.json.token);
       assert.equal(a.status, 201);
       assert.equal(a.json.portraitStatus, "failed");
       assert.equal(a.json.portraitUrl, null);
+      keys.rust = a.json.agentId;
     } finally {
       globalThis.fetch = realFetch;
       delete process.env.META_IMAGE_KEY;
     }
+  });
+
+  it("retries a failed portrait without breeding a second hero", async () => {
+    process.env.META_IMAGE_KEY = "test-image-key";
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return { ok: true, status: 200, json: async () => ({ data: [{ url: "https://cdn.example/rust.png" }] }) };
+    };
+    try {
+      const r = await call("POST", `/v1/agents/${keys.rust}/portrait/retry`, {}, keys.unlucky);
+      assert.equal(r.status, 200);
+      assert.equal(r.json.retried, true);
+      assert.equal(r.json.portraitStatus, "ready");
+      assert.equal(r.json.portraitUrl, "https://cdn.example/rust.png");
+      assert.equal(calls, 1);
+      const again = await call("POST", `/v1/agents/${keys.rust}/portrait/retry`, {}, keys.unlucky);
+      assert.equal(again.status, 200);
+      assert.equal(again.json.retried, false);
+      assert.equal(calls, 1);
+      const seen = await call("GET", `/v1/agents/${keys.rust}/dashboard`, null, keys.unlucky);
+      assert.equal(seen.json.agent.portraitStatus, "ready");
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.META_IMAGE_KEY;
+    }
+  });
+
+  it("denies a portrait retry on a foreign hero", async () => {
+    const r = await call("POST", `/v1/agents/${keys.rust}/portrait/retry`, {}, keys.commander);
+    assert.equal(r.status, 404);
   });
 
   it("compiles and publishes a valid draft", async () => {

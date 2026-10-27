@@ -72,10 +72,11 @@ export type MetaProvider = AiProvider & {
   generatePortrait: (req: PortraitRequest) => Promise<PortraitResult>;
 };
 
-// One style line keeps every agent portrait in the same art family:
-// three-quarter view, vector esports look, dark navy field, no text.
+// One style line keeps every agent portrait in the same art family.
+// The contract fixes the canon: one full-body robot, camera-left,
+// feet on one baseline, chest chip slot, navy field, no text ever.
 export const PORTRAIT_STYLE =
-  "three-quarter view fighting robot portrait, flat vector esports style, glowing visor, dark navy background, no text, no letters";
+  "one full-body fighting robot portrait, front three-quarter view facing camera-left, neutral ready stance, head arms legs and feet fully visible on one baseline, flat vector esports style, glowing visor, chest chip slot, dark navy background, no text, no watermark, no letters";
 
 // The prompter locks the art direction. The subject changes, the style never does.
 export function portraitPromptFor(subject: string): string {

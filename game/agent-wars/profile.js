@@ -30,6 +30,25 @@ function show(el, on) {
   el.hidden = !on;
 }
 
+// Deterministic fallback glyph. One hue per hero, same navy field.
+function silhouetteFor(id) {
+  let h = 0;
+  for (let i = 0; i < String(id).length; i += 1) h = (Math.imul(h, 31) + String(id).charCodeAt(i)) >>> 0;
+  const hue = h % 360;
+  const svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'>"
+    + "<rect width='96' height='96' fill='#101923'/>"
+    + "<rect x='38' y='14' width='20' height='14' fill='#8a94a6'/>"
+    + `<rect x='42' y='18' width='12' height='5' fill='hsl(${hue},90%,60%)'/>`
+    + "<rect x='30' y='32' width='36' height='30' fill='#5b6577'/>"
+    + `<rect x='42' y='38' width='12' height='8' fill='hsl(${hue},90%,60%)'/>`
+    + "<rect x='22' y='34' width='6' height='22' fill='#8a94a6'/>"
+    + "<rect x='68' y='34' width='6' height='22' fill='#8a94a6'/>"
+    + "<rect x='34' y='64' width='10' height='20' fill='#8a94a6'/>"
+    + "<rect x='52' y='64' width='10' height='20' fill='#8a94a6'/>"
+    + "</svg>";
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
 async function refresh() {
   if (!token || !agentId) return;
   const r = await call("GET", `/v1/agents/${agentId}/dashboard`);
@@ -40,7 +59,16 @@ async function refresh() {
   if (d.agent.portraitUrl) {
     $("hero-img").src = d.agent.portraitUrl;
     show($("hero-img"), true);
+    $("hero-art-status").textContent = "Portrait ready — house style locked.";
+  } else {
+    $("hero-img").src = silhouetteFor(d.agent.id);
+    show($("hero-img"), true);
+    $("hero-art-status").textContent = d.agent.portraitStatus === "failed"
+      ? "Portrait paint failed. Retry below — the hero still fights."
+      : "Faceless hero — the server holds no image key yet. The hero still fights.";
   }
+  show($("hero-art-status"), true);
+  show($("retry-btn"), !d.agent.portraitUrl);
   $("hero-shield").src = shieldFor(d.leader.tier);
   show($("hero-shield"), true);
   $("hero-ap").textContent = `${d.leader.ap} AP — ${d.leader.tier}${d.leader.division ? " " + d.leader.division : ""}`;
@@ -149,7 +177,18 @@ $("breed-btn").addEventListener("click", async () => {
   show($("breed-row"), false);
   $("breed-msg").textContent = r.data.portraitUrl
     ? "Hero bred with a portrait."
-    : "Hero bred faceless — the server holds no image key.";
+    : `Hero bred ${r.data.portraitStatus} — art can retry later, fights start now.`;
+  await refresh();
+});
+
+$("retry-btn").addEventListener("click", async () => {
+  if (!agentId) return;
+  $("hero-art-status").textContent = "Repainting the portrait…";
+  const r = await call("POST", `/v1/agents/${agentId}/portrait/retry`);
+  if (r.status !== 200) {
+    $("hero-art-status").textContent = `Retry failed: ${r.data.error || r.status}.`;
+    return;
+  }
   await refresh();
 });
 

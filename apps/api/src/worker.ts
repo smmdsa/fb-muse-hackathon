@@ -531,6 +531,35 @@ export default {
         return json({ error: `server error: ${(err as Error).message}` }, 500);
       }
     }
+    const retryMatch = request.method === "POST" && /^\/v1\/agents\/[^/]+\/portrait\/retry$/.exec(url.pathname);
+    if (retryMatch) {
+      try {
+      const agentId = url.pathname.split("/")[3];
+      const target = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
+      if (!target || target.leader_id !== me.id) return json({ error: "agent not found for this leader" }, 404);
+      if (target.portrait_status === "ready" && target.portrait_url) {
+        return json({ portraitUrl: target.portrait_url, portraitStatus: "ready", retried: false }, 200);
+      }
+      let portraitUrl: string | null = null;
+      let portraitStatus = "faceless";
+      if (hasKey("portrait", env)) {
+        try {
+          const art = await portraitFromEnv(env).generatePortrait({
+            prompt: portraitPromptFor(`${(target.name as string) || "arena robot"}: ${(target.concept as string) || "arena fighter"}`),
+          });
+          portraitUrl = art.url;
+          portraitStatus = "ready";
+        } catch {
+          portraitUrl = null;
+          portraitStatus = "failed";
+        }
+      }
+      await env.DB.prepare("UPDATE agents SET portrait_url = ?, portrait_status = ? WHERE id = ?").bind(portraitUrl, portraitStatus, agentId).run();
+      return json({ portraitUrl, portraitStatus, retried: true }, 200);
+      } catch (err) {
+        return json({ error: `server error: ${(err as Error).message}` }, 500);
+      }
+    }
     const dashMatch = request.method === "GET" && /^\/v1\/agents\/[^/]+\/dashboard$/.exec(url.pathname);
     if (dashMatch) {
       const agentId = url.pathname.split("/")[3];

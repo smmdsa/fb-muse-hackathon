@@ -23,7 +23,7 @@ describe("portrait style lock", () => {
     for (const subject of SUBJECTS) {
       const prompt = portraitPromptFor(subject);
       assert.ok(prompt.startsWith(subject), `subject leads: ${subject}`);
-      for (const token of ["three-quarter view", "flat vector esports", "dark navy", "no text"]) {
+      for (const token of ["full-body", "three-quarter view", "camera-left", "feet", "baseline", "flat vector esports", "chest chip slot", "dark navy", "no text", "no watermark"]) {
         assert.ok(prompt.includes(token), `style holds for ${subject}: ${token}`);
       }
       assert.ok(prompt.length <= 200 + PORTRAIT_STYLE.length + 2);
@@ -34,7 +34,7 @@ describe("portrait style lock", () => {
     for (const blank of ["", "   "]) {
       const prompt = portraitPromptFor(blank);
       assert.ok(prompt.startsWith("arena robot"));
-      assert.ok(prompt.includes("three-quarter view"));
+      assert.ok(prompt.includes("full-body"));
     }
   });
 
