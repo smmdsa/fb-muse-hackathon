@@ -22,6 +22,9 @@ Date: 2026-10-26. Read this file and run each check by hand. The agent cannot do
 9. Let a fight end. An end screen covers the arena with the winner and tick count. Press Fight again.
 10. Watch a hit land. A spark, a "-10" floater, and a white bar flash all show, then clear.
 11. Unplug the network and reload. The page still works with a fallback font.
+12. Type two new prompts and press Start. The compile line names traits and rules for Cyan and Crimson.
+13. Run the same prompts and seed twice. The same side wins both fights.
+14. Play until a shield triggers. The feed shows a BLOCK line and no HP falls on that hit.
 
 ## Report back
 

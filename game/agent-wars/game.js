@@ -47,6 +47,18 @@ const startBtn = document.getElementById("start-btn");
 const restartBtn = document.getElementById("restart-btn");
 const pauseBtn = document.getElementById("pause-btn");
 const seedInput = document.getElementById("seed");
+const promptAInput = document.getElementById("prompt-a");
+const promptBInput = document.getElementById("prompt-b");
+const dnaLine = document.getElementById("dna-line");
+
+// Compile reads both boxes and reports traits plus rules. Compile is local.
+function compileBrains() {
+  brains.A = compileSide(promptAInput.value.trim() || "hold position");
+  brains.B = compileSide(promptBInput.value.trim() || "hold position");
+  const show = (c) => `agg ${c.dna.agg} rules ${c.rules.map((r) => r.id).join(",")}`;
+  dnaLine.textContent = `Cyan: ${show(brains.A)} · Crimson: ${show(brains.B)}`;
+  note("Compiled: Cyan (" + brains.A.prompt + ") vs Crimson (" + brains.B.prompt + ")");
+}
 
 let agents = null;
 let shots = [];
@@ -88,6 +100,7 @@ function spawn(side, leftX) {
     ay: 0,
     alive: true,
     shieldUntil: 0,
+    shieldCdUntil: 0,
   };
 }
 
@@ -119,27 +132,163 @@ function blocked(x1, y1, x2, y2, c) {
   return true;
 }
 
-function policy(me, foe, dna) {
+// Local compile. Same keyword map and rule pool as the mock provider.
+function traitsFor(text) {
+  const p = (text || "").toLowerCase();
+  let agg = 50;
+  let evd = 50;
+  let dist = 50;
+  let con = 50;
+  if (/attack|aggress|push|rush|brave|kill/.test(p)) agg += 30;
+  if (/defen|evad|dodge|flee|run|careful|safe/.test(p)) { evd += 30; agg -= 10; }
+  if (/close|near|melee|chase/.test(p)) dist -= 25;
+  if (/far|snipe|range|kite|keep away/.test(p)) dist += 25;
+  if (/save|conserve|energy|efficient|patient/.test(p)) con += 25;
+  if (/dash|waste|spam|reckless/.test(p)) con -= 20;
+  const clamp = (n) => Math.min(100, Math.max(0, Math.round(n)));
+  return { agg: clamp(agg), evd: clamp(evd), dist: clamp(dist), con: clamp(con) };
+}
+
+const RULE_POOL = [
+  { id: "weak-retreat", when: { operand: "ownHpPct", op: "lt", value: 25 }, move: "RETREAT" },
+  { id: "far-approach", when: { operand: "distFoe", op: "gt", value: 8 }, move: "APPROACH" },
+  { id: "mid-strafe", when: { all: [{ operand: "distFoe", op: "gte", value: 4 }, { operand: "distFoe", op: "lte", value: 10 }] }, move: "STRAFE", fire: true },
+  { id: "close-fire", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true },
+  { id: "seek-center", when: { operand: "objectiveDist", op: "gt", value: 6 }, move: "CAPTURE" },
+  { id: "hide-cover", when: { operand: "coverDist", op: "lt", value: 3 }, move: "SEEK_COVER" },
+  { id: "shield-threat", when: { operand: "projectileTti", op: "lt", value: 0.4 }, move: "STRAFE", shield: true },
+  { id: "late-push", when: { operand: "timeLeft", op: "lt", value: 20 }, move: "APPROACH", fire: true, dash: true },
+];
+
+function compileSide(prompt) {
+  const text = prompt || "hold position";
+  const dna = traitsFor(text);
+  const start = hashSeed(text) % RULE_POOL.length;
+  const rules = [0, 1, 2].map((k) => RULE_POOL[(start + k * 3) % RULE_POOL.length]);
+  return { prompt: text, dna, rules };
+}
+
+let brains = { A: compileSide("evade and snipe from far away"), B: compileSide("rush them down up close") };
+
+function leafVal(obs, operand) {
+  switch (operand) {
+    case "ownHpPct": return obs.hp;
+    case "energy": return obs.en;
+    case "distFoe": return obs.los ? obs.dist : null;
+    case "projectileTti": return obs.tti;
+    case "coverDist": return obs.cover;
+    case "timeLeft": return obs.left;
+    case "objectiveDist": return obs.obj;
+    default: return null;
+  }
+}
+
+function testPred(when, obs) {
+  if (!when || typeof when !== "object") return false;
+  if (Array.isArray(when.all)) return when.all.every((k) => testPred(k, obs));
+  if (Array.isArray(when.any)) return when.any.some((k) => testPred(k, obs));
+  if (when.not) return !testPred(when.not, obs);
+  const v = leafVal(obs, when.operand);
+  if (v === null || v === undefined) return false;
+  if (when.op === "gt") return v > when.value;
+  if (when.op === "gte") return v >= when.value;
+  if (when.op === "lt") return v < when.value;
+  if (when.op === "lte") return v <= when.value;
+  return false;
+}
+
+// The driver evaluates one side's rules and steers the unit.
+function drive(side) {
+  const me = agents[side];
+  const foe = agents[side === "A" ? "B" : "A"];
+  const comp = brains[side];
   const dx = foe.x - me.x;
   const dy = foe.y - me.y;
   const dist = Math.hypot(dx, dy) || 1;
-  const want = 3 + (dna.dist / 100) * 8;
-  let mx;
-  let my;
-  if (dist > want + 1) { mx = dx / dist; my = dy / dist; }
-  else if (dist < want - 1) { mx = -dx / dist; my = -dy / dist; }
-  else {
-    mx = -dy / dist;
-    my = dx / dist;
-    if (((tick >> 6) % 2) === 1) { mx = -mx; my = -my; }
+  const los = foe.alive && sightClear(me, foe);
+  let tti = null;
+  for (const s of shots) {
+    if (s.owner === side) continue;
+    const t = Math.hypot(s.x - me.x, s.y - me.y) / SHOT_SPEED;
+    if (tti === null || t < tti) tti = t;
   }
-  const fire = dist < 12 && dna.agg > 25;
-  const dash = dna.agg > 65 && me.en > 50 && dist > 6 && dist < 10;
-  return { mx, my, ax: dx / dist, ay: dy / dist, fire, dash };
+  let cover = null;
+  for (const c of COVERS) {
+    const cx = Math.min(Math.max(me.x, c.x1), c.x2);
+    const cy = Math.min(Math.max(me.y, c.y1), c.y2);
+    const d = Math.hypot(me.x - cx, me.y - cy);
+    if (cover === null || d < cover) cover = d;
+  }
+  const obs = {
+    hp: (me.hp / MAX_HP) * 100,
+    en: me.en,
+    dist,
+    los,
+    tti,
+    cover,
+    left: 90 - time,
+    obj: Math.hypot(W / 2 - me.x, H / 2 - me.y),
+  };
+  let pick = { move: "CAPTURE" };
+  for (const r of comp.rules) {
+    if (testPred(r.when, obs)) { pick = r; break; }
+  }
+  const flip = ((tick >> 6) % 2) === 1 ? -1 : 1;
+  const toFoe = { x: dx / dist, y: dy / dist };
+  const toCenter = { x: W / 2 - me.x, y: H / 2 - me.y };
+  const cl = Math.hypot(toCenter.x, toCenter.y) || 1;
+  toCenter.x /= cl;
+  toCenter.y /= cl;
+  let mx = 0;
+  let my = 0;
+  if (pick.move === "APPROACH") { const v = los ? toFoe : toCenter; mx = v.x; my = v.y; }
+  else if (pick.move === "RETREAT") { mx = -toFoe.x; my = -toFoe.y; }
+  else if (pick.move === "KITE") {
+    const blend = obs.dist < 6 ? -0.7 : 0.4;
+    mx = toFoe.x * blend + -toFoe.y * flip;
+    my = toFoe.y * blend + toFoe.x * flip;
+  }
+  else if (pick.move === "STRAFE") { mx = -toFoe.y * flip; my = toFoe.x * flip; }
+  else if (pick.move === "SEEK_COVER") {
+    let best = toCenter;
+    let bestD = Infinity;
+    for (const c of COVERS) {
+      const v = { x: (c.x1 + c.x2) / 2 - me.x, y: (c.y1 + c.y2) / 2 - me.y };
+      const d = Math.hypot(v.x, v.y);
+      if (d < bestD) { bestD = d; best = v; }
+    }
+    const l = Math.hypot(best.x, best.y) || 1;
+    mx = best.x / l;
+    my = best.y / l;
+  }
+  else { mx = toCenter.x; my = toCenter.y; }
+  const w = comp.dna.evd / 100;
+  if (tti !== null && tti < 1.2 && comp.dna.evd > 40 && los) {
+    const ax = (me.x - foe.x) / dist;
+    const ay = (me.y - foe.y) / dist;
+    mx = mx * (1 - w) + ax * w;
+    my = my * (1 - w) + ay * w;
+  }
+  let damp = 1;
+  if (me.en < 30 && comp.dna.con > 50) damp = 0.6;
+  return {
+    mx: mx * damp,
+    my: my * damp,
+    ax: los ? toFoe.x : mx,
+    ay: los ? toFoe.y : my,
+    fire: pick.fire === true && dist < 12,
+    dash: pick.dash === true && me.en > 50,
+    shield: pick.shield === true,
+  };
 }
 
-const SHADOW = { agg: 35, dist: 65 };
-const BREAKER = { agg: 80, dist: 20 };
+// Sight breaks when any cover box crosses the view line.
+function sightClear(me, foe) {
+  for (const c of COVERS) {
+    if (blocked(me.x, me.y, foe.x, foe.y, c)) return false;
+  }
+  return true;
+}
 
 function step() {
   if (over || paused) return;
@@ -147,8 +296,8 @@ function step() {
   time += TICK;
   const A = agents.A;
   const B = agents.B;
-  const pa = policy(A, B, SHADOW);
-  const pb = policy(B, A, BREAKER);
+  const pa = drive("A");
+  const pb = drive("B");
   move(A, pa);
   move(B, pb);
   shoot(A, pa, "A");
@@ -173,6 +322,11 @@ function move(me, p) {
   if (!me.alive) return;
   let sp = SPEED;
   if (p.dash && me.en >= DASH_COST) { sp *= 3.2; me.en -= DASH_COST; }
+  if (p.shield && me.en >= SHIELD_COST && time >= me.shieldCdUntil) {
+    me.en -= SHIELD_COST;
+    me.shieldUntil = time + 0.8;
+    me.shieldCdUntil = time + 4;
+  }
   me.en = Math.min(MAX_EN, me.en + REGEN * TICK);
   let nx = me.x + p.mx * sp * TICK;
   let ny = me.y + p.my * sp * TICK;
@@ -226,6 +380,11 @@ function fly() {
     const dx = s.x - t.x;
     const dy = s.y - t.y;
     if (t.alive && dx * dx + dy * dy <= RADIUS * RADIUS) {
+      if (time <= t.shieldUntil) {
+        note(s.owner + " shot blocked by shield");
+        sparks.push({ x: t.x, y: t.y, age: 0, text: "BLOCK", color: "#ffffff" });
+        continue;
+      }
       t.hp -= SHOT_DMG;
       note(s.owner + " hits for " + SHOT_DMG);
       sparks.push({ x: t.x, y: t.y, age: 0, text: "-" + SHOT_DMG, color: s.owner === "A" ? "#37e0ff" : "#ff5d7a" });
@@ -354,7 +513,7 @@ function flash(side) {
 
 // The end screen sits over the scene with the result and the stats.
 function showEnd() {
-  const name = winner === "A" ? "SHADOW.EXE" : winner === "B" ? "BREAKER.01" : null;
+  const name = winner === "A" ? "Cyan" : winner === "B" ? "Crimson" : null;
   endTitle.textContent = name ? name + " wins" : "Draw";
   endStats.textContent = tick + " ticks · seed " + (seedInput.value.trim() || "forge-001");
   pillWinner.textContent = "winner: " + (winner || "DRAW");
@@ -384,7 +543,8 @@ function reset(seed) {
 startBtn.addEventListener("click", () => {
   const seed = seedInput.value.trim() || "forge-001";
   reset(seed);
-  note("Battle starts: SHADOW.EXE vs BREAKER.01");
+  compileBrains();
+  note("Battle starts: Cyan vs Crimson");
   pillState.textContent = "live";
   startBtn.disabled = true;
   restartBtn.disabled = false;
@@ -398,6 +558,7 @@ startBtn.addEventListener("click", () => {
 
 restartBtn.addEventListener("click", () => {
   reset(seedInput.value.trim() || "forge-001");
+  compileBrains();
   note("Battle restarts");
   pillState.textContent = "live";
   pauseBtn.textContent = "Pause";
@@ -407,6 +568,7 @@ restartBtn.addEventListener("click", () => {
 
 againBtn.addEventListener("click", () => {
   reset(seedInput.value.trim() || "forge-001");
+  compileBrains();
   note("Battle restarts");
   pillState.textContent = "live";
   pauseBtn.textContent = "Pause";

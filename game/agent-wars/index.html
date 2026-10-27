@@ -24,7 +24,16 @@
 </header>
 <section class="panel" id="title-card">
 <h2>Build the brain. Enter the arena.</h2>
-<p>Two reference agents fight in THE_FORGE. The sim runs at 30 ticks per second. Covers block shots. Shields block damage.</p>
+<p>Two prompts compile into fighters in THE_FORGE. The sim runs at 30 ticks per second. Covers block shots. Shields block damage. Compile is local.</p>
+<div class="row">
+<label for="prompt-a">Cyan prompt</label>
+<input id="prompt-a" name="prompt-a" value="evade and snipe from far away" maxlength="120" />
+</div>
+<div class="row">
+<label for="prompt-b">Crimson prompt</label>
+<input id="prompt-b" name="prompt-b" value="rush them down up close" maxlength="120" />
+</div>
+<p class="sub" id="dna-line">No compile yet.</p>
 <div class="row">
 <label for="seed">Seed</label>
 <input id="seed" name="seed" value="forge-001" maxlength="40" />
@@ -35,12 +44,12 @@
 <section class="panel">
 <div class="hud">
 <div class="bar-block">
-<span class="name tag-a">SHADOW.EXE</span>
+<span class="name tag-a">CYAN</span>
 <div class="bar"><div class="fill hp-a" id="hp-a"></div></div>
 <div class="bar thin"><div class="fill en-a" id="en-a"></div></div>
 </div>
 <div class="bar-block right">
-<span class="name tag-b">BREAKER.01</span>
+<span class="name tag-b">CRIMSON</span>
 <div class="bar"><div class="fill hp-b" id="hp-b"></div></div>
 <div class="bar thin"><div class="fill en-b" id="en-b"></div></div>
 </div>

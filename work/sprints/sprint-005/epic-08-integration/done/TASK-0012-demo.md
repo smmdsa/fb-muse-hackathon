@@ -27,7 +27,11 @@ One command must prove the loop: prompt, compile, fight, rank, pay.
 
 Accounts, servers, and builder UI stay out of this task.
 
+## Verdict
+
+User words on 2026-10-26: "tested works fine". Both receipts print and read correctly.
+
 ## Notes
 
 - 2026-10-26 start: waits on TASK-0011.
-- 2026-10-26 runs: `pnpm demo` prints B-wins receipt (checksum 280f44aa). Second run with new prompts prints A-wins receipt (checksum 913f9af6). User hand run is pending.
+- 2026-10-26 runs: `pnpm demo` prints B-wins receipt (checksum 280f44aa). Second run with new prompts prints A-wins receipt (checksum 913f9af6).
