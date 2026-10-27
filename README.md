@@ -25,6 +25,8 @@ If a command fails, read the error and fix the cause before you retry.
 
 Start it: `pnpm --filter @agent-wars/api dev`. It serves `http://127.0.0.1:8787` with a file database in `data/`.
 
+Live at https://agent-wars-api.smmdsa.workers.dev (health, leaderboard, and replay reads run on D1).
+
 Deploy it to Cloudflare (needs your account and one D1 id):
 
 - `wrangler d1 create agent-wars` gives the database id. Set it in `wrangler.toml`.

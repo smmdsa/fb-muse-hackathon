@@ -33,3 +33,4 @@ Write routes stay on the Node API until the store ports to async D1. `wrangler d
 - 2026-10-26 start: readiness work before the push.
 - 2026-10-27 verification pass: replay test over a fresh migrated DB seeded with a leader, two versions, and a finished match. Health 200, leaderboard 200 with the seeded leader, replay 200 with identical:true. Suite holds 119 green.
 - 2026-10-26 close: 3 worker tests pass. Migration builds all 6 tables on a fresh database. Full repo suite holds 118 green.
+- 2026-10-27 live deploy: worker shipped, remote migration applied, one seeded match replays identical on the live URL.

@@ -9,5 +9,5 @@ SEASON_ID = "local-s1"
 [[d1_databases]]
 binding = "DB"
 database_name = "agent-wars"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "d15b152e-3ec8-40da-a9c0-48fa5cf56f8f"
 migrations_dir = "migrations"
