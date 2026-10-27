@@ -633,6 +633,45 @@ export default {
     if (request.method === "GET" && replayMatch) {
       return replay(env, decodeURIComponent(replayMatch[0].split("/")[3]));
     }
+    const pubMatch = /^\/v1\/leaders\/[^/]+\/public$/.exec(url.pathname);
+    if (request.method === "GET" && pubMatch) {
+      const leader = await env.DB.prepare("SELECT * FROM leaders WHERE handle = ?").bind(decodeURIComponent(pubMatch[0].split("/")[3])).first<Record<string, unknown>>();
+      if (!leader) return json({ error: "unknown handle" }, 404);
+      const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(leader.id as string).first<Record<string, unknown>>();
+      let wins = 0;
+      let losses = 0;
+      if (agent) {
+        const { results: vrows } = await env.DB.prepare("SELECT id FROM versions WHERE agent_id = ?").bind(agent.id as string).all<Record<string, unknown>>();
+        const ids = vrows.map((v) => v.id as string);
+        if (ids.length) {
+          const marks = ids.map(() => "?").join(",");
+          const { results: bouts } = await env.DB.prepare(
+            `SELECT * FROM matches WHERE a_version IN (${marks}) OR b_version IN (${marks})`,
+          ).bind(...ids, ...ids).all<Record<string, unknown>>();
+          const owned = new Set(ids);
+          for (const m of bouts) {
+            const mine = owned.has(m.a_version as string) ? "A" : "B";
+            if (m.winner === mine) wins += 1;
+            else if (m.winner === "A" || m.winner === "B") losses += 1;
+          }
+        }
+      }
+      const rank = rankFor(leader.ap as number);
+      const equipped = JSON.parse((leader.equipped_json as string) ?? "{}") as Record<string, string | null>;
+      return json({
+        handle: leader.handle,
+        ap: leader.ap,
+        tier: rank.tier,
+        division: rank.division,
+        agent: agent ? {
+          name: agent.name,
+          portraitUrl: agent.portrait_url,
+          equippedSkin: equipped.skin ?? null,
+          wins,
+          losses,
+        } : null,
+      }, 200);
+    }
     if (request.method === "POST" && url.pathname === "/v1/auth/session") {
       const body = await readBody(request);
       if (body === null) return json({ error: "bad json" }, 400);
@@ -965,6 +1004,18 @@ export default {
       equipped,
       catalog: CATALOG.map((c) => ({ ...c, owned: owned.includes(c.id) })),
     });
+    const repMatch = /^\/v1\/leaders\/[^/]+\/report$/.exec(url.pathname);
+    if (request.method === "POST" && repMatch) {
+      const body = await readBody(request);
+      if (body === null) return json({ error: "bad json" }, 400);
+      const handle = decodeURIComponent(repMatch[0].split("/")[3]);
+      const found = await env.DB.prepare("SELECT id FROM leaders WHERE handle = ?").bind(handle).first<Record<string, unknown>>();
+      if (!found) return json({ error: "unknown handle" }, 404);
+      const reason = typeof body.reason === "string" ? body.reason.slice(0, 280) : "";
+      if (!reason) return json({ error: "reason is required" }, 400);
+      await env.DB.prepare("INSERT INTO reports (id, handle, reason, created_at) VALUES (?, ?, ?, ?)").bind(mintId("r"), handle, reason, Date.now()).run();
+      return json({ received: true }, 200);
+    }
     if (request.method === "GET" && url.pathname === "/v1/seasons") {
       const { results: seasons } = await env.DB.prepare("SELECT * FROM season_archives ORDER BY closed_at DESC").bind().all<Record<string, unknown>>();
       return json({

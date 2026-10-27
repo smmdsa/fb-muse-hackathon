@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, equipItem, getLeader, getTournament, getVersion, installVersion, listTournaments, optInAutobattle, pauseAutobattle, readTicket, registerTournament, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, validateRanked, withMatch } from "./flow.ts";
+import { armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, equipItem, getLeader, getTournament, getVersion, installVersion, listTournaments, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -87,6 +87,14 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const token = newToken("demo");
         ctx.store.db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run(id, handle, token);
         send(res, 200, { token, leaderId: id });
+        return;
+      }
+      if (req.method === "GET" && /^\/v1\/leaders\/[^/]+\/public$/.test(url.pathname)) {
+        try {
+          send(res, 200, publicProfile(ctx.store, decodeURIComponent(url.pathname.split("/")[3])));
+        } catch (err) {
+          send(res, 404, { error: (err as Error).message });
+        }
         return;
       }
       const me = bearer(req, ctx);
@@ -314,6 +322,16 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
       }
       if (req.method === "GET" && url.pathname === "/v1/seasons") {
         send(res, 200, { seasons: seasonHistory(ctx.store) });
+        return;
+      }
+      const repMatch = req.method === "POST" && /^\/v1\/leaders\/[^/]+\/report$/.test(url.pathname);
+      if (repMatch) {
+        const reason = typeof body.reason === "string" ? body.reason : "";
+        try {
+          send(res, 200, reportLeader(ctx.store, decodeURIComponent(url.pathname.split("/")[3]), reason));
+        } catch (err) {
+          send(res, (err as Error).message === "unknown handle" ? 404 : 400, { error: (err as Error).message });
+        }
         return;
       }
       if (req.method === "GET" && url.pathname === "/v1/armory") {

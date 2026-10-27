@@ -889,6 +889,56 @@ export function seasonHistory(store: Store): Record<string, unknown>[] {
   }));
 }
 
+// Public cards show the career, never the wallet. Allowlist, not filter.
+export function publicProfile(store: Store, handle: string): Record<string, unknown> {
+  const leader = store.db.prepare("SELECT * FROM leaders WHERE handle = ?").get(handle) as Record<string, unknown> | null;
+  if (!leader) throw new Error("unknown handle");
+  const agent = store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(leader.id as string) as Record<string, unknown> | null;
+  let wins = 0;
+  let losses = 0;
+  if (agent) {
+    const vrows = store.db.prepare("SELECT id FROM versions WHERE agent_id = ?").all(agent.id as string) as Record<string, unknown>[];
+    const ids = vrows.map((v) => v.id as string);
+    if (ids.length) {
+      const marks = ids.map(() => "?").join(",");
+      const bouts = store.db.prepare(
+        `SELECT * FROM matches WHERE a_version IN (${marks}) OR b_version IN (${marks})`,
+      ).all(...ids, ...ids) as Record<string, unknown>[];
+      const owned = new Set(ids);
+      for (const m of bouts) {
+        const mine = owned.has(m.a_version as string) ? "A" : "B";
+        if (m.winner === mine) wins += 1;
+        else if (m.winner === "A" || m.winner === "B") losses += 1;
+      }
+    }
+  }
+  const rank = rankFor(leader.ap as number);
+  const equipped = JSON.parse((leader.equipped_json as string) ?? "{}") as Record<string, string | null>;
+  return {
+    handle: leader.handle,
+    ap: leader.ap,
+    tier: rank.tier,
+    division: rank.division,
+    agent: agent ? {
+      name: agent.name,
+      portraitUrl: agent.portrait_url,
+      equippedSkin: equipped.skin ?? null,
+      wins,
+      losses,
+    } : null,
+  };
+}
+
+// Abuse reports land in a private box. No public listing, ever.
+export function reportLeader(store: Store, handle: string, reason: string, now = Date.now()): { received: boolean } {
+  const leader = store.db.prepare("SELECT id FROM leaders WHERE handle = ?").get(handle) as Record<string, unknown> | null;
+  if (!leader) throw new Error("unknown handle");
+  const clean = reason.slice(0, 280);
+  if (!clean) throw new Error("reason is required");
+  store.db.prepare("INSERT INTO reports (id, handle, reason, created_at) VALUES (?, ?, ?, ?)").run(mintId("r"), handle, clean, now);
+  return { received: true };
+}
+
 // Cancel drops a queued ticket and returns its charge. Settled stays final.
 export function cancelTicket(
   store: Store,

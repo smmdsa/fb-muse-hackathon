@@ -107,6 +107,7 @@ describe("worker writes", () => {
     db.exec(readFileSync(new URL("../../../migrations/0007_tournaments.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0008_armory.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0010_reports.sql", import.meta.url), "utf8"));
     // Reuse the shared shim: it carries batch, like the real D1 binding.
     const wenv = { DB: shim(db), ASSETS: assetsStub };
     const call = (method, path, body, token) => {
@@ -215,6 +216,18 @@ describe("worker writes", () => {
     assert.equal(wr.rated, 1);
     assert.equal(typeof wr.myDelta, "number");
     assert.equal(typeof wr.replay, "string");
+    const pub = await entry.fetch(new Request("http://local/v1/leaders/wa/public"), wenv);
+    assert.equal(pub.status, 200);
+    const card = await pub.json();
+    assert.equal(card.handle, "wa");
+    assert.equal(card.agent.wins + card.agent.losses >= 1, true);
+    const raw = JSON.stringify(card);
+    assert.ok(!raw.includes("token") && !raw.includes("lease") && !raw.includes("wallet"));
+    const rep = await call("POST", "/v1/leaders/wa/report", { reason: "d1 spam" }, sb.json.token);
+    assert.equal(rep.status, 200);
+    assert.equal(rep.json.received, true);
+    const ghost = await entry.fetch(new Request("http://local/v1/leaders/ghost/public"), wenv);
+    assert.equal(ghost.status, 404);
   });
 
   it("refuses a second open ticket in the same mode", async () => {

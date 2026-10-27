@@ -358,6 +358,19 @@ $("retry-btn").addEventListener("click", async () => {
   await refresh();
 });
 
+$("share-btn").addEventListener("click", async () => {
+  const handle = localStorage.getItem(HANDLE_KEY) || "";
+  if (!handle) return;
+  const link = `${location.origin}/public.html?handle=${encodeURIComponent(handle)}`;
+  try {
+    await navigator.clipboard.writeText(link);
+    show($("share-msg"), true);
+  } catch {
+    $("share-msg").textContent = `Copy failed — the link is ${link}`;
+    show($("share-msg"), true);
+  }
+});
+
 $("compile-btn").addEventListener("click", async () => {
   const prompt = $("prompt").value.trim();
   if (!prompt) {

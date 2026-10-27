@@ -89,6 +89,12 @@ export function openStore(path: string): Store {
       closed_at INTEGER NOT NULL,
       archive_json TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS reports (
+      id TEXT PRIMARY KEY,
+      handle TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS wallet_txns (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       wallet_id TEXT NOT NULL,

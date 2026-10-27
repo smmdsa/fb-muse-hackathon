@@ -78,12 +78,13 @@ Deferred with reasons:
 
 - T005 live Spark plus T006 live portraits: blocked on the user moving both Meta secrets to worker `fb-muse-hackathon` and redeploying.
 - T019 arena polish, T025 screenshots, T017 Playwright trace: no screenshot or browser tool in this shell. Needs user eyes or a capable session.
-- T020 evolution lab, T021 armory shop, T022 admin auth, T023 defense audit, T024 observability, T026 seasons rotation, T027 public profiles, T028 skins, T029 Swiss: need R2, cron triggers, admin auth, or live traffic. None started.
+- T020 evolution lab, T022 admin auth, T029 Swiss: need admin auth or live traffic. None started.
+- T021 armory shop, T023 defense audit, T024 observability, T026 seasons rotation, T027 public profiles, T028 skins: done this session (slices 42cf9aa back through the armory commit). API 70/70, `pnpm e2e:path` green.
 - T030 paid RP: blocked by policy. Never build without explicit user approval plus payments review.
 
 User checklist before the next session:
 
 - Move `META_SPARK_KEY` plus `META_IMAGE_KEY` to worker `fb-muse-hackathon`, then re-probe compile and breeding.
-- Apply D1 migrations 0004 to 0007 on the production database, then deploy.
+- Apply D1 migrations 0004 to 0010 on the production database, then deploy.
 - Run `pnpm e2e:path` against the local API, plus the 16 hand checks in `docs/manual-test-profile.md`.
 - Push `feat/agent-wars-s1` when ready.
