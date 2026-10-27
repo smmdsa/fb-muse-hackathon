@@ -1,0 +1,10 @@
+# Paste this instruction into Muse Code
+You are continuing AGENT WARS inside the EXISTING repository, not starting a new project.
+
+FIRST read the provided `00_START/README.md`, `01_PRODUCT/PRODUCT_RULES.md`, `02_DESIGN/AAA_ESPORTS_UI_HANDOFF.md`, both `03_FLOWS` documents, `04_ENGINEERING/ARCHITECTURE_AND_GUARDS.md`, `05_BACKLOG/tasks.json`, `06_QA/PLAYWRIGHT_PLAN.md` and current repo GDD/status/roadmap. Compare the deployed site against latest HEAD and identify implemented vs UI-only vs missing. Preserve all functioning code, tests, migrations and assets. Do not fabricate Playwright pass evidence. Do not assume live Meta keys.
+
+Project north star: a cohesive AAA esports platform: a new Leader can BREED a visually consistent, full-body stylized combat robot influenced by a short cosmetic birth prompt, COMPILE a tactical chip using Muse, review rules, explicitly INSTALL the chip in the one active Agent, select mode, automatically MATCHMAKE with eligible human-created agents including offline policies, WATCH verifiable combat replay, earn/loss AP and AC, and return after AutoBattle to review outcomes + explicitly reactivate. One agent per Leader in the hackathon MVP.
+
+Work in the task order in `05_BACKLOG/ROADMAP_EXECUTION.md`, verify dependencies and mark existing implementation done only when proven. Work one vertical slice at a time; update task metadata with evidence, commit/PR and tests; ensure accessibility, desktop/mobile polish, error/empty states. Unit + integration + Playwright UI screenshot tests for each slice. Server-authoritative battle and atomic idempotent AP/currency. Never enable real purchases or paid tournament entry. Preserve mock/live disclosure.
+
+Begin with **T001**, and return (1) audited current state, (2) scoped implementation, (3) commands and observed results, (4) Playwright screenshots/traces, (5) changed files and commit, (6) next unblocked task. Continue task by task until sprint goals are complete, respecting the local user's approval flow for commits/deploys if necessary.
