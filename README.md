@@ -27,7 +27,7 @@ Start it: `pnpm --filter @agent-wars/api dev`. It serves `http://127.0.0.1:8787`
 
 Live at https://agent-wars-api.smmdsa.workers.dev (health, leaderboard, and replay reads run on D1).
 
-Deploy it to Cloudflare (needs your account and one D1 id):
+Deploy it to Cloudflare (needs your account and one D1 id). Set Build command to `pnpm install --ignore-scripts` so workspace links exist before the bundle step:
 
 - `wrangler d1 create agent-wars` gives the database id. Set it in `wrangler.toml`.
 - `wrangler d1 migrations apply DB --local` applies `migrations/0001_schema.sql`.

@@ -47,6 +47,17 @@ async function leaderboard(env: WorkerEnv, seasonId: string): Promise<Response> 
   return json({ seasonId, rows });
 }
 
+// The reference brain for training-grade fights. Same values as the API server.
+const BENCH_POLICY: AgentPolicy = {
+  schemaVersion: 1,
+  agentVersionId: "benchmark-v1",
+  dna: { aggression: 55, evasion: 55, preferredDistance: 45, energyConservation: 50 },
+  rules: [
+    { id: "b-close", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true },
+    { id: "b-far", when: { operand: "distFoe", op: "gte", value: 8 }, move: "APPROACH" },
+  ],
+};
+
 // Replay re-simulates a stored match and compares checksums.
 async function replay(env: WorkerEnv, id: string): Promise<Response> {
   const match = await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(id).first<Record<string, unknown>>();
@@ -59,7 +70,6 @@ async function replay(env: WorkerEnv, id: string): Promise<Response> {
   if (!a || (match.b_version !== "benchmark-v1" && !b)) {
     return json({ error: "replay unavailable: a version is gone" }, 410);
   }
-  const { BENCH_POLICY } = await import("./flow.ts");
   const pa = JSON.parse(a.policy_json as string) as AgentPolicy;
   const pb = b ? (JSON.parse(b.policy_json as string) as AgentPolicy) : BENCH_POLICY;
   const cfg = { ...DEFAULT_BATTLE, seed: match.seed as string };
