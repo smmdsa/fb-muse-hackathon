@@ -31,7 +31,8 @@ function show(el, on) {
 
 async function refresh() {
   if (!token) {
-    $("cup-status").textContent = "Sign in on the profile page, then register.";
+    $("cup-status").textContent = "Sign in in the barracks, then register.";
+    show($("cup-empty"), true);
     return;
   }
   const r = await call("GET", `/v1/tournaments/${CUP_ID}`);
@@ -48,6 +49,7 @@ async function refresh() {
   } else {
     $("cup-status").textContent = `${cup.phase} — ${seats}.`;
   }
+  show($("cup-empty"), cup.entries.length === 0);
   renderBracket(cup);
   renderGames(cup);
 }
@@ -101,13 +103,13 @@ function renderGames(cup) {
 
 $("cup-register").addEventListener("click", async () => {
   if (!token) {
-    $("cup-status").textContent = "Sign in on the profile page first.";
+    $("cup-status").textContent = "Sign in in the barracks first.";
     return;
   }
   const me = await call("GET", "/v1/me");
   const version = me.data && me.data.agent && me.data.agent.active_version_id;
   if (!version) {
-    $("cup-status").textContent = "Install a version on the profile page first.";
+    $("cup-status").textContent = "Install a version in the barracks first.";
     return;
   }
   $("cup-status").textContent = "Registering…";
@@ -124,88 +126,4 @@ $("cup-register").addEventListener("click", async () => {
 
 $("pill-who").textContent = token ? (localStorage.getItem(HANDLE_KEY) || "signed in") : "signed out";
 
-// Organizer console. The key stays in session memory: a closed tab forgets it.
-const NEXT = {
-  DRAFT: "ANNOUNCED",
-  ANNOUNCED: "REGISTRATION_OPEN",
-  REGISTRATION_OPEN: "LOCKED",
-  LOCKED: "LIVE",
-  SEEDED: "LIVE",
-  LIVE: "COMPLETED",
-  COMPLETED: null,
-  CANCELLED: null,
-};
-
-function adminKey() {
-  return ($("admin-key") && $("admin-key").value) || sessionStorage.getItem("aw_admin") || "";
-}
-
-async function adminCall(path, body) {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-admin-key": adminKey() },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  return { status: res.status, data };
-}
-
-async function renderEvents() {
-  const box = $("events");
-  box.textContent = "";
-  const r = await call("GET", "/v1/tournaments");
-  if (r.status !== 200) {
-    $("admin-msg").textContent = "Sign in on the profile page to list events.";
-    return;
-  }
-  for (const t of r.data.tournaments || []) {
-    const p = document.createElement("p");
-    p.className = "sub";
-    p.textContent = `${t.name} (${t.id}) — ${t.phase}, ${t.entries}/${t.maxPlayers} seats `;
-    const next = NEXT[t.phase];
-    if (next && adminKey()) {
-      const btn = document.createElement("button");
-      btn.className = "btn-ghost";
-      btn.type = "button";
-      btn.textContent = `Advance to ${next}`;
-      btn.addEventListener("click", async () => {
-        const out = await adminCall(`/v1/admin/events/${t.id}/transition`, { to: next });
-        $("admin-msg").textContent = out.status === 200
-          ? `${t.id} is now ${next}.`
-          : `Advance failed: ${out.data.error || out.status}.`;
-        await renderEvents();
-        await refresh();
-      });
-      p.appendChild(btn);
-    }
-    box.appendChild(p);
-  }
-}
-
-$("admin-key").value = sessionStorage.getItem("aw_admin") || "";
-$("admin-key").addEventListener("change", () => {
-  sessionStorage.setItem("aw_admin", $("admin-key").value);
-  renderEvents();
-});
-
-$("ev-create").addEventListener("click", async () => {
-  if (!adminKey()) {
-    $("admin-msg").textContent = "Paste the admin key first.";
-    return;
-  }
-  const size = Math.min(64, Math.max(2, parseInt($("ev-size").value, 10) || 8));
-  const out = await adminCall("/v1/admin/events", {
-    id: $("ev-id").value.trim(),
-    name: $("ev-name").value.trim(),
-    maxPlayers: size,
-    minAp: 0,
-    registrationCloseAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  });
-  $("admin-msg").textContent = out.status === 201
-    ? `Draft ${out.data.id} created. Advance it to open registration.`
-    : `Create failed: ${out.data.error || out.status}.`;
-  await renderEvents();
-});
-
 refresh();
-renderEvents();

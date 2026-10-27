@@ -13,6 +13,8 @@ let qmMode = "casual";
 let qmToken = localStorage.getItem("aw_token") || "";
 let qmVersion = "";
 let qmTimer = 0;
+let qmClock = 0;
+let qmClockTimer = 0;
 
 function qmSay(text) {
   qmStatus.textContent = text;
@@ -34,14 +36,47 @@ async function qmCall(method, path, body) {
   return { status: res.status, data };
 }
 
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function tierProgress(ap, tier) {
+  const bands = { PROTOTYPE: [0, 299], CIRCUIT: [300, 599], CORE: [600, 899], ASCENDANT: [900, 1199], SINGULARITY: [1200, 2000] };
+  const b = bands[String(tier || "PROTOTYPE").toUpperCase()] || bands.PROTOTYPE;
+  const pct = Math.min(100, Math.max(0, ((ap - b[0]) / Math.max(1, b[1] - b[0])) * 100));
+  return { pct, label: `${b[0]}–${b[1]} AP` };
+}
+
+function markSteps(hasAgent, hasChip) {
+  const a = document.getElementById("step-agent");
+  const c = document.getElementById("step-chip");
+  const r = document.getElementById("step-arena");
+  if (!a || !c || !r) return;
+  a.className = "step" + (hasAgent ? " done" : " next");
+  c.className = "step" + (!hasAgent ? "" : hasChip ? " done" : " next");
+  r.className = "step" + (hasAgent && hasChip ? " next" : "");
+}
+
+function primaryCta(hasAgent, hasChip) {
+  const cta = document.getElementById("cta-primary");
+  if (!cta) return;
+  if (!hasAgent) {
+    cta.textContent = "Create my agent";
+    cta.href = "./profile.html";
+  } else if (!hasChip) {
+    cta.textContent = "Program my chip";
+    cta.href = "./profile.html#train-card";
+  } else {
+    cta.textContent = "Play";
+    cta.href = "#quick-card";
+  }
+}
+
 function lobbySay(name, rank, energy) {
-  const set = (id, text) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = text;
-  };
-  set("lobby-name", name);
-  set("lobby-rank", rank);
-  set("lobby-energy", energy);
+  setText("lobby-name", name);
+  setText("lobby-rank", rank);
+  setText("lobby-energy", energy);
 }
 
 async function qmBoot() {
@@ -49,34 +84,85 @@ async function qmBoot() {
   if (who) who.textContent = qmToken ? (localStorage.getItem("aw_handle") || "signed in") : "signed out";
   if (!qmToken) {
     qmEnergy.textContent = "energy —";
-    lobbySay("No hero yet", "Sign in and breed on the profile page.", "energy —");
+    lobbySay("No agent yet", "Breed an agent to enter the league.", "energy —");
+    setText("lobby-chip", "No chip yet");
+    setText("lobby-chip-detail", "Sign in in the barracks. Then compile a chip.");
+    setText("lobby-ap", "— AP");
+    setText("rank-line", "Sign in to see your climb.");
+    markSteps(false, false);
+    primaryCta(false, false);
     return;
   }
   const me = await qmCall("GET", "/v1/me");
   if (me.status !== 200) return;
   qmVersion = (me.data.agent && me.data.agent.active_version_id) || "";
+  const hasAgent = Boolean(me.data.agent);
+  const hasChip = Boolean(qmVersion);
   qmEnergy.textContent = `energy ${me.data.energy.energy}/${me.data.energy.energyMax}`;
   const autoLine = me.data.auto && me.data.auto.optIn
-    ? `AutoBattle on — ${me.data.auto.state}, ${me.data.auto.ran} fought on this visit.`
-    : "AutoBattle off — start it on the profile page.";
-  if (!me.data.agent) {
-    lobbySay("No hero yet", "Breed one on the profile page, then queue.", `energy ${me.data.energy.energy}/${me.data.energy.energyMax}`);
+    ? `AutoBattle on — ${me.data.auto.state}.`
+    : "AutoBattle off — start it in the barracks.";
+  if (!hasAgent) {
+    lobbySay("No agent yet", "Breed one in the barracks, then queue.", `energy ${me.data.energy.energy}/${me.data.energy.energyMax}`);
     const autoEl = document.getElementById("lobby-auto");
     if (autoEl) autoEl.textContent = autoLine;
+    markSteps(false, false);
+    primaryCta(false, false);
     return;
   }
   const img = document.getElementById("lobby-img");
   if (img && me.data.agent.portrait_url) {
     img.src = me.data.agent.portrait_url;
     img.hidden = false;
+    img.classList.remove("empty");
+  }
+  const scoreImg = document.getElementById("score-a-img");
+  if (scoreImg && me.data.agent.portrait_url) {
+    scoreImg.src = me.data.agent.portrait_url;
+    scoreImg.hidden = false;
   }
   lobbySay(
     me.data.agent.name || "Unnamed hero",
-    `${me.data.leader.ap} AP — breed, train, and climb.`,
+    `${me.data.leader.ap} AP — ${me.data.leader.tier || "PROTOTYPE"}.`,
     `energy ${me.data.energy.energy}/${me.data.energy.energyMax} — one per fight.`,
   );
+  setText("score-a-name", (me.data.agent.name || "YOU").toUpperCase().slice(0, 12));
+  setText("lobby-chip", hasChip ? `Chip v${String(qmVersion).slice(0, 8)}` : "No chip yet");
+  setText("lobby-chip-detail", hasChip ? "Active version fights. Change it in the barracks." : "Compile and install a chip in the barracks.");
+  setText("lobby-ap", `${me.data.leader.ap} AP`);
+  setText("lobby-tier", `${me.data.leader.tier || "PROTOTYPE"}${me.data.leader.division ? " " + me.data.leader.division : ""}`);
+  setText("rank-line", `${me.data.leader.ap} AP — ${me.data.leader.tier || "PROTOTYPE"}`);
+  const prog = tierProgress(me.data.leader.ap, me.data.leader.tier);
+  const bar = document.getElementById("lobby-progress");
+  if (bar) bar.style.width = `${prog.pct}%`;
+  setText("lobby-next", `${prog.label}. Win fights to climb.`);
+  setText("rank-range", prog.label);
+  const shield = document.getElementById("lobby-shield");
+  if (shield) shield.src = `./assets/shields/${String(me.data.leader.tier || "prototype").toLowerCase()}.png`;
+  const rankShield = document.getElementById("rank-shield");
+  if (rankShield) rankShield.src = `./assets/shields/${String(me.data.leader.tier || "prototype").toLowerCase()}.png`;
+  setText("qm-pick", hasChip ? `Agent ${me.data.agent.name || "ready"} with chip v${String(qmVersion).slice(0, 8)} enters ${qmMode}.` : "Install a chip in the barracks first.");
+  markSteps(true, hasChip);
+  primaryCta(true, hasChip);
   const autoEl = document.getElementById("lobby-auto");
   if (autoEl) autoEl.textContent = autoLine;
+}
+
+function qmClockStart() {
+  qmClockStop();
+  qmClock = 0;
+  const el = document.getElementById("qm-clock");
+  if (el) el.hidden = false;
+  qmClockTimer = setInterval(() => {
+    qmClock += 1;
+    if (el) el.textContent = `${qmClock}s`;
+  }, 1000);
+}
+
+function qmClockStop() {
+  clearInterval(qmClockTimer);
+  const el = document.getElementById("qm-clock");
+  if (el) el.hidden = true;
 }
 
 async function qmPoll(ticketId, left) {
@@ -85,23 +171,26 @@ async function qmPoll(ticketId, left) {
     qmFind.disabled = false;
     if (qmCancel) qmCancel.hidden = true;
     qmTicket = "";
+    qmClockStop();
     return;
   }
   const r = await qmCall("GET", `/v1/matchmaking/${ticketId}`);
   if (r.status !== 200) {
     qmSay("Ticket lost. Queue again.");
     qmFind.disabled = false;
+    qmClockStop();
     return;
   }
   if (r.data.status === "settled" && r.data.match) {
     const m = r.data.match;
     const foe = String(m.b_version).startsWith("bot:") ? `sparring ${m.b_version}` : "a ranked foe";
     qmResult.hidden = false;
-    qmResult.textContent = `${m.winner} wins in ${m.ticks} ticks vs ${foe}. ${m.rated ? "Rated." : "Unrated."} Details on the profile dashboard.`;
+    qmResult.textContent = `${m.winner} wins in ${m.ticks} ticks vs ${foe}. ${m.rated ? "Rated." : "Unrated."} Details on the dashboard.`;
     qmSay("Fight settled — loading the server replay.");
     qmFind.disabled = false;
     if (qmCancel) qmCancel.hidden = true;
     qmTicket = "";
+    qmClockStop();
     qmBoot();
     playSettled(m);
     return;
@@ -111,39 +200,42 @@ async function qmPoll(ticketId, left) {
     qmFind.disabled = false;
     if (qmCancel) qmCancel.hidden = true;
     qmTicket = "";
+    qmClockStop();
     qmBoot();
     return;
   }
   if (qmMode === "casual" && r.data.settle_at) {
     const secs = Math.max(0, Math.ceil((r.data.settle_at - Date.now()) / 1000));
-    qmSay(`Waiting for a same-ELO foe… sparring bot in ${secs}s.`);
+    qmSay(`Waiting for a same-ELO foe… sparring bot in ${secs}s. Cancel keeps your energy.`);
   } else {
-    qmSay("Waiting for a same-ELO human…");
+    qmSay("Waiting for a same-ELO human… Cancel keeps your energy.");
   }
   qmTimer = setTimeout(() => qmPoll(ticketId, left - 1), 5000);
 }
 
-qmCasual.addEventListener("click", () => qmPick("casual"));
-qmRanked.addEventListener("click", () => qmPick("ranked"));
+qmCasual.addEventListener("click", () => { qmPick("casual"); qmBoot(); });
+qmRanked.addEventListener("click", () => { qmPick("ranked"); qmBoot(); });
 
 qmFind.addEventListener("click", async () => {
   clearTimeout(qmTimer);
   qmResult.hidden = true;
   if (!qmToken) {
-    qmSay("Sign in on the profile page first.");
+    qmSay("Sign in in the barracks first.");
     return;
   }
   await qmBoot();
   if (!qmVersion) {
-    qmSay("Breed a hero and compile a version on the profile page first.");
+    qmSay("Breed an agent and install a chip in the barracks first.");
     return;
   }
   qmFind.disabled = true;
   qmSay("Queueing… one energy.");
+  qmClockStart();
   const r = await qmCall("POST", "/v1/matchmaking/request", { versionId: qmVersion, mode: qmMode });
   if (r.status !== 201) {
     qmSay(`Queue refused: ${r.data.error || r.status}.`);
     qmFind.disabled = false;
+    qmClockStop();
     return;
   }
   if (r.data.status === "settled" && r.data.match) {
@@ -152,6 +244,7 @@ qmFind.addEventListener("click", async () => {
     qmResult.textContent = `${m.winner} wins in ${m.ticks} ticks. ${m.rated ? "Rated." : "Unrated sparring."}`;
     qmSay("Matched at once — loading the server replay.");
     qmFind.disabled = false;
+    qmClockStop();
     qmBoot();
     playSettled(m);
     return;
@@ -199,6 +292,7 @@ if (qmCancel) {
     qmTicket = "";
     qmCancel.hidden = true;
     qmFind.disabled = false;
+    qmClockStop();
     if (r.status === 200) {
       qmSay("Ticket canceled — the charge is refunded. Queue again when ready.");
       qmBoot();

@@ -88,8 +88,21 @@ async function refresh() {
   $("hero-energy").textContent = d.energy.energy >= d.energy.energyMax
     ? `energy ${d.energy.energy}/${d.energy.energyMax} — full`
     : `energy ${d.energy.energy}/${d.energy.energyMax} — +1 in ${mins || 1} min`;
+  markWelcome(Boolean(d.agent), (d.versions || []).length > 0, Boolean(d.agent && d.agent.activeVersionId));
   await renderDash(d);
   await renderSeasons();
+}
+
+function markWelcome(hasAgent, hasDraft, hasActive) {
+  const set = (id, cls) => {
+    const el = $(id);
+    if (el) el.className = `step ${cls}`;
+  };
+  set("w-agent", hasAgent ? "done" : "next");
+  set("w-chip", !hasAgent ? "" : hasActive || hasDraft ? "done" : "next");
+  set("w-arena", hasAgent && hasActive ? "done" : "");
+  const next = $("hero-next");
+  if (next) show(next, hasAgent && !hasActive);
 }
 
 async function renderSeasons() {

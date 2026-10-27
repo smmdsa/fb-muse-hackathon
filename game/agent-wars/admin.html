@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Wars — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+<main class="shell">
+<header class="top">
+<div>
+<p class="sub">Restricted area</p>
+<h1>Organizer console</h1>
+<p class="sub">Drafts, locks, and live events.</p>
+</div>
+<div class="pills">
+<a class="pill link" href="./index.html">command</a>
+<a class="pill link" href="./tournaments.html">cup</a>
+</div>
+</header>
+<section class="panel" id="admin-card">
+<h2>Organizer</h2>
+<div class="admin-note">
+<p class="sub">The admin key stays in this tab only. It never touches disk. Server checks the key on every write.</p>
+</div>
+<div class="row">
+<label for="admin-key">Admin key</label>
+<input id="admin-key" name="admin-key" value="" maxlength="200" placeholder="paste ADMIN_KEY" autocomplete="off" />
+</div>
+<div class="row">
+<label for="ev-id">ID</label>
+<input id="ev-id" name="ev-id" value="" maxlength="40" placeholder="winter-cup" />
+<label for="ev-name">Name</label>
+<input id="ev-name" name="ev-name" value="" maxlength="80" placeholder="Winter Cup" />
+<label for="ev-size">Seats</label>
+<input id="ev-size" name="ev-size" value="8" maxlength="2" inputmode="numeric" />
+<button id="ev-create" class="btn-primary" type="button">Create draft</button>
+</div>
+<p class="sub" id="admin-msg"></p>
+<div id="events"></div>
+</section>
+</main>
+<script src="./admin.js"></script>
+</body>
+</html>

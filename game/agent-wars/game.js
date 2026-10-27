@@ -482,29 +482,67 @@ function drawSparks(sx, sy) {
 }
 
 function unit(me, color, sx, sy) {
-  if (!me.alive) return;
+  if (!me.alive) {
+    ctx.strokeStyle = "#3a4568";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(me.x * sx - 8, me.y * sy - 8);
+    ctx.lineTo(me.x * sx + 8, me.y * sy + 8);
+    ctx.moveTo(me.x * sx + 8, me.y * sy - 8);
+    ctx.lineTo(me.x * sx - 8, me.y * sy + 8);
+    ctx.stroke();
+    return;
+  }
+  const px = me.x * sx;
+  const py = me.y * sy;
+  const ang = Math.atan2(me.ay || 0, me.ax || 1);
   ctx.fillStyle = "#05070f";
   ctx.beginPath();
-  ctx.ellipse(me.x * sx, me.y * sy + 12, 12, 5, 0, 0, Math.PI * 2);
+  ctx.ellipse(px, py + 12, 13, 5, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = color;
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(ang);
+  ctx.fillStyle = "#141b33";
   ctx.strokeStyle = "#05070f";
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(me.x * sx, me.y * sy, RADIUS * sx, 0, Math.PI * 2);
+  ctx.roundRect(-13, -10, 26, 20, 4);
   ctx.fill();
   ctx.stroke();
-  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.moveTo(me.x * sx, me.y * sy);
-  ctx.lineTo((me.x + me.ax) * sx, (me.y + me.ay) * sy);
-  ctx.stroke();
+  ctx.roundRect(-13, -10, 26, 7, 3);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(4, -3, 7, 6);
+  ctx.fillStyle = "#05070f";
+  ctx.fillRect(-14, -3, 5, 6);
+  ctx.fillRect(11, -12, 4, 5);
+  ctx.fillRect(11, 7, 4, 5);
+  ctx.restore();
+  const low = me.hp / MAX_HP < 0.3;
+  if (low) {
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.arc(px, py, RADIUS * sx + 3, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
   if (time <= me.shieldUntil) {
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(me.x * sx, me.y * sy, RADIUS * sx + 6, 0, Math.PI * 2);
+    ctx.arc(px, py, RADIUS * sx + 7, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath();
+    ctx.arc(px, py, RADIUS * sx + 10, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
   }
 }
 
@@ -514,6 +552,10 @@ function sync() {
   hpB.style.width = (agents.B.hp / MAX_HP) * 100 + "%";
   enA.style.width = (agents.A.en / MAX_EN) * 100 + "%";
   enB.style.width = (agents.B.en / MAX_EN) * 100 + "%";
+  const clock = document.getElementById("arena-clock");
+  if (clock) clock.textContent = String(Math.max(0, Math.ceil(90 - time)));
+  const compact = document.getElementById("diag-compact");
+  if (compact) compact.textContent = "local sim · " + tick + " ticks";
 }
 
 // The HP bar flashes white on a hit. The class clears after 120 ms.
@@ -526,8 +568,13 @@ function flash(side) {
 // The end screen sits over the scene with the result and the stats.
 function showEnd() {
   const name = winner === "A" ? "Cyan" : winner === "B" ? "Crimson" : null;
-  endTitle.textContent = name ? name + " wins" : "Draw";
-  endStats.textContent = tick + " ticks · seed " + (seedInput.value.trim() || "forge-001");
+  const lead = winner === "DRAW" ? "Draw" : name ? name + " wins" : "Draw";
+  endTitle.textContent = lead;
+  const aHp = agents && agents.A ? Math.max(0, Math.round(agents.A.hp)) : 0;
+  const bHp = agents && agents.B ? Math.max(0, Math.round(agents.B.hp)) : 0;
+  endStats.textContent = `${tick} ticks · Cyan ${aHp} HP — Crimson ${bHp} HP`;
+  const econ = document.getElementById("end-econ");
+  if (econ) econ.textContent = "Sandbox sparring — no rank change.";
   pillWinner.textContent = "winner: " + (winner || "DRAW");
   pillState.textContent = "done";
   endcard.hidden = false;
@@ -659,7 +706,9 @@ function finishReplay() {
   winner = m.winner || null;
   const ok = m.checksumOk ? "checksum verified" : "checksum MISMATCH";
   endTitle.textContent = winner === "A" ? "Cyan wins" : winner === "B" ? "Crimson wins" : "Draw";
-  endStats.textContent = (m.ticks ?? tick) + " ticks · " + ok + (m.econ ? " · " + m.econ : "");
+  endStats.textContent = (m.ticks ?? tick) + " ticks · " + ok;
+  const econ = document.getElementById("end-econ");
+  if (econ) econ.textContent = m.econ ? String(m.econ) : "";
   pillWinner.textContent = "winner: " + (winner || "DRAW");
   pillState.textContent = "done";
   endcard.hidden = false;
