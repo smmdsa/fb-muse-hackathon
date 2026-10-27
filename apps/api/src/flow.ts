@@ -106,8 +106,8 @@ export function runRanked(
   paidA = creditAc(store, aAgent.leader_id as string, input.key, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
   paidB = creditAc(store, bAgent.leader_id as string, input.key, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
   store.db.prepare(
-    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
-  ).run(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
+    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+  ).run(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, paidA, paidB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
   };
   try {
     transact(store, settle);
@@ -334,6 +334,32 @@ export function spendEnergy(store: Store, leaderId: string, now = Date.now()): {
 
 // The dashboard shows one hero: portrait, ELO, every version with its chips,
 // and each chip with its trigger totals across all fights of that version.
+// Recent fights for one hero, newest first. Replay links included.
+export function fightHistory(store: Store, versionIds: string[]): Record<string, unknown>[] {
+  if (!versionIds.length) return [];
+  const marks = versionIds.map(() => "?").join(",");
+  const rows = store.db.prepare(
+    `SELECT * FROM matches WHERE a_version IN (${marks}) OR b_version IN (${marks}) ORDER BY created_at DESC LIMIT 20`,
+  ).all(...versionIds, ...versionIds) as Record<string, unknown>[];
+  const owned = new Set(versionIds);
+  return rows.map((m) => {
+    const mine = owned.has(m.a_version as string) ? "a" : "b";
+    return {
+      matchId: m.id,
+      seed: m.seed,
+      winner: m.winner,
+      ticks: m.ticks,
+      checksum: m.checksum,
+      rated: m.rated,
+      myDelta: mine === "a" ? m.delta_a : m.delta_b,
+      myPaid: mine === "a" ? m.paid_a : m.paid_b,
+      foe: mine === "a" ? m.b_version : m.a_version,
+      at: m.created_at,
+      replay: `/v1/matches/${m.id}/replay`,
+    };
+  });
+}
+
 export function dashboard(store: Store, agentId: string, leaderId: string): Record<string, unknown> {
   const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as Record<string, unknown> | null;
   if (!agent || agent.leader_id !== leaderId) throw new Error("agent not found for this leader");
@@ -377,6 +403,7 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
     leader: { handle: leader.handle, ap: leader.ap, ac: leader.ac, tier: rank.tier, division: rank.division },
     energy: energyView(energyFor(store, leaderId)),
     versions,
+    history: fightHistory(store, versionRows.map((v) => v.id as string)),
   };
 }
 
@@ -438,10 +465,10 @@ export function runCasual(
   // One write block: the match row and the wallet credit land together.
   let paid = 0;
   transact(store, () => {
-    store.db.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)"
-    ).run(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
     paid = creditAc(store, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
+    store.db.prepare(
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?)"
+    ).run(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, paid, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
   });
   return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !!bot, paid };
 }

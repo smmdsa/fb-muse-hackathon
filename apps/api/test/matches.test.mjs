@@ -99,6 +99,21 @@ describe("matches", () => {
     assert.equal(me.json.energy.energy, 9);
   });
 
+  it("stores payouts and lists recent fights with replay links", async () => {
+    const row = store.db.prepare("SELECT paid_a, paid_b, rated FROM matches WHERE id = ?").get("rank-1");
+    assert.equal(row.rated, 1);
+    assert.ok(row.paid_a >= 0 && row.paid_b >= 0);
+    const me = await call("GET", "/v1/me", null, keys.a.token);
+    const dash = await call("GET", `/v1/agents/${me.json.agent.id}/dashboard`, null, keys.a.token);
+    assert.ok(Array.isArray(dash.json.history));
+    const first = dash.json.history.find((h) => h.matchId === "rank-1");
+    assert.ok(first);
+    assert.equal(first.rated, 1);
+    assert.equal(typeof first.myDelta, "number");
+    assert.equal(first.myPaid, row.paid_a);
+    assert.equal(typeof first.replay, "string");
+  });
+
   it("denies ranked at zero energy", async () => {
     for (let i = 2; i <= 10; i += 1) {
       const r = await call(

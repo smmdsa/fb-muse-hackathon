@@ -140,6 +140,31 @@ function renderDash(d) {
     card.appendChild(table);
   }
   show($("dash-card"), true);
+  renderHist(d);
+}
+
+function renderHist(d) {
+  const box = $("hist");
+  box.textContent = "";
+  const rows = d.history || [];
+  if (!rows.length) {
+    box.innerHTML = "<p class='sub'>No fights yet — queue from the arena.</p>";
+  }
+  for (const h of rows) {
+    const p = document.createElement("p");
+    p.className = "sub";
+    const econ = h.rated
+      ? `AP ${h.myDelta >= 0 ? "+" : ""}${h.myDelta} · ${h.myPaid} AC`
+      : `${h.myPaid} AC · unrated`;
+    const foe = String(h.foe || "").startsWith("bot:") ? `sparring ${h.foe}` : `vs ${h.foe}`;
+    p.textContent = `${h.winner} wins in ${h.ticks} ticks ${foe} — ${econ} `;
+    const a = document.createElement("a");
+    a.href = `./index.html?replay=${h.matchId}`;
+    a.textContent = "replay";
+    p.appendChild(a);
+    box.appendChild(p);
+  }
+  show($("hist-card"), true);
 }
 
 async function boot() {

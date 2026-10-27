@@ -54,6 +54,8 @@ export function openStore(path: string): Store {
       rated INTEGER NOT NULL,
       delta_a INTEGER NOT NULL DEFAULT 0,
       delta_b INTEGER NOT NULL DEFAULT 0,
+      paid_a INTEGER NOT NULL DEFAULT 0,
+      paid_b INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       chips_json TEXT
     );

@@ -239,11 +239,37 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
       avgTicks: fights.length ? Math.round(ticks / fights.length) : 0,
     });
   }
+  const owned = new Set(versionRows.map((v) => v.id as string));
+  const history: Record<string, unknown>[] = [];
+  if (owned.size) {
+    const marks = [...owned].map(() => "?").join(",");
+    const ids = [...owned];
+    const { results: fights } = await env.DB.prepare(
+      `SELECT * FROM matches WHERE a_version IN (${marks}) OR b_version IN (${marks}) ORDER BY created_at DESC LIMIT 20`,
+    ).bind(...ids, ...ids).all<Record<string, unknown>>();
+    for (const m of fights) {
+      const mine = owned.has(m.a_version as string) ? "a" : "b";
+      history.push({
+        matchId: m.id,
+        seed: m.seed,
+        winner: m.winner,
+        ticks: m.ticks,
+        checksum: m.checksum,
+        rated: m.rated,
+        myDelta: mine === "a" ? m.delta_a : m.delta_b,
+        myPaid: mine === "a" ? m.paid_a : m.paid_b,
+        foe: mine === "a" ? m.b_version : m.a_version,
+        at: m.created_at,
+        replay: `/v1/matches/${m.id}/replay`,
+      });
+    }
+  }
   return {
     agent: { id: agent.id, name: agent.name ?? null, concept: agent.concept ?? null, portraitUrl: agent.portrait_url ?? null, portraitStatus: agent.portrait_status ?? "faceless", activeVersionId: agent.active_version_id ?? null },
     leader: { handle: leader.handle, ap: leader.ap, ac: leader.ac, tier: rank.tier, division: rank.division },
     energy: energyView(await energyFor(env, leaderId)),
     versions,
+    history,
   };
 }
 
@@ -303,8 +329,8 @@ async function runCasualD1(
   const plan = await planPay(env, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
   const writes: unknown[] = [
     env.DB.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
-    ).bind(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?)",
+    ).bind(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, plan.credited, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
     ...plan.stmts,
   ];
   await env.DB.batch(writes as never[]);
@@ -379,8 +405,8 @@ async function settleRankedD1(
     ...planA.stmts,
     ...planB.stmts,
     env.DB.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
-    ).bind(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+    ).bind(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, planA.credited, planB.credited, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
   );
   try {
     await env.DB.batch(writes as never[]);

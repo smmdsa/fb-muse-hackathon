@@ -39,6 +39,7 @@ before(() => {
   db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../../../migrations/0004_cost_audit.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../../../migrations/0005_portrait_status.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0006_match_payouts.sql", import.meta.url), "utf8"));
   db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     "l1", "commander", "t1", 1020000, 520, 5, 1,
   );
@@ -99,6 +100,7 @@ describe("worker writes", () => {
     db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0004_cost_audit.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0005_portrait_status.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0006_match_payouts.sql", import.meta.url), "utf8"));
     // Reuse the shared shim: it carries batch, like the real D1 binding.
     const wenv = { DB: shim(db), ASSETS: assetsStub };
     const call = (method, path, body, token) => {
@@ -199,6 +201,12 @@ describe("worker writes", () => {
     assert.equal(dash.versions[0].chips.length > 0, true);
     const fired = dash.versions[0].chips.reduce((n, c) => n + c.triggers, 0);
     assert.ok(fired > 0 && fired <= dash.versions[0].avgTicks * dash.versions[0].fights);
+    assert.ok(Array.isArray(dash.history));
+    const wr = dash.history.find((h) => h.matchId === "wr-1");
+    assert.ok(wr);
+    assert.equal(wr.rated, 1);
+    assert.equal(typeof wr.myDelta, "number");
+    assert.equal(typeof wr.replay, "string");
   });
 
   it("refuses a second open ticket in the same mode", async () => {
@@ -208,6 +216,7 @@ describe("worker writes", () => {
     db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0004_cost_audit.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0005_portrait_status.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0006_match_payouts.sql", import.meta.url), "utf8"));
     db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l7", "solo7", "t7");
     db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a7", "l7", "v7");
     db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
@@ -261,6 +270,7 @@ describe("worker replay", () => {
     db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0004_cost_audit.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0005_portrait_status.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0006_match_payouts.sql", import.meta.url), "utf8"));
     db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
       "l9", "replay-leader", "t9", 1020000, 520, 5, 1,
     );
@@ -308,6 +318,7 @@ describe("worker replay", () => {
     db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0004_cost_audit.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0005_portrait_status.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0006_match_payouts.sql", import.meta.url), "utf8"));
     db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
       "l8", "bot-leader", "t8", 1020000, 520, 5, 1,
     );

@@ -583,3 +583,77 @@ pauseBtn.addEventListener("click", () => {
   pauseBtn.textContent = paused ? "Resume" : "Pause";
   pillState.textContent = paused ? "paused" : "live";
 });
+
+// Server replay playback. Frames come from GET /v1/matches/:id/replay.
+let replayFrames = null;
+let replayIdx = 0;
+let replayMeta = null;
+
+function faceDelta(c, p) {
+  const dx = c - p;
+  if (dx > 0.001) return 1;
+  if (dx < -0.001) return -1;
+  return 0;
+}
+
+function playServerReplay(replay, meta) {
+  clearInterval(timer);
+  replayFrames = replay.frames || [];
+  replayIdx = 0;
+  replayMeta = meta || {};
+  shots = [];
+  sparks = [];
+  over = true;
+  paused = false;
+  winner = null;
+  pillSeed.textContent = "seed " + (replay.seed || "server");
+  pillState.textContent = "replay";
+  pillWinner.textContent = "winner: —";
+  endcard.hidden = true;
+  feed.innerHTML = "";
+  note("Server replay loads: " + replayFrames.length + " frames");
+  timer = setInterval(playStep, STEP_MS);
+}
+
+function playStep() {
+  if (!replayFrames || replayIdx >= replayFrames.length) {
+    clearInterval(timer);
+    finishReplay();
+    return;
+  }
+  const f = replayFrames[replayIdx];
+  const p = replayIdx > 0 ? replayFrames[replayIdx - 1] : f;
+  replayIdx += 1;
+  let fxA = faceDelta(f.ax, p.ax);
+  let fyA = faceDelta(f.ay, p.ay);
+  if (fxA === 0 && fyA === 0) { fxA = 1; fyA = 0; }
+  let fxB = faceDelta(f.bx, p.bx);
+  let fyB = faceDelta(f.by, p.by);
+  if (fxB === 0 && fyB === 0) { fxB = -1; fyB = 0; }
+  agents = {
+    A: { side: "A", x: f.ax, y: f.ay, hp: f.ahp, en: f.aen, ax: fxA, ay: fyA, alive: f.ahp > 0 },
+    B: { side: "B", x: f.bx, y: f.by, hp: f.bhp, en: f.ben, ax: fxB, ay: fyB, alive: f.bhp > 0 },
+  };
+  if (f.ahp < p.ahp) flash("A");
+  if (f.bhp < p.bhp) flash("B");
+  tick = f.t;
+  time = f.t * TICK;
+  draw();
+  sync();
+}
+
+function finishReplay() {
+  const m = replayMeta || {};
+  winner = m.winner || null;
+  const ok = m.checksumOk ? "checksum verified" : "checksum MISMATCH";
+  endTitle.textContent = winner === "A" ? "Cyan wins" : winner === "B" ? "Crimson wins" : "Draw";
+  endStats.textContent = (m.ticks ?? tick) + " ticks · " + ok + (m.econ ? " · " + m.econ : "");
+  pillWinner.textContent = "winner: " + (winner || "DRAW");
+  pillState.textContent = "done";
+  endcard.hidden = false;
+  note("Replay ends. " + endTitle.textContent + ". " + ok + ".");
+  replayFrames = null;
+  replayMeta = null;
+}
+
+window.playServerReplay = playServerReplay;
