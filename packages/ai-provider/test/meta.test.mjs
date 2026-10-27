@@ -37,6 +37,22 @@ describe("meta provider", () => {
     assert.equal(seen[0].body.reasoning_effort, "low");
   });
 
+  it("sends the full operand, operator, and move vocabulary", async () => {
+    let system = "";
+    const fetchFn = async (url, init) => {
+      system = JSON.parse(init.body).messages.find((m) => m.role === "system").content;
+      return chatOk(POLICY_TEXT)();
+    };
+    const meta = createMetaProvider({ META_SPARK_KEY: "spark-k" }, fetchFn);
+    await meta.compileStrategy({ prompt: "rush", agentVersionId: "v9" });
+    for (const token of ["ownHpPct", "distFoe", "projectileTti", "coverDist", "lineOfSight", "dashReady", "shieldReady", "foeLastSeenAge", "objectiveDist", "timeLeft", "edgeDist", "energy"]) {
+      assert.ok(system.includes(token), `system names operand ${token}`);
+    }
+    for (const token of ["gt, gte, lt, lte, eq", "APPROACH", "RETREAT", "STRAFE", "KITE", "CAPTURE", "SEEK_COVER", "rejects the whole draft"]) {
+      assert.ok(system.includes(token), `system names ${token}`);
+    }
+  });
+
   it("refuses a keyless compile without calling the network", async () => {
     let called = 0;
     const meta = createMetaProvider({}, async () => { called += 1; return chatOk(POLICY_TEXT)(); });
