@@ -23,3 +23,15 @@ export type AiProvider = {
   name: ProviderName;
   compileStrategy: (req: CompileRequest) => Promise<CompileResult>;
 };
+
+export type PortraitRequest = {
+  prompt: string;
+  size?: string;
+};
+
+export type PortraitResult = {
+  provider: ProviderName;
+  url: string;
+  model: string;
+  latencyMs: number;
+};
