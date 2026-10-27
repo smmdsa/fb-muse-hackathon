@@ -793,6 +793,7 @@ export default {
       const concept = typeof created.concept === "string" ? created.concept.slice(0, 280) : "";
       let portraitUrl: string | null = null;
       let portraitStatus = "faceless";
+      let breedError: string | null = "portraits need META_IMAGE_KEY; set the secret first";
       if (hasKey("portrait", env)) {
         try {
           const art = await portraitFromEnv(env).generatePortrait({
@@ -800,16 +801,18 @@ export default {
           });
           portraitUrl = art.url;
           portraitStatus = "ready";
-        } catch {
+          breedError = null;
+        } catch (err) {
           portraitUrl = null;
           portraitStatus = "failed";
+          breedError = err instanceof Error ? err.message : "unknown image error";
         }
       }
       const id = mintId("agent");
       await env.DB.prepare(
         "INSERT INTO agents (id, leader_id, active_version_id, name, concept, portrait_url, portrait_status) VALUES (?, ?, NULL, ?, ?, ?, ?)",
       ).bind(id, me.id as string, name || null, concept || null, portraitUrl, portraitStatus).run();
-      return json({ agentId: id, portraitUrl, portraitStatus }, 201);
+      return json({ agentId: id, portraitUrl, portraitStatus, error: breedError }, 201);
       } catch (err) {
         return json({ error: `server error: ${(err as Error).message}` }, 500);
       }
@@ -821,24 +824,27 @@ export default {
       const target = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
       if (!target || target.leader_id !== me.id) return json({ error: "agent not found for this leader" }, 404);
       if (target.portrait_status === "ready" && target.portrait_url) {
-        return json({ portraitUrl: target.portrait_url, portraitStatus: "ready", retried: false }, 200);
+        return json({ portraitUrl: target.portrait_url, portraitStatus: "ready", retried: false, error: null }, 200);
       }
       let portraitUrl: string | null = null;
       let portraitStatus = "faceless";
+      let retryError: string | null = "portraits need META_IMAGE_KEY; set the secret first";
       if (hasKey("portrait", env)) {
         try {
           const art = await portraitFromEnv(env).generatePortrait({
             prompt: portraitPromptFor(`${(target.name as string) || "arena robot"}: ${(target.concept as string) || "arena fighter"}`),
           });
           portraitUrl = art.url;
+          retryError = null;
           portraitStatus = "ready";
-        } catch {
+        } catch (err) {
           portraitUrl = null;
           portraitStatus = "failed";
+          retryError = err instanceof Error ? err.message : "unknown image error";
         }
       }
       await env.DB.prepare("UPDATE agents SET portrait_url = ?, portrait_status = ? WHERE id = ?").bind(portraitUrl, portraitStatus, agentId).run();
-      return json({ portraitUrl, portraitStatus, retried: true }, 200);
+      return json({ portraitUrl, portraitStatus, retried: true, error: retryError }, 200);
       } catch (err) {
         return json({ error: `server error: ${(err as Error).message}` }, 500);
       }

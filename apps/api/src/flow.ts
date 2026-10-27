@@ -212,12 +212,14 @@ export async function createAgent(
   store: Store,
   env: FlowEnv,
   input: { leaderId: string; name: string; concept: string },
-): Promise<{ agentId: string; portraitUrl: string | null; portraitStatus: string }> {
+): Promise<{ agentId: string; portraitUrl: string | null; portraitStatus: string; error: string | null }> {
   const id = mintId("agent");
   // The hero always records how breeding ended: ready, failed, or faceless.
   // Faceless means no key existed; failed means the image call dropped.
+  // The reason travels with the reply so a failed paint can be diagnosed.
   let portraitUrl: string | null = null;
   let portraitStatus = "faceless";
+  let error: string | null = "portraits need META_IMAGE_KEY; set the secret first";
   if (hasKey("portrait", env)) {
     try {
       const art = await portraitFromEnv(env).generatePortrait({
@@ -225,15 +227,17 @@ export async function createAgent(
       });
       portraitUrl = art.url;
       portraitStatus = "ready";
-    } catch {
+      error = null;
+    } catch (err) {
       portraitUrl = null;
       portraitStatus = "failed";
+      error = err instanceof Error ? err.message : "unknown image error";
     }
   }
   store.db.prepare("INSERT INTO agents (id, leader_id, active_version_id, name, concept, portrait_url, portrait_status) VALUES (?, ?, NULL, ?, ?, ?, ?)").run(
     id, input.leaderId, input.name || null, input.concept || null, portraitUrl, portraitStatus,
   );
-  return { agentId: id, portraitUrl, portraitStatus };
+  return { agentId: id, portraitUrl, portraitStatus, error };
 }
 
 // Analysis explains one stored bout from its own telemetry. The model
@@ -318,14 +322,15 @@ export async function retryPortrait(
   store: Store,
   env: FlowEnv,
   input: { agentId: string; leaderId: string },
-): Promise<{ portraitUrl: string | null; portraitStatus: string; retried: boolean }> {
+): Promise<{ portraitUrl: string | null; portraitStatus: string; retried: boolean; error: string | null }> {
   const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
   if (!agent || agent.leader_id !== input.leaderId) throw new Error("agent not found for this leader");
   if (agent.portrait_status === "ready" && agent.portrait_url) {
-    return { portraitUrl: agent.portrait_url as string, portraitStatus: "ready", retried: false };
+    return { portraitUrl: agent.portrait_url as string, portraitStatus: "ready", retried: false, error: null };
   }
   let portraitUrl: string | null = null;
   let portraitStatus = "faceless";
+  let error: string | null = "portraits need META_IMAGE_KEY; set the secret first";
   if (hasKey("portrait", env)) {
     try {
       const art = await portraitFromEnv(env).generatePortrait({
@@ -333,13 +338,15 @@ export async function retryPortrait(
       });
       portraitUrl = art.url;
       portraitStatus = "ready";
-    } catch {
+      error = null;
+    } catch (err) {
       portraitUrl = null;
       portraitStatus = "failed";
+      error = err instanceof Error ? err.message : "unknown image error";
     }
   }
   store.db.prepare("UPDATE agents SET portrait_url = ?, portrait_status = ? WHERE id = ?").run(portraitUrl, portraitStatus, input.agentId);
-  return { portraitUrl, portraitStatus, retried: true };
+  return { portraitUrl, portraitStatus, retried: true, error };
 }
 
 // Compile saves a draft. Nothing activates until the player installs it.
