@@ -29,7 +29,7 @@ Date: 2026-10-26. Sprint: sprint-006. This file tells the truth about what runs.
 - Standings slice done: `packages/leaderboard` orders placed leaders by AP with deterministic breaks and top-N cuts.
 - Local API slice done in code: `apps/api` serves demo-key auth, one-agent rule, mock compile plus validated publish, training, rated fights with replay, and standings. 10 route tests pass in-memory because this shell denies listening sockets; `curl` proof steps live in README for a hand run.
 - Workers readiness done: `wrangler.toml`, `migrations/0001_schema.sql`, and a worker entry with health, leaderboard, and replay reads. A replay test proves identical checksums on a fresh migrated DB. Write routes stay on Node until the store ports to async D1.
-- Remote is live: `feat/agent-wars-s1` at `2072569`, confirmed on origin. Walkthrough in `docs/judging-walkthrough.md`.
+- Remote is live: user pushed `feat/agent-wars-s1` and `main` through `d4f3867`. Walkthrough in `docs/judging-walkthrough.md`.
 - Worker is live at https://agent-wars-api.smmdsa.workers.dev: D1 `agent-wars` migrated, seed match replays identical, leaderboard serves two ranks.
 - Seasons slice done: `packages/seasons` archives the frozen board and resets every leader for the next season.
 - Accounts, AI compile, and publish flow: planned for later S2 slices.
