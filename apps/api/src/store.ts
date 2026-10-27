@@ -21,7 +21,9 @@ export function openStore(path: string): Store {
       placed INTEGER NOT NULL DEFAULT 0,
       ac INTEGER NOT NULL DEFAULT 0,
       rp INTEGER NOT NULL DEFAULT 100,
-      autobattle_json TEXT
+      autobattle_json TEXT,
+      owned_json TEXT NOT NULL DEFAULT '[]',
+      equipped_json TEXT NOT NULL DEFAULT '{"skin":null,"trail":null,"banner":null}'
     );
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,

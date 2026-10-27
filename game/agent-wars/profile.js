@@ -142,6 +142,53 @@ async function renderDash(d) {
   show($("dash-card"), true);
   renderHist(d);
   await renderAuto();
+  await renderArmory();
+}
+
+async function renderArmory() {
+  const r = await call("GET", "/v1/armory");
+  if (r.status !== 200) {
+    $("armory-wallet").textContent = "Armory unavailable.";
+    show($("armory-card"), true);
+    return;
+  }
+  $("armory-wallet").textContent = `${r.data.ac} AC · ${r.data.rp} mock RP in the wallet.`;
+  const box = $("armory");
+  box.textContent = "";
+  const equipped = r.data.equipped || {};
+  for (const c of r.data.catalog || []) {
+    const p = document.createElement("p");
+    p.className = "sub";
+    const slot = c.id.split("-")[0];
+    p.textContent = `${c.name} — ${c.price} ${c.currency}${c.owned ? " · owned" : ""}${Object.values(equipped).includes(c.id) ? " · equipped" : ""} `;
+    if (!c.owned) {
+      const buy = document.createElement("button");
+      buy.className = "btn-ghost";
+      buy.type = "button";
+      buy.textContent = "Buy";
+      buy.addEventListener("click", async () => {
+        const out = await call("POST", "/v1/armory/buy", { itemId: c.id });
+        if (out.status !== 200) {
+          $("armory-wallet").textContent = `Buy failed: ${out.data.error || out.status}.`;
+          return;
+        }
+        await renderArmory();
+      });
+      p.appendChild(buy);
+    } else {
+      const fit = document.createElement("button");
+      fit.className = "btn-ghost";
+      fit.type = "button";
+      fit.textContent = "Equip";
+      fit.addEventListener("click", async () => {
+        await call("POST", "/v1/armory/equip", { slot, itemId: c.id });
+        await renderArmory();
+      });
+      p.appendChild(fit);
+    }
+    box.appendChild(p);
+  }
+  show($("armory-card"), true);
 }
 
 async function renderAuto() {

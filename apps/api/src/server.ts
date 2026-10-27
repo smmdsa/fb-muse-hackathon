@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { autobattleDigest, autobattleTick, board, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getTournament, getVersion, installVersion, listTournaments, optInAutobattle, pauseAutobattle, readTicket, registerTournament, requestMatch, retryPortrait, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
+import { armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, equipItem, getLeader, getTournament, getVersion, installVersion, listTournaments, optInAutobattle, pauseAutobattle, readTicket, registerTournament, requestMatch, retryPortrait, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -309,6 +309,39 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           send(res, 201, registerTournament(ctx.store, { eventId: url.pathname.split("/")[3], leaderId: me.id as string, versionId }));
         } catch (err) {
           send(res, 404, { error: (err as Error).message });
+        }
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/v1/armory") {
+        send(res, 200, armoryView(ctx.store, me.id as string));
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/armory/buy") {
+        const itemId = typeof body.itemId === "string" ? body.itemId : "";
+        if (!itemId) {
+          send(res, 400, { error: "itemId is required" });
+          return;
+        }
+        try {
+          send(res, 200, buyItem(ctx.store, me.id as string, itemId));
+        } catch (err) {
+          const message = (err as Error).message;
+          send(res, message.startsWith("unknown item") ? 404 : 422, { error: message });
+        }
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/armory/equip") {
+        const slot = typeof body.slot === "string" ? body.slot : "";
+        const itemId = typeof body.itemId === "string" ? body.itemId : "";
+        if (!slot || !itemId) {
+          send(res, 400, { error: "slot and itemId are required" });
+          return;
+        }
+        try {
+          send(res, 200, equipItem(ctx.store, me.id as string, slot, itemId));
+        } catch (err) {
+          const message = (err as Error).message;
+          send(res, message.startsWith("not owned") ? 404 : 422, { error: message });
         }
         return;
       }

@@ -5,6 +5,7 @@ import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendM
 import type { Status } from "@agent-wars/autobattle";
 import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket } from "@agent-wars/tournaments";
 import type { Championship } from "@agent-wars/tournaments";
+import { CATALOG } from "@agent-wars/economy";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies, pickBot } from "@agent-wars/battle-core";
 import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
 import type { History } from "@agent-wars/matchmaker";
@@ -927,6 +928,79 @@ export default {
       return json({ entered: true, started, event: cupView(event, games) }, 201);
       } catch (err) {
         return json({ error: (err as Error).message }, 404);
+      }
+    }
+    const ARMORY_SLOTS = ["skin", "trail", "banner"];
+    const readCloset = async (): Promise<{ leader: Record<string, unknown>; owned: string[]; equipped: Record<string, string | null> }> => {
+      const leader = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(me.id as string).first<Record<string, unknown>>();
+      if (!leader) throw new Error("unknown leader");
+      return {
+        leader,
+        owned: JSON.parse((leader.owned_json as string) ?? "[]") as string[],
+        equipped: JSON.parse((leader.equipped_json as string) ?? "{}") as Record<string, string | null>,
+      };
+    };
+    const armoryJson = (leader: Record<string, unknown>, owned: string[], equipped: Record<string, string | null>): Record<string, unknown> => ({
+      ac: leader.ac,
+      rp: leader.rp,
+      equipped,
+      catalog: CATALOG.map((c) => ({ ...c, owned: owned.includes(c.id) })),
+    });
+    if (request.method === "GET" && url.pathname === "/v1/armory") {
+      const { leader, owned, equipped } = await readCloset();
+      return json(armoryJson(leader, owned, equipped), 200);
+    }
+    if (request.method === "POST" && url.pathname === "/v1/armory/buy") {
+      try {
+      const body = await readBody(request);
+      if (body === null) return json({ error: "bad json" }, 400);
+      const itemId = typeof body.itemId === "string" ? body.itemId : "";
+      if (!itemId) return json({ error: "itemId is required" }, 400);
+      const item = CATALOG.find((c) => c.id === itemId);
+      if (!item) return json({ error: `unknown item ${itemId}` }, 404);
+      const { leader, owned } = await readCloset();
+      if (!owned.includes(itemId)) {
+        const balance = item.currency === "AC" ? (leader.ac as number) : (leader.rp as number);
+        if (balance < item.price) return json({ error: `insufficient ${item.currency}` }, 422);
+        const key = `shop:${itemId}`;
+        const column = item.currency === "AC" ? "ac" : "rp";
+        const writes: unknown[] = [
+          env.DB.prepare("INSERT OR IGNORE INTO wallet_keys (wallet_id, key) VALUES (?, ?)").bind(me.id as string, key),
+        ];
+        const claimed = await env.DB.batch(writes as never[]) as { changes?: number; meta?: { changes?: number } }[];
+        const first = claimed[0] ?? {};
+        const inserted = (first.changes ?? first.meta?.changes ?? 0) > 0;
+        if (inserted) {
+          await env.DB.prepare(`UPDATE leaders SET ${column} = ${column} - ? WHERE id = ?`).bind(item.price, me.id as string).run();
+          await env.DB.prepare("INSERT OR IGNORE INTO wallet_txns (wallet_id, idem_key, currency, delta, reason, at) VALUES (?, ?, ?, ?, ?, ?)").bind(
+            me.id as string, key, item.currency, -item.price, `buy ${itemId}`, Date.now(),
+          ).run();
+        }
+        owned.push(itemId);
+        await env.DB.prepare("UPDATE leaders SET owned_json = ? WHERE id = ?").bind(JSON.stringify(owned), me.id as string).run();
+      }
+      const fresh = await readCloset();
+      return json(armoryJson(fresh.leader, fresh.owned, fresh.equipped), 200);
+      } catch (err) {
+        return json({ error: (err as Error).message }, 422);
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/v1/armory/equip") {
+      try {
+      const body = await readBody(request);
+      if (body === null) return json({ error: "bad json" }, 400);
+      const slot = typeof body.slot === "string" ? body.slot : "";
+      const itemId = typeof body.itemId === "string" ? body.itemId : "";
+      if (!slot || !itemId) return json({ error: "slot and itemId are required" }, 400);
+      if (!ARMORY_SLOTS.includes(slot)) return json({ error: `unknown slot ${slot}` }, 422);
+      const { owned, equipped } = await readCloset();
+      if (!owned.includes(itemId)) return json({ error: `not owned ${itemId}` }, 404);
+      const next = { ...equipped, [slot]: itemId };
+      await env.DB.prepare("UPDATE leaders SET equipped_json = ? WHERE id = ?").bind(JSON.stringify(next), me.id as string).run();
+      const fresh = await readCloset();
+      return json(armoryJson(fresh.leader, fresh.owned, fresh.equipped), 200);
+      } catch (err) {
+        return json({ error: (err as Error).message }, 422);
       }
     }
     const cancelMatch = request.method === "POST" && /^\/v1\/matchmaking\/[^/]+\/cancel$/.test(url.pathname);

@@ -12,6 +12,7 @@ import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendM
 import type { Status } from "@agent-wars/autobattle";
 import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket } from "@agent-wars/tournaments";
 import type { Championship } from "@agent-wars/tournaments";
+import { CATALOG } from "@agent-wars/economy";
 import { pickBot } from "@agent-wars/battle-core";
 import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
 import type { History } from "@agent-wars/matchmaker";
@@ -798,6 +799,61 @@ export function registerTournament(
   }
   saveCup(store, event, games);
   return { entered: true, started, event: cupView(event, games) };
+}
+
+// The armory sells looks, never power. Skins, trails, and banners only.
+const ARMORY_SLOTS = ["skin", "trail", "banner"];
+
+function readCloset(store: Store, leaderId: string): { leader: Record<string, unknown>; owned: string[]; equipped: Record<string, string | null> } {
+  const leader = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown> | null;
+  if (!leader) throw new Error("unknown leader");
+  return {
+    leader,
+    owned: JSON.parse((leader.owned_json as string) ?? "[]") as string[],
+    equipped: JSON.parse((leader.equipped_json as string) ?? "{}") as Record<string, string | null>,
+  };
+}
+
+export function armoryView(store: Store, leaderId: string): Record<string, unknown> {
+  const { leader, owned, equipped } = readCloset(store, leaderId);
+  return {
+    ac: leader.ac,
+    rp: leader.rp,
+    equipped,
+    catalog: CATALOG.map((c) => ({ ...c, owned: owned.includes(c.id) })),
+  };
+}
+
+// One charge per item, ever. A replayed buy grants without charging.
+export function buyItem(store: Store, leaderId: string, itemId: string, now = Date.now()): Record<string, unknown> {
+  const item = CATALOG.find((c) => c.id === itemId);
+  if (!item) throw new Error(`unknown item ${itemId}`);
+  const { leader, owned } = readCloset(store, leaderId);
+  if (owned.includes(itemId)) return armoryView(store, leaderId);
+  const balance = item.currency === "AC" ? (leader.ac as number) : (leader.rp as number);
+  if (balance < item.price) throw new Error(`insufficient ${item.currency}`);
+  const key = `shop:${itemId}`;
+  const res = store.db.prepare("INSERT OR IGNORE INTO wallet_keys (wallet_id, key) VALUES (?, ?)").run(leaderId, key) as { changes: number };
+  if (res.changes > 0) {
+    const column = item.currency === "AC" ? "ac" : "rp";
+    store.db.prepare(`UPDATE leaders SET ${column} = ${column} - ? WHERE id = ?`).run(item.price, leaderId);
+    store.db.prepare("INSERT INTO wallet_txns (wallet_id, idem_key, currency, delta, reason, at) VALUES (?, ?, ?, ?, ?, ?)").run(
+      leaderId, key, item.currency, -item.price, `buy ${itemId}`, now,
+    );
+  }
+  owned.push(itemId);
+  store.db.prepare("UPDATE leaders SET owned_json = ? WHERE id = ?").run(JSON.stringify(owned), leaderId);
+  return armoryView(store, leaderId);
+}
+
+// Equip owns-first. No stats change anywhere in this file.
+export function equipItem(store: Store, leaderId: string, slot: string, itemId: string): Record<string, unknown> {
+  if (!ARMORY_SLOTS.includes(slot)) throw new Error(`unknown slot ${slot}`);
+  const { owned, equipped } = readCloset(store, leaderId);
+  if (!owned.includes(itemId)) throw new Error(`not owned ${itemId}`);
+  const next = { ...equipped, [slot]: itemId };
+  store.db.prepare("UPDATE leaders SET equipped_json = ? WHERE id = ?").run(JSON.stringify(next), leaderId);
+  return armoryView(store, leaderId);
 }
 
 // Cancel drops a queued ticket and returns its charge. Settled stays final.
