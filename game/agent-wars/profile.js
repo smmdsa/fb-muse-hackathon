@@ -61,7 +61,11 @@ function silhouetteFor(id, skin) {
 async function refresh() {
   if (!token || !agentId) return;
   const r = await call("GET", `/v1/agents/${agentId}/dashboard`);
-  if (r.status !== 200) return;
+  if (r.status !== 200) {
+    $("dash").textContent = `Dashboard unavailable: ${r.data.error || r.status}. Retry in a bit.`;
+    show($("dash-card"), true);
+    return;
+  }
   const d = r.data;
   $("hero-name").textContent = d.agent.name || "Unnamed hero";
   $("hero-concept").textContent = d.agent.concept || "no concept yet";
@@ -91,6 +95,19 @@ async function refresh() {
   markWelcome(Boolean(d.agent), (d.versions || []).length > 0, Boolean(d.agent && d.agent.activeVersionId));
   await renderDash(d);
   await renderSeasons();
+}
+
+function shortWhen(when) {
+  const flat = (p) => {
+    if (!p || typeof p !== "object") return "?";
+    if (p.operand) return `${p.operand} ${p.op} ${p.value}`;
+    if (Array.isArray(p.all)) return `all(${p.all.map(flat).join("; ")})`;
+    if (Array.isArray(p.any)) return `any(${p.any.map(flat).join("; ")})`;
+    if (p.not) return `not ${flat(p.not)}`;
+    return "?";
+  };
+  const s = flat(when);
+  return s.length > 48 ? `${s.slice(0, 47)}…` : s;
 }
 
 function markWelcome(hasAgent, hasDraft, hasActive) {
@@ -161,11 +178,23 @@ async function renderDash(d) {
         await refresh();
       });
       card.appendChild(fit);
+      const drop = document.createElement("button");
+      drop.className = "btn-ghost";
+      drop.type = "button";
+      drop.textContent = "Delete draft";
+      drop.addEventListener("click", async () => {
+        const r = await call("DELETE", `/v1/agents/${d.agent.id}/policies/${v.versionId}`);
+        $("train-msg").textContent = r.status === 200
+          ? "Draft deleted."
+          : `Delete failed: ${r.data.error || r.status}.`;
+        await refresh();
+      });
+      card.appendChild(drop);
     }
     const table = document.createElement("table");
     table.className = "chips";
     const top = document.createElement("tr");
-    for (const h of ["chip", "move", "fire", "triggers"]) {
+    for (const h of ["chip", "when", "move", "fire", "triggers"]) {
       const th = document.createElement("th");
       th.textContent = h;
       top.appendChild(th);
@@ -173,7 +202,7 @@ async function renderDash(d) {
     table.appendChild(top);
     for (const c of v.chips) {
       const tr = document.createElement("tr");
-      for (const cell of [c.id, c.move, c.fire ? "yes" : "no", String(c.triggers)]) {
+      for (const cell of [c.id, shortWhen(c.when), c.move, c.fire ? "yes" : "no", String(c.triggers)]) {
         const td = document.createElement("td");
         td.textContent = cell;
         tr.appendChild(td);

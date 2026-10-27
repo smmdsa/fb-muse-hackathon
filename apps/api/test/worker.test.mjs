@@ -276,6 +276,12 @@ describe("worker writes", () => {
     assert.equal(over.status, 400);
     const overLab = await call("POST", "/v1/lab/ab", { agentId: aa.json.agentId, promptA: "x".repeat(2001), promptB: "ok brief" }, sa.json.token);
     assert.equal(overLab.status, 400);
+    const spare = await call("POST", `/v1/agents/${aa.json.agentId}/policies/compile`, { prompt: "hold the center patiently" }, sa.json.token);
+    assert.equal(spare.status, 201);
+    const gone = await entry.fetch(new Request(`http://local/v1/agents/${aa.json.agentId}/policies/${spare.json.versionId}`, { method: "DELETE", headers: { authorization: `Bearer ${sa.json.token}` } }), wenv);
+    assert.equal(gone.status, 200);
+    const keep = await entry.fetch(new Request(`http://local/v1/agents/${aa.json.agentId}/policies/${va.json.versionId}`, { method: "DELETE", headers: { authorization: `Bearer ${sa.json.token}` } }), wenv);
+    assert.equal(keep.status, 422);
   });
 
   it("stays dark with no admin key", async () => {

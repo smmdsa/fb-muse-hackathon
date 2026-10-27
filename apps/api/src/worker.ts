@@ -317,7 +317,7 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
   const versions = [];
   for (const v of versionRows) {
     const { results: fights } = await env.DB.prepare("SELECT * FROM matches WHERE a_version = ? OR b_version = ?").bind(v.id, v.id).all<Record<string, unknown>>();
-    const policy = JSON.parse(v.policy_json as string) as { dna: Record<string, number>; rules: { id: string; move: string; fire?: boolean }[] };
+    const policy = JSON.parse(v.policy_json as string) as { dna: Record<string, number>; rules: { id: string; move: string; fire?: boolean; when: unknown }[] };
     const triggers: Record<string, number> = {};
     let wins = 0;
     let ticks = 0;
@@ -339,7 +339,7 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
       provider: (v.provider as string) ?? "mock",
       isMock: ((v.is_mock as number) ?? 1) === 1,
       createdAt: v.created_at,
-      chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, triggers: triggers[r.id] ?? 0 })),
+      chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, when: r.when ?? null, triggers: triggers[r.id] ?? 0 })),
       dna: policy.dna,
       fights: fights.length,
       wins,
@@ -885,6 +885,26 @@ export default {
         "INSERT INTO versions (id, agent_id, policy_json, sha, created_at, provider, is_mock, tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(versionId, agentId, JSON.stringify(compiled.policy), hex, Date.now(), compiled.provider, compiled.isMock ? 1 : 0, compiled.promptTokens, compiled.latencyMs).run();
       return json({ versionId, provider: compiled.provider, isMock: compiled.isMock, ...spent }, 201);
+      } catch (err) {
+        return json({ error: `server error: ${(err as Error).message}` }, 500);
+      }
+    }
+    const deleteMatch = request.method === "DELETE" && /^\/v1\/agents\/[^/]+\/policies\/[^/]+$/.exec(url.pathname);
+    if (deleteMatch) {
+      try {
+        const agentId = url.pathname.split("/")[3];
+        const versionId = decodeURIComponent(deleteMatch[0].split("/")[5]);
+        const target = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
+        if (!target || target.leader_id !== me.id) return json({ error: "agent not found for this leader" }, 404);
+        const version = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(versionId).first<Record<string, unknown>>();
+        if (!version || version.agent_id !== agentId) return json({ error: "unknown version for this agent" }, 404);
+        if (target.active_version_id === versionId) return json({ error: "the active version fights on: install another first" }, 422);
+        const bout = await env.DB.prepare("SELECT id FROM matches WHERE a_version = ? OR b_version = ? LIMIT 1").bind(versionId, versionId).first<Record<string, unknown>>();
+        if (bout) return json({ error: "this version has fights: history keeps it" }, 422);
+        const seated = await env.DB.prepare("SELECT id FROM tournaments WHERE event_json LIKE ? LIMIT 1").bind(`%${versionId}%`).first<Record<string, unknown>>();
+        if (seated) return json({ error: "this version holds an event seat: it stays registered" }, 422);
+        await env.DB.prepare("DELETE FROM versions WHERE id = ?").bind(versionId).run();
+        return json({ deleted: true }, 200);
       } catch (err) {
         return json({ error: `server error: ${(err as Error).message}` }, 500);
       }

@@ -6,7 +6,7 @@ import { timingSafeEqual } from "node:crypto";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, createTournament, dashboard, energyFor, energyView, equipItem, evolutionLab, getLeader, getTournament, getVersion, installVersion, listTournaments, MAX_PROMPT, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
+import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, createTournament, dashboard, deleteVersion, energyFor, energyView, equipItem, evolutionLab, getLeader, getTournament, getVersion, installVersion, listTournaments, MAX_PROMPT, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -235,6 +235,16 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           return;
         }
         send(res, 201, { versionId: out.versionId, provider: out.provider, isMock: out.isMock, tokens: out.tokens, latencyMs: out.latencyMs });
+        return;
+      }
+      const deleteMatch = req.method === "DELETE" && /^\/v1\/agents\/[^/]+\/policies\/[^/]+$/.exec(url.pathname);
+      if (deleteMatch) {
+        try {
+          send(res, 200, deleteVersion(ctx.store, { leaderId: me.id as string, agentId: url.pathname.split("/")[3], versionId: decodeURIComponent(url.pathname.split("/")[5]) }));
+        } catch (err) {
+          const msg = (err as Error).message;
+          send(res, /not found|unknown version/.test(msg) ? 404 : 422, { error: msg });
+        }
         return;
       }
       const installMatch = req.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/install$/.test(url.pathname);
