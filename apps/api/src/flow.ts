@@ -384,6 +384,25 @@ export async function compileAndPublish(
   return { versionId, errors: [], provider: compiled.provider, isMock: compiled.isMock, ...spent };
 }
 
+// Delete removes one draft. The active version stays, and history stays:
+// a version with fights, or a seat in any event, refuses deletion.
+export function deleteVersion(
+  store: Store,
+  input: { leaderId: string; agentId: string; versionId: string },
+): { deleted: boolean } {
+  const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
+  if (!agent || agent.leader_id !== input.leaderId) throw new Error("agent not found for this leader");
+  const version = getVersion(store, input.versionId);
+  if (!version || version.agentId !== input.agentId) throw new Error("unknown version for this agent");
+  if (agent.active_version_id === input.versionId) throw new Error("the active version fights on: install another first");
+  const fights = store.db.prepare("SELECT id FROM matches WHERE a_version = ? OR b_version = ? LIMIT 1").get(input.versionId, input.versionId);
+  if (fights) throw new Error("this version has fights: history keeps it");
+  const seated = store.db.prepare("SELECT id FROM tournaments WHERE event_json LIKE ? LIMIT 1").get(`%${input.versionId}%`);
+  if (seated) throw new Error("this version holds an event seat: it stays registered");
+  store.db.prepare("DELETE FROM versions WHERE id = ?").run(input.versionId);
+  return { deleted: true };
+}
+
 // Install names the fighting version. Drafts stay inert until this runs.
 export function installVersion(
   store: Store,
@@ -467,7 +486,7 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
   const versionRows = store.db.prepare("SELECT * FROM versions WHERE agent_id = ? ORDER BY created_at").all(agentId) as Record<string, unknown>[];
   const versions = versionRows.map((v) => {
     const fights = store.db.prepare("SELECT * FROM matches WHERE a_version = ? OR b_version = ?").all(v.id, v.id) as Record<string, unknown>[];
-    const policy = JSON.parse(v.policy_json as string) as { dna: Record<string, number>; rules: { id: string; move: string; fire?: boolean }[] };
+    const policy = JSON.parse(v.policy_json as string) as { dna: Record<string, number>; rules: { id: string; move: string; fire?: boolean; when: unknown }[] };
     const triggers: Record<string, number> = {};
     let wins = 0;
     let ticks = 0;
@@ -489,7 +508,7 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
       provider: v.provider ?? "mock",
       isMock: (v.is_mock ?? 1) === 1,
       createdAt: v.created_at,
-      chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, triggers: triggers[r.id] ?? 0 })),
+      chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, when: r.when ?? null, triggers: triggers[r.id] ?? 0 })),
       dna: policy.dna,
       fights: fights.length,
       wins,
