@@ -231,21 +231,24 @@ export async function compileAndPublish(
   store: Store,
   env: FlowEnv,
   input: { agentId: string; prompt: string },
-): Promise<{ versionId: string; errors: string[]; provider: string; isMock: boolean }> {
+): Promise<{ versionId: string; errors: string[]; provider: string; isMock: boolean; tokens: number; latencyMs: number }> {
   const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
   if (!agent) throw new Error("unknown agent");
   const versionId = mintId("v");
   const compiled = await providerFromEnv(env).compileStrategy({ prompt: input.prompt, agentVersionId: versionId });
-  if (!compiled.policy) return { versionId: "", errors: compiled.errors, provider: compiled.provider, isMock: compiled.isMock };
+  // Every draft carries its spend, mock or Meta: the audit never goes blind.
+  const spent = { tokens: compiled.promptTokens, latencyMs: compiled.latencyMs };
+  if (!compiled.policy) return { versionId: "", errors: compiled.errors, provider: compiled.provider, isMock: compiled.isMock, ...spent };
   const check = validatePolicy(compiled.policy);
-  if (!check.ok) return { versionId: "", errors: check.errors, provider: compiled.provider, isMock: compiled.isMock };
+  if (!check.ok) return { versionId: "", errors: check.errors, provider: compiled.provider, isMock: compiled.isMock, ...spent };
   const crypto = await import("node:crypto");
   const sha = crypto.createHash("sha256").update(JSON.stringify(compiled.policy)).digest("hex");
-  store.db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at, provider, is_mock) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+  store.db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at, provider, is_mock, tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
     versionId, input.agentId, JSON.stringify(compiled.policy), sha, Date.now(), compiled.provider, compiled.isMock ? 1 : 0,
+    compiled.promptTokens, compiled.latencyMs,
   );
   store.db.prepare("UPDATE agents SET active_version_id = ? WHERE id = ?").run(versionId, input.agentId);
-  return { versionId, errors: [], provider: compiled.provider, isMock: compiled.isMock };
+  return { versionId, errors: [], provider: compiled.provider, isMock: compiled.isMock, ...spent };
 }
 
 // Energy reads the persisted machine, refreshes regen, and saves it back.

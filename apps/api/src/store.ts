@@ -38,7 +38,9 @@ export function openStore(path: string): Store {
       sha TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       provider TEXT NOT NULL DEFAULT 'mock',
-      is_mock INTEGER NOT NULL DEFAULT 1
+      is_mock INTEGER NOT NULL DEFAULT 1,
+      tokens INTEGER NOT NULL DEFAULT 0,
+      latency_ms INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS matches (
       id TEXT PRIMARY KEY,

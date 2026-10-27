@@ -550,16 +550,17 @@ export default {
       if (!prompt) return json({ error: "prompt is required" }, 400);
       const versionId = mintId("v");
       const compiled = await providerFromEnv(env).compileStrategy({ prompt, agentVersionId: versionId });
-      if (!compiled.policy) return json({ error: "draft failed validation", errors: compiled.errors, provider: compiled.provider, isMock: compiled.isMock }, 422);
+      const spent = { tokens: compiled.promptTokens, latencyMs: compiled.latencyMs };
+      if (!compiled.policy) return json({ error: "draft failed validation", errors: compiled.errors, provider: compiled.provider, isMock: compiled.isMock, ...spent }, 422);
       const check = validatePolicy(compiled.policy);
-      if (!check.ok) return json({ error: "draft failed validation", errors: check.errors, provider: compiled.provider, isMock: compiled.isMock }, 422);
+      if (!check.ok) return json({ error: "draft failed validation", errors: check.errors, provider: compiled.provider, isMock: compiled.isMock, ...spent }, 422);
       const sha = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(compiled.policy)));
       const hex = [...new Uint8Array(sha)].map((x) => x.toString(16).padStart(2, "0")).join("");
       await env.DB.prepare(
-        "INSERT INTO versions (id, agent_id, policy_json, sha, created_at, provider, is_mock) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      ).bind(versionId, agentId, JSON.stringify(compiled.policy), hex, Date.now(), compiled.provider, compiled.isMock ? 1 : 0).run();
+        "INSERT INTO versions (id, agent_id, policy_json, sha, created_at, provider, is_mock, tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).bind(versionId, agentId, JSON.stringify(compiled.policy), hex, Date.now(), compiled.provider, compiled.isMock ? 1 : 0, compiled.promptTokens, compiled.latencyMs).run();
       await env.DB.prepare("UPDATE agents SET active_version_id = ? WHERE id = ?").bind(versionId, agentId).run();
-      return json({ versionId, provider: compiled.provider, isMock: compiled.isMock }, 201);
+      return json({ versionId, provider: compiled.provider, isMock: compiled.isMock, ...spent }, 201);
       } catch (err) {
         return json({ error: `server error: ${(err as Error).message}` }, 500);
       }

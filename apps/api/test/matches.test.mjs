@@ -77,6 +77,22 @@ describe("matches", () => {
     assert.equal(r.status, 422);
   });
 
+  it("audits compile cost on the stored version", async () => {
+    const s = await call("POST", "/v1/auth/session", { handle: "audit" });
+    const a = await call("POST", "/v1/agents", {}, s.json.token);
+    const v = await call("POST", `/v1/agents/${a.json.agentId}/policies/compile`, { prompt: "rush them down up close" }, s.json.token);
+    assert.equal(v.status, 201);
+    assert.equal(v.json.provider, "mock");
+    assert.equal(v.json.isMock, true);
+    assert.ok(v.json.tokens > 0);
+    assert.ok(v.json.latencyMs >= 0);
+    const row = store.db.prepare("SELECT provider, is_mock, tokens, latency_ms FROM versions WHERE id = ?").get(v.json.versionId);
+    assert.equal(row.provider, "mock");
+    assert.equal(row.is_mock, 1);
+    assert.equal(row.tokens, v.json.tokens);
+    assert.equal(row.latency_ms, v.json.latencyMs);
+  });
+
   it("spends one energy per ranked fight", async () => {
     const me = await call("GET", "/v1/me", null, keys.a.token);
     assert.equal(me.json.energy.energy, 9);
