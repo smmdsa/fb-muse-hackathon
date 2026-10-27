@@ -264,6 +264,16 @@ input {
   background: var(--panel-low);
 }
 
+#hero-img,
+#lobby-img {
+  animation: paint-in 0.5s ease-out;
+}
+
+@keyframes paint-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
 .hero-name { font-family: var(--display); font-weight: 700; font-size: 20px; margin: 0; }
 
 #hero-shield { width: 56px; height: 56px; object-fit: contain; }
@@ -293,5 +303,5 @@ table.chips th { font-family: var(--display); color: var(--dim); font-weight: 60
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none; }
+  * { transition: none; animation: none; }
 }

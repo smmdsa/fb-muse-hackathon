@@ -30,21 +30,30 @@ function show(el, on) {
   el.hidden = !on;
 }
 
-// Deterministic fallback glyph. One hue per hero, same navy field.
-function silhouetteFor(id) {
+// Deterministic fallback glyph. Same navy field, same robot shape, always.
+// Equipped skins only shift the palette: ember burns orange, tide runs cold.
+const SKIN_TINTS = {
+  "skin-ember": { visor: 18, body: "#7a5b4a", limb: "#a08a76" },
+  "skin-tide": { visor: 190, body: "#4a6a7a", limb: "#8ab0c0" },
+};
+
+function silhouetteFor(id, skin) {
+  const tint = SKIN_TINTS[skin] || null;
   let h = 0;
   for (let i = 0; i < String(id).length; i += 1) h = (Math.imul(h, 31) + String(id).charCodeAt(i)) >>> 0;
-  const hue = h % 360;
+  const hue = tint ? tint.visor : h % 360;
+  const body = tint ? tint.body : "#5b6577";
+  const limb = tint ? tint.limb : "#8a94a6";
   const svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'>"
     + "<rect width='96' height='96' fill='#101923'/>"
-    + "<rect x='38' y='14' width='20' height='14' fill='#8a94a6'/>"
+    + `<rect x='38' y='14' width='20' height='14' fill='${limb}'/>`
     + `<rect x='42' y='18' width='12' height='5' fill='hsl(${hue},90%,60%)'/>`
-    + "<rect x='30' y='32' width='36' height='30' fill='#5b6577'/>"
+    + `<rect x='30' y='32' width='36' height='30' fill='${body}'/>`
     + `<rect x='42' y='38' width='12' height='8' fill='hsl(${hue},90%,60%)'/>`
-    + "<rect x='22' y='34' width='6' height='22' fill='#8a94a6'/>"
-    + "<rect x='68' y='34' width='6' height='22' fill='#8a94a6'/>"
-    + "<rect x='34' y='64' width='10' height='20' fill='#8a94a6'/>"
-    + "<rect x='52' y='64' width='10' height='20' fill='#8a94a6'/>"
+    + `<rect x='22' y='34' width='6' height='22' fill='${limb}'/>`
+    + `<rect x='68' y='34' width='6' height='22' fill='${limb}'/>`
+    + `<rect x='34' y='64' width='10' height='20' fill='${limb}'/>`
+    + `<rect x='52' y='64' width='10' height='20' fill='${limb}'/>`
     + "</svg>";
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
@@ -61,7 +70,9 @@ async function refresh() {
     show($("hero-img"), true);
     $("hero-art-status").textContent = "Portrait ready — house style locked.";
   } else {
-    $("hero-img").src = silhouetteFor(d.agent.id);
+    const arm = await call("GET", "/v1/armory");
+    const skin = arm.status === 200 && arm.data.equipped ? arm.data.equipped.skin : null;
+    $("hero-img").src = silhouetteFor(d.agent.id, skin);
     show($("hero-img"), true);
     $("hero-art-status").textContent = d.agent.portraitStatus === "failed"
       ? "Portrait paint failed. Retry below — the hero still fights."
