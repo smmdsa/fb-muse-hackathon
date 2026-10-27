@@ -25,6 +25,7 @@ Date: 2026-10-26. Sprint: sprint-004. Economy done. This file tells the truth ab
 - S4 economy slice done: `packages/economy` runs an idempotent AC/RP ledger with a 150/day cap and a mock cosmetic shop. Real money stays locked.
 - Integration milestone done in code: compiled DNA steers the sim per tick, and `pnpm demo` prints prompt, traits, winner, AP moves, and AC payout. User hand run is pending.
 - Viewer DNA mode done in code: two prompt boxes compile locally and drive the fight, with a named compile line and shield feedback. Hand checks 12 to 14 cover it.
+- Matchmaker slice done: `packages/matchmaker` picks server-owned opponents with eligibility, rolling pair caps, and nearest-rating order.
 - Accounts, AI compile, and publish flow: planned for later S2 slices.
 - Ranked AP ±12 to ±28, AutoBattle leases, championships, shop (S3 and S4): planned.
 - Full acceptance suite from GDD section 14: planned. S1 covers gameplay rows only.

@@ -26,6 +26,8 @@ importers:
 
   packages/economy: {}
 
+  packages/matchmaker: {}
+
   packages/ranking: {}
 
   packages/tournaments: {}
