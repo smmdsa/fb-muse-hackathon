@@ -6,6 +6,60 @@ import { checksum, createBattle, DEFAULT_BATTLE, stepBattle } from "./simulation
 import { segmentHitsBox } from "./world.ts";
 import type { AgentAction, AgentId, BattleConfig, BattleState, Vec2 } from "./types.ts";
 
+// Sparring bots. Rule-based presets near ladder bands, never AP minters.
+// Bots fight unrated only; the picker below matches bots to nearby AP.
+export type BotPreset = { id: string; name: string; apHint: number; policy: import("./types.ts").AgentPolicy };
+
+const BOT_SHADOW = {
+  schemaVersion: 1,
+  agentVersionId: "bot-shadow",
+  dna: { aggression: 35, evasion: 80, preferredDistance: 65, energyConservation: 70 },
+  rules: [
+    { id: "s-hide", when: { operand: "coverDist", op: "lt", value: 3 }, move: "SEEK_COVER" },
+    { id: "s-strafe", when: { all: [{ operand: "distFoe", op: "gte", value: 4 }, { operand: "distFoe", op: "lte", value: 10 }] }, move: "STRAFE", fire: true },
+    { id: "s-retreat", when: { operand: "ownHpPct", op: "lt", value: 25 }, move: "RETREAT" },
+    { id: "s-center", when: { operand: "objectiveDist", op: "gt", value: 6 }, move: "CAPTURE" },
+  ],
+} as BotPreset["policy"];
+
+const BOT_BENCH = {
+  schemaVersion: 1,
+  agentVersionId: "bot-bench",
+  dna: { aggression: 55, evasion: 55, preferredDistance: 45, energyConservation: 50 },
+  rules: [
+    { id: "n-close", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true },
+    { id: "n-far", when: { operand: "distFoe", op: "gte", value: 6 }, move: "APPROACH" },
+    { id: "n-center", when: { operand: "objectiveDist", op: "gt", value: 6 }, move: "CAPTURE" },
+  ],
+} as BotPreset["policy"];
+
+const BOT_BREAKER = {
+  schemaVersion: 1,
+  agentVersionId: "bot-breaker",
+  dna: { aggression: 80, evasion: 30, preferredDistance: 20, energyConservation: 35 },
+  rules: [
+    { id: "b-rush", when: { operand: "distFoe", op: "gte", value: 6 }, move: "APPROACH", fire: true },
+    { id: "b-fire", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true },
+    { id: "b-retreat", when: { operand: "ownHpPct", op: "lt", value: 25 }, move: "RETREAT" },
+    { id: "b-center", when: { operand: "objectiveDist", op: "gt", value: 6 }, move: "CAPTURE" },
+  ],
+} as BotPreset["policy"];
+
+export const BOT_PRESETS: BotPreset[] = [
+  { id: "bot:shadow", name: "SHADOW-UNIT", apHint: 400, policy: BOT_SHADOW },
+  { id: "bot:bench", name: "BENCH-UNIT", apHint: 550, policy: BOT_BENCH },
+  { id: "bot:breaker", name: "BREAKER-UNIT", apHint: 700, policy: BOT_BREAKER },
+];
+
+// The picker returns the preset nearest the player's AP.
+export function pickBot(ap: number): BotPreset {
+  let best = BOT_PRESETS[0];
+  for (const p of BOT_PRESETS) {
+    if (Math.abs(p.apHint - ap) < Math.abs(best.apHint - ap)) best = p;
+  }
+  return best;
+}
+
 // The reference brain for training-grade fights. Both servers use this copy.
 export const BENCH_POLICY: AgentPolicy = {
   schemaVersion: 1,

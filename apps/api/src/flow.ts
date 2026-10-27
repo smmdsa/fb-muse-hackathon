@@ -10,6 +10,9 @@ import { buildStandings } from "@agent-wars/leaderboard";
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
 import { draft, refresh, spendManualMatch, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
+import { pickBot } from "@agent-wars/battle-core";
+import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
+import type { History } from "@agent-wars/matchmaker";
 import type { Store } from "./store.ts";
 import { mintId } from "./store.ts";
 
@@ -95,31 +98,39 @@ export function runRanked(
       st.ratingMilli, st.ap, st.placementGames, st.placed ? 1 : 0, id,
     );
   }
-  const pay = (leaderId: string, kind: "win" | "loss" | "no-contest", side: string) => {
-    const row = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown>;
-    const wallet = createWallet(leaderId, 0);
-    wallet.ac = row.ac as number;
-    wallet.rp = row.rp as number;
-    for (const k of store.db.prepare("SELECT key FROM wallet_keys WHERE wallet_id = ?").all(leaderId) as { key: string }[]) {
-      wallet.keys.add(k.key);
-    }
-    const before = wallet.txns.length;
-    const res = earnAc(wallet, { key: `${input.key}-${side}`, kind, suspicious: false, now: Date.now() });
-    store.db.prepare("INSERT OR IGNORE INTO wallet_keys (wallet_id, key) VALUES (?, ?)").run(leaderId, `${input.key}-${side}`);
-    for (const t of wallet.txns.slice(before)) {
-      store.db.prepare("INSERT INTO wallet_txns (wallet_id, idem_key, currency, delta, reason, at) VALUES (?, ?, ?, ?, ?, ?)").run(
-        leaderId, t.idempotencyKey, t.currency, t.delta, t.reason, t.at,
-      );
-    }
-    store.db.prepare("UPDATE leaders SET ac = ?, rp = ? WHERE id = ?").run(wallet.ac, wallet.rp, leaderId);
-    return res.credited;
-  };
-  const paidA = pay(aAgent.leader_id as string, winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest", "a");
-  const paidB = pay(bAgent.leader_id as string, winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest", "b");
+  const paidA = creditAc(store, aAgent.leader_id as string, input.key, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
+  const paidB = creditAc(store, bAgent.leader_id as string, input.key, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
   store.db.prepare(
     "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
   ).run(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
   return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA, paidB };
+}
+
+// One AC credit. Idempotent per match key and side; the daily cap lives in the ledger.
+export function creditAc(
+  store: Store,
+  leaderId: string,
+  matchKey: string,
+  side: string,
+  kind: "win" | "loss" | "no-contest",
+): number {
+  const row = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown>;
+  const wallet = createWallet(leaderId, 0);
+  wallet.ac = row.ac as number;
+  wallet.rp = row.rp as number;
+  for (const k of store.db.prepare("SELECT key FROM wallet_keys WHERE wallet_id = ?").all(leaderId) as { key: string }[]) {
+    wallet.keys.add(k.key);
+  }
+  const before = wallet.txns.length;
+  const res = earnAc(wallet, { key: `${matchKey}-${side}`, kind, suspicious: false, now: Date.now() });
+  store.db.prepare("INSERT OR IGNORE INTO wallet_keys (wallet_id, key) VALUES (?, ?)").run(leaderId, `${matchKey}-${side}`);
+  for (const t of wallet.txns.slice(before)) {
+    store.db.prepare("INSERT INTO wallet_txns (wallet_id, idem_key, currency, delta, reason, at) VALUES (?, ?, ?, ?, ?, ?)").run(
+      leaderId, t.idempotencyKey, t.currency, t.delta, t.reason, t.at,
+    );
+  }
+  store.db.prepare("UPDATE leaders SET ac = ?, rp = ? WHERE id = ?").run(wallet.ac, wallet.rp, leaderId);
+  return res.credited;
 }
 
 // The board lists placed leaders for the local season.
@@ -259,4 +270,170 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
     energy: energyView(energyFor(store, leaderId)),
     versions,
   };
+}
+
+export const BOT_SETTLE_MS = 30_000;
+export const RANKED_TICKET_MS = 10 * 60_000;
+
+export type TicketMode = "casual" | "ranked";
+
+// Nearest ELO human with a published version. Never self, never over the pair cap.
+export function findHumanOpponent(
+  store: Store,
+  leaderId: string,
+  now: number,
+): { leaderId: string; versionId: string; ap: number } | null {
+  const me = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown> | null;
+  if (!me) return null;
+  const rows = store.db.prepare(
+    `SELECT m.created_at AS at, aa.leader_id AS a, ab.leader_id AS b FROM matches m
+     JOIN versions va ON va.id = m.a_version JOIN agents aa ON aa.id = va.agent_id
+     JOIN versions vb ON vb.id = m.b_version JOIN agents ab ON ab.id = vb.agent_id
+     WHERE m.rated = 1`
+  ).all() as Record<string, unknown>[];
+  const history: History = { marks: rows.map((m) => ({ a: m.a as string, b: m.b as string, at: m.at as number })) };
+  const agents = store.db.prepare("SELECT * FROM agents WHERE active_version_id IS NOT NULL").all() as Record<string, unknown>[];
+  let best: { leaderId: string; versionId: string; ap: number } | null = null;
+  let bestGap = Infinity;
+  for (const a of agents) {
+    const other = a.leader_id as string;
+    if (other === leaderId) continue;
+    const row = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(other) as Record<string, unknown> | null;
+    if (!row) continue;
+    if (pairMeetings(history, leaderId, other, now) >= MAX_PAIR_MEETINGS) continue;
+    const gap = Math.abs((row.ap as number) - (me.ap as number));
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = { leaderId: other, versionId: a.active_version_id as string, ap: row.ap as number };
+    }
+  }
+  return best;
+}
+
+// Casual unrated fight: no AP moves, AC still pays the human side.
+export function runCasual(
+  store: Store,
+  input: { aVersionId: string; bVersionId?: string; bBot?: string; seed: string; leaderId: string },
+): { matchId: string; winner: string; ticks: number; checksum: string; foe: string; bot: boolean; paid: number } {
+  const found = getVersion(store, input.aVersionId);
+  if (!found) throw new Error("unknown version");
+  const bot = input.bBot ? pickBotFor(store, input.leaderId) : null;
+  const foeLabel = input.bVersionId ?? (bot ? bot.id : "");
+  if (!input.bVersionId && !bot) throw new Error("no opponent");
+  const foePolicy = input.bVersionId
+    ? (getVersion(store, input.bVersionId)?.policy ?? null)
+    : (bot?.policy ?? null);
+  if (!foePolicy) throw new Error("unknown foe version");
+  const out = fightPolicies(found.policy, foePolicy, input.seed);
+  const id = mintId("m");
+  store.db.prepare(
+    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)"
+  ).run(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
+  const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
+  const paid = creditAc(store, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
+  return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !!bot, paid };
+}
+
+function pickBotFor(store: Store, leaderId: string): { id: string; policy: import("@agent-wars/behavior-dna").AgentPolicy } {
+  const row = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown> | null;
+  const bot = pickBot((row?.ap as number) ?? 500);
+  return { id: bot.id, policy: bot.policy };
+}
+
+function settleTicket(store: Store, ticket: Record<string, unknown>, foeVersion: string | null, now: number): Record<string, unknown> {
+  const mode = ticket.mode as TicketMode;
+  let matchId: string;
+  let foeLabel = foeVersion ?? "";
+  if (mode === "ranked" && foeVersion) {
+    const settled = runRanked(store, {
+      aVersionId: ticket.version_id as string,
+      bVersionId: foeVersion,
+      seed: `q-${ticket.id}`,
+      key: ticket.id as string,
+    });
+    matchId = settled.matchId as string;
+  } else {
+    const bot = foeVersion ? null : true;
+    const settled = runCasual(store, {
+      aVersionId: ticket.version_id as string,
+      bVersionId: foeVersion ?? undefined,
+      bBot: bot ? "1" : undefined,
+      seed: `q-${ticket.id}`,
+      leaderId: ticket.leader_id as string,
+    });
+    matchId = settled.matchId;
+    foeLabel = settled.foe;
+  }
+  store.db.prepare("UPDATE tickets SET status = 'settled', foe_version = ?, match_id = ? WHERE id = ?").run(
+    foeLabel, matchId, ticket.id,
+  );
+  return { ...(store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(ticket.id) as Record<string, unknown>) };
+}
+
+// The queue spends one energy at request time. Humans settle at once;
+// casual falls back to a same-band bot after 30 seconds, ranked waits.
+export function requestMatch(
+  store: Store,
+  input: { leaderId: string; versionId: string; mode: TicketMode },
+  now = Date.now(),
+): Record<string, unknown> {
+  if (input.mode !== "casual" && input.mode !== "ranked") throw new Error("unknown mode");
+  const owned = store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(input.leaderId) as Record<string, unknown> | null;
+  const version = getVersion(store, input.versionId);
+  if (!version || !owned || version.agentId !== owned.id) throw new Error("unknown version");
+  if ((owned.active_version_id as string) !== input.versionId) throw new Error("queue your active version");
+  const spent = spendEnergy(store, input.leaderId, now);
+  if (!spent.ok) throw new Error((spent as { reason: string }).reason);
+  const id = mintId("t");
+  const wait = input.mode === "casual" ? BOT_SETTLE_MS : RANKED_TICKET_MS;
+  store.db.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)").run(
+    id, input.leaderId, input.versionId, input.mode, now, now + wait,
+  );
+  const foe = findHumanOpponent(store, input.leaderId, now);
+  if (foe) {
+    const row = store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(id) as Record<string, unknown>;
+    return settleTicket(store, row, foe.versionId, now);
+  }
+  return store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(id) as Record<string, unknown>;
+}
+
+// Lazy settle on read. No cron: the next poll after the deadline settles.
+export function readTicket(
+  store: Store,
+  input: { ticketId: string; leaderId: string },
+  now = Date.now(),
+): Record<string, unknown> & { match?: Record<string, unknown> } {
+  const ticket = store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(input.ticketId) as Record<string, unknown> | null;
+  if (!ticket || ticket.leader_id !== input.leaderId) throw new Error("unknown ticket");
+  if (ticket.status !== "queued") {
+    const out = { ...ticket } as Record<string, unknown> & { match?: Record<string, unknown> };
+    if (ticket.match_id) {
+      out.match = (store.db.prepare("SELECT * FROM matches WHERE id = ?").get(ticket.match_id as string) as Record<string, unknown>) ?? undefined;
+    }
+    return out;
+  }
+  if (now < (ticket.settle_at as number)) {
+    if (ticket.mode === "ranked") {
+      const foe = findHumanOpponent(store, input.leaderId, now);
+      if (foe) {
+        const settled = settleTicket(store, ticket, foe.versionId, now);
+        return withMatch(store, settled);
+      }
+    }
+    return { ...ticket };
+  }
+  if (ticket.mode === "casual") {
+    const settled = settleTicket(store, ticket, null, now);
+    return withMatch(store, settled);
+  }
+  store.db.prepare("UPDATE tickets SET status = 'expired' WHERE id = ?").run(input.ticketId);
+  return { ...(store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(input.ticketId) as Record<string, unknown>) };
+}
+
+export function withMatch(store: Store, ticket: Record<string, unknown>): Record<string, unknown> & { match?: Record<string, unknown> } {
+  const out = { ...ticket } as Record<string, unknown> & { match?: Record<string, unknown> };
+  if (ticket.match_id) {
+    out.match = (store.db.prepare("SELECT * FROM matches WHERE id = ?").get(ticket.match_id as string) as Record<string, unknown>) ?? undefined;
+  }
+  return out;
 }

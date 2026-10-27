@@ -5,7 +5,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, fightPolicies } from "@agent-wars/battle-core";
-import { board, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, runRanked, runTraining, spendEnergy, validateRanked } from "./flow.ts";
+import { board, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, readTicket, requestMatch, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
+import type { TicketMode } from "./flow.ts";
 
 type Ctx = { store: Store };
 
@@ -174,6 +175,31 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           const msg = (err as Error).message;
           const code = msg.includes("duplicate") ? 409 : msg.includes("self match") ? 422 : 404;
           send(res, code, { error: msg });
+        }
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/matchmaking/request") {
+        const versionId = typeof body.versionId === "string" ? body.versionId : "";
+        const mode = typeof body.mode === "string" ? body.mode : "";
+        if (!versionId || (mode !== "casual" && mode !== "ranked")) {
+          send(res, 400, { error: "versionId and mode casual|ranked are required" });
+          return;
+        }
+        try {
+          const ticket = requestMatch(ctx.store, { leaderId: me.id as string, versionId, mode: mode as TicketMode });
+          send(res, 201, withMatch(ctx.store, ticket));
+        } catch (err) {
+          send(res, 409, { error: (err as Error).message });
+        }
+        return;
+      }
+      const ticketMatch = req.method === "GET" && /^\/v1\/matchmaking\/[^/]+$/.exec(url.pathname);
+      if (ticketMatch) {
+        const ticketId = url.pathname.split("/")[3];
+        try {
+          send(res, 200, readTicket(ctx.store, { ticketId, leaderId: me.id as string }));
+        } catch (err) {
+          send(res, 404, { error: (err as Error).message });
         }
         return;
       }
