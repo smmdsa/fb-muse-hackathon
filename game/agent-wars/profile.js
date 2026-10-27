@@ -143,11 +143,43 @@ async function renderSeasons() {
 async function renderDash(d) {
   const box = $("dash");
   box.textContent = "";
-  if (!d.versions.length) {
-    box.innerHTML = "<p class='sub'>No versions yet. Compile a prompt to mint chips.</p>";
+  const versions = Array.isArray(d.versions) ? d.versions : null;
+  const count = document.createElement("p");
+  count.className = "sub";
+  if (!versions) {
+    count.textContent = `Dashboard arrived without versions (keys: ${Object.keys(d || {}).join(", ")}). Reload the page.`;
+    box.appendChild(count);
+    show($("dash-card"), true);
     return;
   }
-  for (const v of d.versions.slice().reverse()) {
+  count.textContent = `Dashboard: ${versions.length} version(s) on file.`;
+  box.appendChild(count);
+  if (!versions.length) {
+    const empty = document.createElement("p");
+    empty.className = "sub";
+    empty.textContent = "No versions yet. Compile a prompt to mint chips.";
+    box.appendChild(empty);
+    show($("dash-card"), true);
+    return;
+  }
+  for (const v of versions.slice().reverse()) {
+    try {
+      box.appendChild(paintVersion(d, v));
+    } catch (err) {
+      const bad = document.createElement("p");
+      bad.className = "sub";
+      bad.textContent = `Card ${v && v.versionId ? v.versionId : "?"} failed to paint: ${err instanceof Error ? err.message : String(err)}`;
+      box.appendChild(bad);
+    }
+  }
+  show($("dash-card"), true);
+  renderHist(d);
+  await renderAuto();
+  await renderArmory();
+}
+
+// One card paints alone. A sick card never kills its siblings.
+function paintVersion(d, v) {
     const card = document.createElement("div");
     card.className = "ver";
     const head = document.createElement("p");
@@ -220,11 +252,7 @@ async function renderDash(d) {
       table.appendChild(tr);
     }
     if (!v.corrupt) card.appendChild(table);
-  }
-  show($("dash-card"), true);
-  renderHist(d);
-  await renderAuto();
-  await renderArmory();
+    return card;
 }
 
 async function renderArmory() {
