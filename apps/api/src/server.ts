@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
-import { BENCH_POLICY, fightPolicies } from "@agent-wars/battle-core";
+import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
 import { board, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, readTicket, requestMatch, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -216,13 +216,23 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           return;
         }
         const a = getVersion(ctx.store, match.a_version as string);
-        const b = match.b_version === "benchmark-v1" ? null : getVersion(ctx.store, match.b_version as string);
-        if (!a || (match.b_version !== "benchmark-v1" && !b)) {
+        const b = match.b_version === "benchmark-v1" || (match.b_version as string).startsWith("bot:") ? null : getVersion(ctx.store, match.b_version as string);
+        let pb = b ? b.policy : BENCH_POLICY;
+        if ((match.b_version as string).startsWith("bot:")) {
+          const preset = BOT_PRESETS.find((p) => p.id === match.b_version);
+          if (!preset) {
+            send(res, 410, { error: "replay unavailable: unknown bot" });
+            return;
+          }
+          pb = preset.policy;
+        }
+        if (!a || (match.b_version !== "benchmark-v1" && !(match.b_version as string).startsWith("bot:") && !b)) {
           send(res, 410, { error: "replay unavailable: a version is gone" });
           return;
         }
-        const again = fightPolicies(a.policy, b ? b.policy : BENCH_POLICY, match.seed as string);
-        send(res, 200, { stored: match, recomputed: again, identical: again.checksum === match.checksum });
+        const again = fightPolicies(a.policy, pb, match.seed as string);
+        const replay = buildReplay(a.policy, pb, match.seed as string);
+        send(res, 200, { stored: match, recomputed: again, replay, identical: again.checksum === match.checksum });
         return;
       }
       send(res, 404, { error: "unknown route" });

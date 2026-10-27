@@ -60,6 +60,71 @@ export function pickBot(ap: number): BotPreset {
   return best;
 }
 
+// A replay samples the canonical sim: one frame every 9 ticks plus the
+// final frame, hit and KO events from HP transitions. Same seed gives
+// byte-identical snapshots; the viewer renders these, never re-simulates.
+export type ReplayFrame = {
+  t: number;
+  ax: number; ay: number; ahp: number; aen: number;
+  bx: number; by: number; bhp: number; ben: number;
+};
+
+export type ReplayEvent = { t: number; side: AgentId; type: "hit" | "ko" };
+
+export type Replay = {
+  seed: string;
+  winner: string;
+  ticks: number;
+  checksum: string;
+  frames: ReplayFrame[];
+  events: ReplayEvent[];
+};
+
+const REPLAY_EVERY = 9;
+
+function snap(state: BattleState): ReplayFrame {
+  const a = state.agents.A;
+  const b = state.agents.B;
+  return {
+    t: state.tick,
+    ax: a.pos.x, ay: a.pos.y, ahp: a.hp, aen: a.energy,
+    bx: b.pos.x, by: b.pos.y, bhp: b.hp, ben: b.energy,
+  };
+}
+
+export function buildReplay(
+  a: AgentPolicy,
+  b: AgentPolicy,
+  seed: string,
+): Replay {
+  const cfg = { ...DEFAULT_BATTLE, seed };
+  let state = createBattle(cfg);
+  const frames: ReplayFrame[] = [snap(state)];
+  const events: ReplayEvent[] = [];
+  let guard = 0;
+  while (!state.over && guard < cfg.world.maxTicks) {
+    const before = snap(state);
+    state = stepBattle(
+      state,
+      { A: drive(state, a, "A", cfg), B: drive(state, b, "B", cfg) },
+      cfg,
+    );
+    guard += 1;
+    for (const [side, was, is] of [["A", before.ahp, state.agents.A.hp], ["B", before.bhp, state.agents.B.hp]] as const) {
+      if (is < was) events.push({ t: state.tick, side, type: is <= 0 ? "ko" : "hit" });
+    }
+    if (state.tick % REPLAY_EVERY === 0 || state.over) frames.push(snap(state));
+  }
+  return {
+    seed,
+    winner: state.winner ?? "DRAW",
+    ticks: state.tick,
+    checksum: checksum(state),
+    frames,
+    events,
+  };
+}
+
 // The reference brain for training-grade fights. Both servers use this copy.
 export const BENCH_POLICY: AgentPolicy = {
   schemaVersion: 1,

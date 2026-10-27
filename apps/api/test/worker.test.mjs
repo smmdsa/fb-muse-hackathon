@@ -230,5 +230,39 @@ describe("worker replay", () => {
     assert.equal(body.identical, true);
     assert.equal(body.recomputed.checksum, body.stored.checksum);
     assert.equal(body.recomputed.ticks, body.stored.ticks);
+    assert.ok(body.replay.frames.length > 10);
+    assert.equal(body.replay.checksum, body.stored.checksum);
+    assert.equal(body.replay.frames[0].t, 0);
+  });
+
+  it("replays a bot fight from the preset", async () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
+    db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+      "l8", "bot-leader", "t8", 1020000, 520, 5, 1,
+    );
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a8", "l8", "v8");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v8", "a8", JSON.stringify(rush), "shim", Date.now(),
+    );
+    db.prepare(
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+    ).run("m8", "bot-seed-1", "v8", "bot:bench", "A", 2700, "shim", Date.now(), "{}");
+    const shimmed = {
+      prepare: (query) => ({
+        bind: (...values) => ({
+          first: async () => db.prepare(query).get(...values) ?? null,
+          all: async () => ({ results: db.prepare(query).all(...values) }),
+          run: async () => db.prepare(query).run(...values),
+        }),
+      }),
+    };
+    const res = await entry.fetch(new Request("http://local/v1/matches/m8/replay"), { DB: shimmed, ASSETS: assetsStub });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.identical, false);
+    assert.ok(body.replay.frames.length > 10);
   });
 });

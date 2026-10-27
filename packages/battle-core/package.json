@@ -7,7 +7,7 @@
     "@agent-wars/behavior-dna": "workspace:*"
   },
   "scripts": {
-    "test": "node --test ./test/determinism.test.mjs ./test/mirror.test.mjs ./test/policy-driver.test.mjs",
+    "test": "node --test ./test/determinism.test.mjs ./test/mirror.test.mjs ./test/policy-driver.test.mjs ./test/replay.test.mjs",
     "build": "node ./scripts/build-check.mjs"
   }
 }

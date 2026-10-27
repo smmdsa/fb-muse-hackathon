@@ -3,7 +3,7 @@
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
 import { draft, refresh, spendManualMatch, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
-import { BENCH_POLICY, fightPolicies, pickBot } from "@agent-wars/battle-core";
+import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies, pickBot } from "@agent-wars/battle-core";
 import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
 import type { History } from "@agent-wars/matchmaker";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
@@ -96,13 +96,23 @@ async function replay(env: WorkerEnv, id: string): Promise<Response> {
     match.b_version === "benchmark-v1"
       ? null
       : await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(match.b_version).first<Record<string, unknown>>();
-  if (!a || (match.b_version !== "benchmark-v1" && !b)) {
+  if (!a) return json({ error: "replay unavailable: a version is gone" }, 410);
+  const pa = JSON.parse(a.policy_json as string) as AgentPolicy;
+  let pb: AgentPolicy;
+  if ((match.b_version as string).startsWith("bot:")) {
+    const preset = BOT_PRESETS.find((p) => p.id === match.b_version);
+    if (!preset) return json({ error: "replay unavailable: unknown bot" }, 410);
+    pb = preset.policy;
+  } else if (b) {
+    pb = JSON.parse(b.policy_json as string) as AgentPolicy;
+  } else if (match.b_version === "benchmark-v1") {
+    pb = BENCH_POLICY;
+  } else {
     return json({ error: "replay unavailable: a version is gone" }, 410);
   }
-  const pa = JSON.parse(a.policy_json as string) as AgentPolicy;
-  const pb = b ? (JSON.parse(b.policy_json as string) as AgentPolicy) : BENCH_POLICY;
   const again = fightPolicies(pa, pb, match.seed as string);
-  return json({ stored: match, recomputed: { winner: again.winner, ticks: again.ticks, checksum: again.checksum }, identical: again.checksum === match.checksum });
+  const replay = buildReplay(pa, pb, match.seed as string);
+  return json({ stored: match, recomputed: { winner: again.winner, ticks: again.ticks, checksum: again.checksum }, replay, identical: again.checksum === match.checksum });
 }
 
 async function pay(
