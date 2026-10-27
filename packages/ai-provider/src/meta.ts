@@ -29,6 +29,7 @@ const COMPILE_SYSTEM = [
   "\"rules\":[{\"id\":\"<slug>\",\"when\":{...},\"move\":\"<MOVE>\",",
   "\"fire\":true|false,\"shield\":true|false,\"dash\":true|false}]}.",
   "Send 2 to 6 rules. Keep every trait an integer 0-100.",
+  "The brief can run paragraphs long. Read it whole, distill the overall battle plan, then mint rules that together express it.",
   "Operands, exactly these: ownHpPct, energy, distFoe, projectileTti, coverDist, lineOfSight, dashReady, shieldReady, foeLastSeenAge, objectiveDist, timeLeft, edgeDist.",
   "Operators, exactly these: gt, gte, lt, lte, eq. Value is a number; eq also takes true or false for lineOfSight, dashReady, shieldReady.",
   "Moves, exactly these: APPROACH, RETREAT, STRAFE, KITE, CAPTURE, SEEK_COVER.",

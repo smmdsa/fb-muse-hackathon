@@ -57,6 +57,50 @@ describe("evolution lab", () => {
   });
 });
 
+describe("long briefs", () => {
+  const PARAGRAPH = [
+    "My robot is a patient ambusher. It holds the center early and saves energy for the late fight.",
+    "When the foe closes under six meters it dashes sideways and fires on the move.",
+    "It keeps range whenever cover stands near, hiding behind it to dodge incoming fire.",
+    "Below a quarter of health it retreats, conserves what energy remains, and only peeks out to shoot.",
+    "It never wastes ammunition at long range without a clear line, and it chases a weakened foe to finish the bout.",
+  ].join(" ");
+  let prompter;
+
+  it("provisions a prompter", async () => {
+    const s = await call("POST", "/v1/auth/session", { handle: "paragrapher" });
+    const g = await call("POST", "/v1/agents", {}, s.json.token);
+    prompter = { token: s.json.token, agentId: g.json.agentId };
+    assert.ok(prompter.agentId);
+  });
+
+  it("compiles a paragraph brief", async () => {
+    const r = await call("POST", `/v1/agents/${prompter.agentId}/policies/compile`, { prompt: PARAGRAPH }, prompter.token);
+    assert.equal(r.status, 201);
+    assert.ok(r.json.versionId);
+  });
+
+  it("compiles exactly at the cap and rejects past it", async () => {
+    const at = await call("POST", `/v1/agents/${prompter.agentId}/policies/compile`, { prompt: "x".repeat(2000) }, prompter.token);
+    assert.equal(at.status, 201);
+    const over = await call("POST", `/v1/agents/${prompter.agentId}/policies/compile`, { prompt: "x".repeat(2001) }, prompter.token);
+    assert.equal(over.status, 400);
+    assert.match(over.json.error, /under 2000/);
+  });
+
+  it("runs the lab on paragraph briefs", async () => {
+    const r = await call("POST", "/v1/lab/ab", {
+      agentId: prompter.agentId, promptA: PARAGRAPH, promptB: "Rush them down up close.", bouts: 4,
+    }, prompter.token);
+    assert.equal(r.status, 201);
+    assert.match(r.json.verdict, /sample too small/);
+    const over = await call("POST", "/v1/lab/ab", {
+      agentId: prompter.agentId, promptA: "x".repeat(2001), promptB: "ok", bouts: 4,
+    }, prompter.token);
+    assert.equal(over.status, 422);
+  });
+});
+
 describe("battle analysis", () => {
   it("explains a stored bout with its own numbers", async () => {
     const t = await call("POST", "/v1/matches/training", { versionId: "v-missing", seed: "x" }, leader.token);

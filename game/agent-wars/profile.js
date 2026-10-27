@@ -301,6 +301,13 @@ function renderHist(d) {
   show($("hist-card"), true);
 }
 
+// Counters keep long briefs honest. The cap is 2000, the habit is detail.
+for (const [box, count] of [["prompt", "prompt-count"], ["prompt-a", "prompt-a-count"], ["prompt-b", "prompt-b-count"]]) {
+  $(box).addEventListener("input", () => {
+    $(count).textContent = String($(box).value.length);
+  });
+}
+
 $("lab-btn").addEventListener("click", async () => {
   if (!agentId) return;
   const promptA = $("prompt-a").value.trim();

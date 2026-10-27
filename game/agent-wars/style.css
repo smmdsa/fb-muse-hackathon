@@ -124,6 +124,19 @@ input {
   font-size: 15px;
 }
 
+textarea {
+  background: var(--panel-low);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 10px;
+  font-size: 15px;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
 .pills { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .pill {

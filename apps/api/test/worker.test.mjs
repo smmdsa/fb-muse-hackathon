@@ -272,6 +272,10 @@ describe("worker writes", () => {
     }
     const jump = await call("POST", "/v1/admin/events/s1-kickoff/transition", { to: "COMPLETED" }, null, ADMIN);
     assert.equal(jump.status, 422);
+    const over = await call("POST", `/v1/agents/${aa.json.agentId}/policies/compile`, { prompt: "x".repeat(2001) }, sa.json.token);
+    assert.equal(over.status, 400);
+    const overLab = await call("POST", "/v1/lab/ab", { agentId: aa.json.agentId, promptA: "x".repeat(2001), promptB: "ok brief" }, sa.json.token);
+    assert.equal(overLab.status, 400);
   });
 
   it("stays dark with no admin key", async () => {
