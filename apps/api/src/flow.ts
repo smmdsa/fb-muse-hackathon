@@ -8,14 +8,15 @@ import { applyRanked, createLedger, ratingFor } from "@agent-wars/ranking";
 import { rankFor } from "@agent-wars/ranking";
 import { buildStandings } from "@agent-wars/leaderboard";
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
-import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
+import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, DAY_MS, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
 import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket } from "@agent-wars/tournaments";
 import type { Championship } from "@agent-wars/tournaments";
 import { CATALOG } from "@agent-wars/economy";
 import { pickBot } from "@agent-wars/battle-core";
-import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
-import type { History } from "@agent-wars/matchmaker";
+import { MAX_DEFENSE_PER_DAY, recordDefense } from "@agent-wars/autobattle";
+import { pickOpponent } from "@agent-wars/matchmaker";
+import type { Candidate, History } from "@agent-wars/matchmaker";
 import type { Store } from "./store.ts";
 import { mintId } from "./store.ts";
 
@@ -430,22 +431,40 @@ export function findHumanOpponent(
      WHERE m.rated = 1`
   ).all() as Record<string, unknown>[];
   const history: History = { marks: rows.map((m) => ({ a: m.a as string, b: m.b as string, at: m.at as number })) };
+  const seeker = store.db.prepare("SELECT rating_milli FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown>;
+  const seekers: Candidate = {
+    leaderId,
+    ratingMilli: seeker.rating_milli as number,
+    optIn: true,
+    published: true,
+    leaseExpiresAt: now + 1,
+  };
   const agents = store.db.prepare("SELECT * FROM agents WHERE active_version_id IS NOT NULL").all() as Record<string, unknown>[];
-  let best: { leaderId: string; versionId: string; ap: number } | null = null;
-  let bestGap = Infinity;
+  const pool: Candidate[] = [];
   for (const a of agents) {
     const other = a.leader_id as string;
     if (other === leaderId) continue;
     const row = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(other) as Record<string, unknown> | null;
     if (!row) continue;
-    if (pairMeetings(history, leaderId, other, now) >= MAX_PAIR_MEETINGS) continue;
-    const gap = Math.abs((row.ap as number) - (me.ap as number));
-    if (gap < bestGap) {
-      bestGap = gap;
-      best = { leaderId: other, versionId: a.active_version_id as string, ap: row.ap as number };
-    }
+    const st: Record<string, unknown> = row.autobattle_json ? JSON.parse(row.autobattle_json as string) : {};
+    const defenses = Array.isArray(st.defenseAt) ? (st.defenseAt as number[]).length : 0;
+    if (defenses >= MAX_DEFENSE_PER_DAY) continue;
+    pool.push({
+      leaderId: other,
+      ratingMilli: row.rating_milli as number,
+      optIn: st.optIn === true,
+      published: true,
+      leaseExpiresAt: typeof st.leaseExpiresAt === "number" ? (st.leaseExpiresAt as number) : null,
+    });
   }
-  return best;
+  const foe = pickOpponent(history, seekers, pool, now);
+  if (!foe) return null;
+  // The picked foe takes one defense stamp. Caps turn later foes away.
+  const stamped = recordDefense(energyFor(store, foe.leaderId, now), now);
+  store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(stamped.status), foe.leaderId);
+  const picked = store.db.prepare("SELECT ap FROM leaders WHERE id = ?").get(foe.leaderId) as Record<string, unknown>;
+  const agent = store.db.prepare("SELECT active_version_id FROM agents WHERE leader_id = ?").get(foe.leaderId) as Record<string, unknown>;
+  return { leaderId: foe.leaderId, versionId: agent.active_version_id as string, ap: picked.ap as number };
 }
 
 // Casual unrated fight: no AP moves, AC still pays the human side.
@@ -651,6 +670,10 @@ export function autobattleDigest(store: Store, leaderId: string, now = Date.now(
     leaseExpiresAt: st.leaseExpiresAt,
     state: st.state,
     energy: energyView(st, now),
+    defense: {
+      used: st.defenseAt.filter((t) => now - t < DAY_MS).length,
+      max: MAX_DEFENSE_PER_DAY,
+    },
     stopReason: autobattleStop(store, leaderId, now),
     recent: rows.map((m) => {
       const mine = owned.has(m.a_version as string) ? "a" : "b";

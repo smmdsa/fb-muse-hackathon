@@ -166,6 +166,8 @@ describe("worker writes", () => {
     const meBefore = await (await entry.fetch(new Request("http://local/v1/me", {
       headers: { authorization: `Bearer ${sa.json.token}` },
     }), wenv)).json();
+    const sbOpt = await call("POST", "/v1/autobattle/opt-in", {}, sb.json.token);
+    assert.equal(sbOpt.status, 200);
     const q = await call("POST", "/v1/matchmaking/request", { versionId: va.json.versionId, mode: "casual" }, sa.json.token);
     assert.equal(q.status, 201);
     assert.equal(q.json.status, "settled");

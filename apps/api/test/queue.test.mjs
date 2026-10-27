@@ -2,11 +2,13 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "../src/index.ts";
 import {
+  autobattleDigest,
   cancelTicket,
   compileAndPublish,
   createAgent,
   findHumanOpponent,
   installVersion,
+  optInAutobattle,
   readTicket,
   requestMatch,
   spendEnergy,
@@ -53,6 +55,32 @@ describe("matchmaking queue", () => {
     arena.close();
   });
 
+  it("only pairs against opted-in foes under the defense cap", async () => {
+    const arena = openStore(":memory:");
+    const t0 = 990_000;
+    const a = await leader("seeker", "rush them down up close", arena);
+    const b = await leader("shy", "evade and stay safe far away", arena);
+    installVersion(arena, { leaderId: a.id, agentId: a.agentId, versionId: a.version });
+    installVersion(arena, { leaderId: b.id, agentId: b.agentId, versionId: b.version });
+    const q = requestMatch(arena, { leaderId: a.id, versionId: a.version, mode: "ranked" }, t0);
+    assert.equal(q.status, "queued");
+    const lonely = readTicket(arena, { ticketId: q.id, leaderId: a.id }, t0 + 1);
+    assert.equal(lonely.status, "queued");
+    optInAutobattle(arena, b.id, t0);
+    const paired = readTicket(arena, { ticketId: q.id, leaderId: a.id }, t0 + 2);
+    assert.equal(paired.status, "settled");
+    const capped = JSON.parse(arena.db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get(b.id).autobattle_json);
+    capped.defenseAt = [t0, t0 + 1, t0 + 2];
+    arena.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(capped), b.id);
+    const q2 = requestMatch(arena, { leaderId: a.id, versionId: a.version, mode: "ranked" }, t0 + 3);
+    const skipped = readTicket(arena, { ticketId: q2.id, leaderId: a.id }, t0 + 4);
+    assert.equal(skipped.status, "queued");
+    const digest = autobattleDigest(arena, b.id, t0 + 5);
+    assert.equal(digest.defense.used, 3);
+    assert.equal(digest.defense.max, 3);
+    arena.close();
+  });
+
   it("installs a draft before the queue accepts it", async () => {
     // Own arena: installed drafts here must not leak into the shared ladder.
     const arena = openStore(":memory:");
@@ -93,6 +121,8 @@ describe("matchmaking queue", () => {
     const b = await leader("qb", "rush them down up close");
     installVersion(store, { leaderId: a.id, agentId: a.agentId, versionId: a.version });
     installVersion(store, { leaderId: b.id, agentId: b.agentId, versionId: b.version });
+    optInAutobattle(store, a.id, t0);
+    optInAutobattle(store, b.id, t0);
     store.db.prepare("UPDATE leaders SET ap = ? WHERE id = ?").run(100, "l-solo");
     store.db.prepare("UPDATE leaders SET ap = ? WHERE id = ?").run(520, b.id);
     const q = requestMatch(store, { leaderId: a.id, versionId: a.version, mode: "ranked" }, t0);

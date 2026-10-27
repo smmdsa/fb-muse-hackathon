@@ -1,14 +1,15 @@
 // Cloudflare Worker entry. Full API on D1: auth, publish, fights, replay.
 
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
-import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
+import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, DAY_MS, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
 import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket } from "@agent-wars/tournaments";
 import type { Championship } from "@agent-wars/tournaments";
 import { CATALOG } from "@agent-wars/economy";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies, pickBot } from "@agent-wars/battle-core";
-import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
-import type { History } from "@agent-wars/matchmaker";
+import { MAX_DEFENSE_PER_DAY, recordDefense } from "@agent-wars/autobattle";
+import { pickOpponent } from "@agent-wars/matchmaker";
+import type { Candidate, History } from "@agent-wars/matchmaker";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
 import { checkLimit } from "./ids.ts";
@@ -277,6 +278,10 @@ async function autoDigestD1(env: WorkerEnv, leaderId: string, now: number): Prom
     leaseExpiresAt: st.leaseExpiresAt,
     state: st.state,
     energy: energyView(st, now),
+    defense: {
+      used: st.defenseAt.filter((t) => now - t < DAY_MS).length,
+      max: MAX_DEFENSE_PER_DAY,
+    },
     stopReason: await autoStopD1(env, leaderId, now),
     recent: rows.map((m) => {
       const mine = owned.has(m.a_version as string) ? "a" : "b";
@@ -384,21 +389,35 @@ async function findHumanOpponent(env: WorkerEnv, leaderId: string, now: number):
   ).bind().all<Record<string, unknown>>();
   const history: History = { marks: rows.map((m) => ({ a: m.a as string, b: m.b as string, at: m.at as number })) };
   const { results: agents } = await env.DB.prepare("SELECT * FROM agents WHERE active_version_id IS NOT NULL").bind().all<Record<string, unknown>>();
-  let best: { leaderId: string; versionId: string } | null = null;
-  let bestGap = Infinity;
+  const pool: Candidate[] = [];
   for (const a of agents) {
     const other = a.leader_id as string;
     if (other === leaderId) continue;
     const row = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(other).first<Record<string, unknown>>();
     if (!row) continue;
-    if (pairMeetings(history, leaderId, other, now) >= MAX_PAIR_MEETINGS) continue;
-    const gap = Math.abs((row.ap as number) - (me.ap as number));
-    if (gap < bestGap) {
-      bestGap = gap;
-      best = { leaderId: other, versionId: a.active_version_id as string };
-    }
+    const st: Record<string, unknown> = row.autobattle_json ? JSON.parse(row.autobattle_json as string) : {};
+    const defenses = Array.isArray(st.defenseAt) ? (st.defenseAt as number[]).length : 0;
+    if (defenses >= MAX_DEFENSE_PER_DAY) continue;
+    pool.push({
+      leaderId: other,
+      ratingMilli: row.rating_milli as number,
+      optIn: st.optIn === true,
+      published: true,
+      leaseExpiresAt: typeof st.leaseExpiresAt === "number" ? (st.leaseExpiresAt as number) : null,
+    });
   }
-  return best;
+  const foe = pickOpponent(history, {
+    leaderId,
+    ratingMilli: me.rating_milli as number,
+    optIn: true,
+    published: true,
+    leaseExpiresAt: now + 1,
+  }, pool, now);
+  if (!foe) return null;
+  const stamped = recordDefense(await energyFor(env, foe.leaderId, now), now);
+  await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(stamped.status), foe.leaderId).run();
+  const agent = await env.DB.prepare("SELECT active_version_id FROM agents WHERE leader_id = ?").bind(foe.leaderId).first<Record<string, unknown>>();
+  return { leaderId: foe.leaderId, versionId: agent?.active_version_id as string };
 }
 
 async function runCasualD1(
