@@ -8,6 +8,36 @@ importers:
 
   .: {}
 
+  apps/api:
+    dependencies:
+      '@agent-wars/ai-provider':
+        specifier: workspace:*
+        version: link:../../packages/ai-provider
+      '@agent-wars/autobattle':
+        specifier: workspace:*
+        version: link:../../packages/autobattle
+      '@agent-wars/battle-core':
+        specifier: workspace:*
+        version: link:../../packages/battle-core
+      '@agent-wars/behavior-dna':
+        specifier: workspace:*
+        version: link:../../packages/behavior-dna
+      '@agent-wars/economy':
+        specifier: workspace:*
+        version: link:../../packages/economy
+      '@agent-wars/leaderboard':
+        specifier: workspace:*
+        version: link:../../packages/leaderboard
+      '@agent-wars/matchmaker':
+        specifier: workspace:*
+        version: link:../../packages/matchmaker
+      '@agent-wars/ranking':
+        specifier: workspace:*
+        version: link:../../packages/ranking
+      '@agent-wars/tournaments':
+        specifier: workspace:*
+        version: link:../../packages/tournaments
+
   packages/ai-provider:
     dependencies:
       '@agent-wars/behavior-dna':

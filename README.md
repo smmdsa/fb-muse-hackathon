@@ -20,6 +20,17 @@ If a command fails, read the error and fix the cause before you retry.
 - Install: `pnpm install`. Scripts never run at install (`.npmrc` pins `ignore-scripts=true`).
 - Run all tests: `pnpm test`
 - Run pnpm from a plain path. If a run fails with `lstat 'E:'`, run `Set-Location -Path 'E:\muse-hacktoon'` first.
+
+## API
+
+Start it: `pnpm --filter @agent-wars/api dev`. It serves `http://127.0.0.1:8787` with a file database in `data/`.
+
+Prove it by hand (needs a shell that can bind ports):
+
+- `curl -X POST http://127.0.0.1:8787/v1/auth/session -d '{"handle":"you"}'` returns a token.
+- `curl -X POST http://127.0.0.1:8787/v1/agents -H "Authorization: Bearer TOKEN"` creates one agent.
+- `curl -X POST http://127.0.0.1:8787/v1/agents/AGENT/policies/compile -H "Authorization: Bearer TOKEN" -d '{"prompt":"rush them down"}'` publishes a version.
+- `curl -X POST http://127.0.0.1:8787/v1/matches/training -H "Authorization: Bearer TOKEN" -d '{"versionId":"VERSION","seed":"t1"}'` returns a checksum.
 - Run sim tests only: from `packages/battle-core`, run `node --test ./test/determinism.test.mjs ./test/mirror.test.mjs`
 - Smoke the sim: from `packages/battle-core`, run `node ./scripts/build-check.mjs`
 - Serve the demo: from `game/agent-wars`, run `python3 -m http.server 8765`, then open `http://127.0.0.1:8765/` in a browser.

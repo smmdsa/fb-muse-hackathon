@@ -1,0 +1,22 @@
+{
+  "name": "@agent-wars/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@agent-wars/ai-provider": "workspace:*",
+    "@agent-wars/autobattle": "workspace:*",
+    "@agent-wars/battle-core": "workspace:*",
+    "@agent-wars/behavior-dna": "workspace:*",
+    "@agent-wars/economy": "workspace:*",
+    "@agent-wars/leaderboard": "workspace:*",
+    "@agent-wars/matchmaker": "workspace:*",
+    "@agent-wars/ranking": "workspace:*",
+    "@agent-wars/tournaments": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test ./test/accounts.test.mjs ./test/matches.test.mjs",
+    "dev": "node ./src/dev.mjs"
+  }
+}
