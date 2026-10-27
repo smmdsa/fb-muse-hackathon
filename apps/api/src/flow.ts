@@ -322,7 +322,7 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
   const versionRows = store.db.prepare("SELECT * FROM versions WHERE agent_id = ? ORDER BY created_at").all(agentId) as Record<string, unknown>[];
   const versions = versionRows.map((v) => {
     const fights = store.db.prepare("SELECT * FROM matches WHERE a_version = ? OR b_version = ?").all(v.id, v.id) as Record<string, unknown>[];
-    const policy = JSON.parse(v.policy_json as string) as { rules: { id: string; move: string; fire?: boolean }[] };
+    const policy = JSON.parse(v.policy_json as string) as { dna: Record<string, number>; rules: { id: string; move: string; fire?: boolean }[] };
     const triggers: Record<string, number> = {};
     let wins = 0;
     let ticks = 0;
@@ -345,6 +345,7 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
       isMock: (v.is_mock ?? 1) === 1,
       createdAt: v.created_at,
       chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, triggers: triggers[r.id] ?? 0 })),
+      dna: policy.dna,
       fights: fights.length,
       wins,
       winRate: fights.length ? wins / fights.length : 0,

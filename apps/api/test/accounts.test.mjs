@@ -138,6 +138,8 @@ describe("accounts", () => {
     assert.equal(r.json.leader.tier, "CIRCUIT");
     assert.equal(r.json.versions.length, 1);
     assert.ok(r.json.versions[0].chips.length > 0);
+    assert.deepEqual(Object.keys(r.json.versions[0].dna).sort(), ["aggression", "energyConservation", "evasion", "preferredDistance"]);
+    assert.ok(r.json.versions[0].dna.aggression >= 50);
   });
 
   it("shows the leader summary", async () => {

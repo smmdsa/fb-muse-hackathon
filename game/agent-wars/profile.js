@@ -98,6 +98,13 @@ function renderDash(d) {
     head.textContent = `${v.versionId.slice(0, 14)}… — ${v.fights} fights, ${v.wins} wins, ${(v.winRate * 100).toFixed(0)}%, ${v.avgTicks} avg ticks `;
     head.appendChild(prov);
     card.appendChild(head);
+    const dna = document.createElement("p");
+    dna.className = "sub";
+    const traits = v.dna || {};
+    dna.textContent = ["aggression", "evasion", "preferredDistance", "energyConservation"]
+      .map((k) => `${k} ${traits[k] ?? "—"}`)
+      .join(" · ");
+    card.appendChild(dna);
     const table = document.createElement("table");
     table.className = "chips";
     const top = document.createElement("tr");

@@ -202,7 +202,7 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
   const versions = [];
   for (const v of versionRows) {
     const { results: fights } = await env.DB.prepare("SELECT * FROM matches WHERE a_version = ? OR b_version = ?").bind(v.id, v.id).all<Record<string, unknown>>();
-    const policy = JSON.parse(v.policy_json as string) as { rules: { id: string; move: string; fire?: boolean }[] };
+    const policy = JSON.parse(v.policy_json as string) as { dna: Record<string, number>; rules: { id: string; move: string; fire?: boolean }[] };
     const triggers: Record<string, number> = {};
     let wins = 0;
     let ticks = 0;
@@ -225,6 +225,7 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
       isMock: ((v.is_mock as number) ?? 1) === 1,
       createdAt: v.created_at,
       chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, triggers: triggers[r.id] ?? 0 })),
+      dna: policy.dna,
       fights: fights.length,
       wins,
       winRate: fights.length ? wins / fights.length : 0,
