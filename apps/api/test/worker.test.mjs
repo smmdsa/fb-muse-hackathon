@@ -198,6 +198,34 @@ describe("worker writes", () => {
     const fired = dash.versions[0].chips.reduce((n, c) => n + c.triggers, 0);
     assert.ok(fired > 0 && fired <= dash.versions[0].avgTicks * dash.versions[0].fights);
   });
+
+  it("refuses a second open ticket in the same mode", async () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0004_cost_audit.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0005_portrait_status.sql", import.meta.url), "utf8"));
+    db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l7", "solo7", "t7");
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a7", "l7", "v7");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v7", "a7", JSON.stringify({ schemaVersion: 1, agentVersionId: "v7", dna: { aggression: 80, evasion: 40, preferredDistance: 25, energyConservation: 50 }, rules: [{ id: "r", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true }] }), "shim", Date.now(),
+    );
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
+    const post = (path, body) => entry.fetch(new Request(`http://local${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer t7" },
+      body: JSON.stringify(body),
+    }), wenv).then(async (r) => ({ status: r.status, json: await r.json() }));
+    const first = await post("/v1/matchmaking/request", { versionId: "v7", mode: "ranked" });
+    assert.equal(first.status, 201);
+    assert.equal(first.json.status, "queued");
+    const dup = await post("/v1/matchmaking/request", { versionId: "v7", mode: "ranked" });
+    assert.equal(dup.status, 409);
+    assert.match(dup.json.error, /ticket already open/);
+    const other = await post("/v1/matchmaking/request", { versionId: "v7", mode: "casual" });
+    assert.equal(other.status, 201);
+  });
 });
 
 describe("worker replay", () => {

@@ -486,6 +486,8 @@ export function requestMatch(
   const version = getVersion(store, input.versionId);
   if (!version || !owned || version.agentId !== owned.id) throw new Error("unknown version");
   if ((owned.active_version_id as string) !== input.versionId) throw new Error("queue your active version");
+  const open = store.db.prepare("SELECT * FROM tickets WHERE leader_id = ? AND mode = ? AND status = 'queued'").get(input.leaderId, input.mode);
+  if (open) throw new Error("ticket already open for this mode");
   const spent = spendEnergy(store, input.leaderId, now);
   if (!spent.ok) throw new Error((spent as { reason: string }).reason);
   const id = mintId("t");

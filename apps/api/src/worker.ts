@@ -397,6 +397,8 @@ async function requestMatchD1(
   const version = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(input.versionId).first<Record<string, unknown>>();
   if (!version || !owned || version.agent_id !== owned.id) throw new Error("unknown version");
   if (owned.active_version_id !== input.versionId) throw new Error("queue your active version");
+  const open = await env.DB.prepare("SELECT * FROM tickets WHERE leader_id = ? AND mode = ? AND status = 'queued'").bind(input.leaderId, input.mode).first();
+  if (open) throw new Error("ticket already open for this mode");
   const spent = await spendEnergy(env, input.leaderId, now);
   if (!spent.ok) throw new Error(spent.reason ?? "energy empty");
   const id = mintId("t");

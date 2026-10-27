@@ -39,6 +39,19 @@ describe("matchmaking queue", () => {
     arena.close();
   });
 
+  it("refuses a second open ticket in the same mode", async () => {
+    const arena = openStore(":memory:");
+    const t0 = 970_000;
+    const d = await leader("single", "rush them down up close", arena);
+    installVersion(arena, { leaderId: d.id, agentId: d.agentId, versionId: d.version });
+    const first = requestMatch(arena, { leaderId: d.id, versionId: d.version, mode: "casual" }, t0);
+    assert.equal(first.status, "queued");
+    assert.throws(() => requestMatch(arena, { leaderId: d.id, versionId: d.version, mode: "casual" }, t0 + 1), /ticket already open/);
+    const other = requestMatch(arena, { leaderId: d.id, versionId: d.version, mode: "ranked" }, t0 + 1);
+    assert.equal(other.status, "queued");
+    arena.close();
+  });
+
   it("installs a draft before the queue accepts it", async () => {
     // Own arena: installed drafts here must not leak into the shared ladder.
     const arena = openStore(":memory:");
