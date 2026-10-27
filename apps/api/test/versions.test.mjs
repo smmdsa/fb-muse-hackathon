@@ -57,6 +57,22 @@ describe("version management", () => {
     assert.match(fought.json.error, /history/);
   });
 
+  it("flags an unreadable draft instead of blanking the dashboard", async () => {
+    store.db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at, provider, is_mock, tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "v-poison", me.agentId, "not-json{{{", "x", Date.now(), "meta", 0, 0, 0,
+    );
+    const dash = await call("GET", `/v1/agents/${me.agentId}/dashboard`, null, me.token);
+    assert.equal(dash.status, 200);
+    assert.ok(dash.json.versions.length >= 2);
+    const bad = dash.json.versions.find((v) => v.versionId === "v-poison");
+    assert.equal(bad.corrupt, true);
+    assert.deepEqual(bad.chips, []);
+    const del = await call("DELETE", `/v1/agents/${me.agentId}/policies/v-poison`, null, me.token);
+    assert.equal(del.status, 200);
+    const after = await call("GET", `/v1/agents/${me.agentId}/dashboard`, null, me.token);
+    assert.ok(!after.json.versions.some((v) => v.versionId === "v-poison"));
+  });
+
   it("404s foreign heroes and ghost versions", async () => {
     const s = await call("POST", "/v1/auth/session", { handle: "stranger" });
     const foreign = await call("DELETE", `/v1/agents/${me.agentId}/policies/${me.v1}`, null, s.json.token);

@@ -282,6 +282,12 @@ describe("worker writes", () => {
     assert.equal(gone.status, 200);
     const keep = await entry.fetch(new Request(`http://local/v1/agents/${aa.json.agentId}/policies/${va.json.versionId}`, { method: "DELETE", headers: { authorization: `Bearer ${sa.json.token}` } }), wenv);
     assert.equal(keep.status, 422);
+    await wenv.DB.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at, provider, is_mock, tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind("v-wpoison", aa.json.agentId, "broken{{{", "x", Date.now(), "meta", 0, 0, 0).run();
+    const dashW = await entry.fetch(new Request(`http://local/v1/agents/${aa.json.agentId}/dashboard`, { headers: { authorization: `Bearer ${sa.json.token}` } }), wenv);
+    assert.equal(dashW.status, 200);
+    const flagged = (await dashW.json()).versions.find((v) => v.versionId === "v-wpoison");
+    assert.equal(flagged.corrupt, true);
+    assert.deepEqual(flagged.chips, []);
   });
 
   it("stays dark with no admin key", async () => {
