@@ -20,13 +20,19 @@ function shim(db) {
 
 let env;
 
+const assetsStub = {
+  fetch: async () => new Response("<!doctype html><title>Agent Wars</title>", {
+    headers: { "content-type": "text/html" },
+  }),
+};
+
 before(() => {
   const db = new DatabaseSync(":memory:");
   db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
   db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     "l1", "commander", "t1", 1020000, 520, 5, 1,
   );
-  env = { DB: shim(db) };
+  env = { DB: shim(db), ASSETS: assetsStub };
 });
 
 describe("worker reads", () => {
@@ -47,6 +53,13 @@ describe("worker reads", () => {
     const res = await entry.fetch(new Request("http://local/v1/secret"), env);
     assert.equal(res.status, 401);
   });
+
+  it("serves the viewer shell at the root", async () => {
+    const res = await entry.fetch(new Request("http://local/"), env);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type"), /text\/html/);
+    assert.match(await res.text(), /Agent Wars/);
+  });
 });
 
 describe("worker writes", () => {
@@ -62,7 +75,7 @@ describe("worker writes", () => {
         }),
       }),
     };
-    const wenv = { DB: shimmed };
+    const wenv = { DB: shimmed, ASSETS: assetsStub };
     const call = (method, path, body, token) => {
       if (method !== "POST") throw new Error("writes only");
       return entry.fetch(
@@ -143,7 +156,7 @@ describe("worker replay", () => {
         }),
       }),
     };
-    const res = await entry.fetch(new Request("http://local/v1/matches/m9/replay"), { DB: shimmed });
+    const res = await entry.fetch(new Request("http://local/v1/matches/m9/replay"), { DB: shimmed, ASSETS: assetsStub });
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.identical, true);

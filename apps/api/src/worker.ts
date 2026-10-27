@@ -10,6 +10,7 @@ import { applyRanked, createLedger, rankFor, ratingFor } from "@agent-wars/ranki
 
 export type WorkerEnv = {
   DB: D1Database;
+  ASSETS: { fetch: (request: Request) => Promise<Response> };
   META_SPARK_KEY?: string;
   META_IMAGE_KEY?: string;
   META_API_BASE?: string;
@@ -126,6 +127,8 @@ async function pay(
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
+    // The viewer is a static asset. Anything outside /v1/ serves the game.
+    if (!url.pathname.startsWith("/v1/")) return env.ASSETS.fetch(request);
     if (request.method === "GET" && url.pathname === "/v1/health") {
       return json({ ok: true, worker: "agent-wars-api" });
     }
