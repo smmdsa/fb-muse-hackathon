@@ -18,23 +18,32 @@ export const BENCH_POLICY: AgentPolicy = {
 };
 
 // The runner fights two policies to the end. Same seed, same checksum.
+// It tallies which chip fired each tick per side for the dashboard.
 export function fightPolicies(
   a: AgentPolicy,
   b: AgentPolicy,
   seed: string,
-): { winner: string; ticks: number; checksum: string } {
+): { winner: string; ticks: number; checksum: string; chipsA: Record<string, number>; chipsB: Record<string, number> } {
   const cfg = { ...DEFAULT_BATTLE, seed };
   let state = createBattle(cfg);
+  const tallyA = new Map<string, number>();
+  const tallyB = new Map<string, number>();
   let guard = 0;
   while (!state.over && guard < cfg.world.maxTicks) {
     state = stepBattle(
       state,
-      { A: drive(state, a, "A", cfg), B: drive(state, b, "B", cfg) },
+      { A: drive(state, a, "A", cfg, tallyA), B: drive(state, b, "B", cfg, tallyB) },
       cfg,
     );
     guard += 1;
   }
-  return { winner: state.winner ?? "DRAW", ticks: state.tick, checksum: checksum(state) };
+  return {
+    winner: state.winner ?? "DRAW",
+    ticks: state.tick,
+    checksum: checksum(state),
+    chipsA: Object.fromEntries(tallyA),
+    chipsB: Object.fromEntries(tallyB),
+  };
 }
 
 function dir(from: Vec2, to: Vec2): Vec2 {
@@ -100,9 +109,11 @@ export function drive(
   policy: AgentPolicy,
   me: AgentId,
   cfg: BattleConfig,
+  tally?: Map<string, number>,
 ): AgentAction {
   const obs = observe(state, me, cfg);
   const want = evaluate(policy, obs);
+  if (tally) tally.set(want.ruleId, (tally.get(want.ruleId) ?? 0) + 1);
   const a = state.agents[me];
   const foeId: AgentId = me === "A" ? "B" : "A";
   const f = state.agents[foeId];

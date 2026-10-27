@@ -1,6 +1,6 @@
 // Cloudflare Worker entry. Full API on D1: auth, publish, fights, replay.
 
-import { providerFromEnv } from "@agent-wars/ai-provider";
+import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
 import { BENCH_POLICY, fightPolicies } from "@agent-wars/battle-core";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
@@ -31,7 +31,11 @@ type D1Database = {
 function json(body: unknown, code = 200): Response {
   return new Response(JSON.stringify(body), {
     status: code,
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "access-control-allow-origin": "*",
+      "access-control-allow-headers": "authorization, content-type",
+    },
   });
 }
 
@@ -124,11 +128,68 @@ async function pay(
   return res.credited;
 }
 
+// The dashboard serves one hero with chip stats per version.
+async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string): Promise<Record<string, unknown>> {
+  const agent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
+  if (!agent || agent.leader_id !== leaderId) throw new Error("agent not found for this leader");
+  const leader = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>();
+  if (!leader) throw new Error("leader not found");
+  const rank = rankFor(leader.ap as number);
+  const { results: versionRows } = await env.DB.prepare("SELECT * FROM versions WHERE agent_id = ? ORDER BY created_at").bind(agentId).all<Record<string, unknown>>();
+  const versions = [];
+  for (const v of versionRows) {
+    const { results: fights } = await env.DB.prepare("SELECT * FROM matches WHERE a_version = ? OR b_version = ?").bind(v.id, v.id).all<Record<string, unknown>>();
+    const policy = JSON.parse(v.policy_json as string) as { rules: { id: string; move: string; fire?: boolean }[] };
+    const triggers: Record<string, number> = {};
+    let wins = 0;
+    let ticks = 0;
+    for (const f of fights) {
+      const side = f.a_version === v.id ? "a" : "b";
+      if ((side === "a" && f.winner === "A") || (side === "b" && f.winner === "B")) wins += 1;
+      ticks += f.ticks as number;
+      try {
+        const chips = JSON.parse((f.chips_json as string) || "{}") as Record<string, Record<string, number>>;
+        for (const [chip, n] of Object.entries(chips[side] ?? {})) {
+          triggers[chip] = (triggers[chip] ?? 0) + (n as number);
+        }
+      } catch {
+        continue;
+      }
+    }
+    versions.push({
+      versionId: v.id,
+      provider: (v.provider as string) ?? "mock",
+      isMock: ((v.is_mock as number) ?? 1) === 1,
+      createdAt: v.created_at,
+      chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, triggers: triggers[r.id] ?? 0 })),
+      fights: fights.length,
+      wins,
+      winRate: fights.length ? wins / fights.length : 0,
+      avgTicks: fights.length ? Math.round(ticks / fights.length) : 0,
+    });
+  }
+  return {
+    agent: { id: agent.id, name: agent.name ?? null, concept: agent.concept ?? null, portraitUrl: agent.portrait_url ?? null, activeVersionId: agent.active_version_id ?? null },
+    leader: { handle: leader.handle, ap: leader.ap, ac: leader.ac, tier: rank.tier, division: rank.division },
+    versions,
+  };
+}
+
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
     // The viewer is a static asset. Anything outside /v1/ serves the game.
     if (!url.pathname.startsWith("/v1/")) return env.ASSETS.fetch(request);
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "access-control-allow-origin": "*",
+          "access-control-allow-headers": "authorization, content-type",
+          "access-control-allow-methods": "GET, POST, OPTIONS",
+        },
+      });
+    }
     if (request.method === "GET" && url.pathname === "/v1/health") {
       return json({ ok: true, worker: "agent-wars-api" });
     }
@@ -160,9 +221,35 @@ export default {
     if (request.method === "POST" && url.pathname === "/v1/agents") {
       const exists = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(me.id as string).first();
       if (exists) return json({ error: "one agent per leader in this phase" }, 409);
+      const created = await readBody(request);
+      if (created === null) return json({ error: "bad json" }, 400);
+      const name = typeof created.name === "string" ? created.name.slice(0, 60) : "";
+      const concept = typeof created.concept === "string" ? created.concept.slice(0, 280) : "";
+      let portraitUrl: string | null = null;
+      if (hasKey("portrait", env)) {
+        try {
+          const art = await portraitFromEnv(env).generatePortrait({
+            prompt: portraitPromptFor(`${name || "arena robot"}: ${concept || "arena fighter"}`),
+          });
+          portraitUrl = art.url;
+        } catch {
+          portraitUrl = null;
+        }
+      }
       const id = mintId("agent");
-      await env.DB.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, NULL)").bind(id, me.id as string).run();
-      return json({ agentId: id }, 201);
+      await env.DB.prepare(
+        "INSERT INTO agents (id, leader_id, active_version_id, name, concept, portrait_url) VALUES (?, ?, NULL, ?, ?, ?)",
+      ).bind(id, me.id as string, name || null, concept || null, portraitUrl).run();
+      return json({ agentId: id, portraitUrl }, 201);
+    }
+    const dashMatch = request.method === "GET" && /^\/v1\/agents\/[^/]+\/dashboard$/.exec(url.pathname);
+    if (dashMatch) {
+      const agentId = url.pathname.split("/")[3];
+      try {
+        return json(await agentDashboard(env, agentId, me.id as string));
+      } catch (err) {
+        return json({ error: (err as Error).message }, 404);
+      }
     }
     const compileMatch = request.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/compile$/.test(url.pathname);
     if (compileMatch) {
@@ -175,16 +262,16 @@ export default {
       if (!prompt) return json({ error: "prompt is required" }, 400);
       const versionId = mintId("v");
       const compiled = await providerFromEnv(env).compileStrategy({ prompt, agentVersionId: versionId });
-      if (!compiled.policy) return json({ error: "draft failed validation", errors: compiled.errors }, 422);
+      if (!compiled.policy) return json({ error: "draft failed validation", errors: compiled.errors, provider: compiled.provider, isMock: compiled.isMock }, 422);
       const check = validatePolicy(compiled.policy);
-      if (!check.ok) return json({ error: "draft failed validation", errors: check.errors }, 422);
+      if (!check.ok) return json({ error: "draft failed validation", errors: check.errors, provider: compiled.provider, isMock: compiled.isMock }, 422);
       const sha = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(compiled.policy)));
       const hex = [...new Uint8Array(sha)].map((x) => x.toString(16).padStart(2, "0")).join("");
-      await env.DB.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").bind(
-        versionId, agentId, JSON.stringify(compiled.policy), hex, Date.now(),
-      ).run();
+      await env.DB.prepare(
+        "INSERT INTO versions (id, agent_id, policy_json, sha, created_at, provider, is_mock) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).bind(versionId, agentId, JSON.stringify(compiled.policy), hex, Date.now(), compiled.provider, compiled.isMock ? 1 : 0).run();
       await env.DB.prepare("UPDATE agents SET active_version_id = ? WHERE id = ?").bind(versionId, agentId).run();
-      return json({ versionId }, 201);
+      return json({ versionId, provider: compiled.provider, isMock: compiled.isMock }, 201);
     }
     if (request.method === "POST" && url.pathname === "/v1/matches/training") {
       const body = await readBody(request);
@@ -197,8 +284,8 @@ export default {
       const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, BENCH_POLICY, seed);
       const id = mintId("m");
       await env.DB.prepare(
-        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)",
-      ).bind(id, seed, versionId, "benchmark-v1", out.winner, out.ticks, out.checksum, Date.now()).run();
+        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+      ).bind(id, seed, versionId, "benchmark-v1", out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })).run();
       return json({ matchId: id, ...out }, 201);
     }
     if (request.method === "POST" && url.pathname === "/v1/matches/ranked") {
@@ -252,8 +339,8 @@ export default {
       const paidA = await pay(env, aAgent.leader_id as string, key, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
       const paidB = await pay(env, bAgent.leader_id as string, key, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
       await env.DB.prepare(
-        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
-      ).bind(key, seed, aVersionId, bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, Date.now()).run();
+        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)"
+      ).bind(key, seed, aVersionId, bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })).run();
       return json({ matchId: key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA, paidB }, 201);
     }
     return json({ error: "unknown route" }, 404);
