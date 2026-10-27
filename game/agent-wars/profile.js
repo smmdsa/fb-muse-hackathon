@@ -158,14 +158,22 @@ async function renderDash(d) {
     head.textContent = `${v.versionId.slice(0, 14)}… — ${v.fights} fights, ${v.wins} wins, ${(v.winRate * 100).toFixed(0)}%, ${v.avgTicks} avg ticks `;
     head.appendChild(prov);
     card.appendChild(head);
-    const dna = document.createElement("p");
-    dna.className = "sub";
-    const traits = v.dna || {};
-    dna.textContent = ["aggression", "evasion", "preferredDistance", "energyConservation"]
-      .map((k) => `${k} ${traits[k] ?? "—"}`)
-      .join(" · ");
-    card.appendChild(dna);
-    if (v.versionId !== d.agent.activeVersionId) {
+    if (v.corrupt) {
+      const bad = document.createElement("p");
+      bad.className = "sub";
+      bad.textContent = "Unreadable draft — its rules never saved right. Delete it below and compile again.";
+      card.appendChild(bad);
+    }
+    if (!v.corrupt) {
+      const dna = document.createElement("p");
+      dna.className = "sub";
+      const traits = v.dna || {};
+      dna.textContent = ["aggression", "evasion", "preferredDistance", "energyConservation"]
+        .map((k) => `${k} ${traits[k] ?? "—"}`)
+        .join(" · ");
+      card.appendChild(dna);
+    }
+    if (v.versionId !== d.agent.activeVersionId && !v.corrupt) {
       const fit = document.createElement("button");
       fit.className = "btn-ghost";
       fit.type = "button";
@@ -178,6 +186,8 @@ async function renderDash(d) {
         await refresh();
       });
       card.appendChild(fit);
+    }
+    if (v.versionId !== d.agent.activeVersionId) {
       const drop = document.createElement("button");
       drop.className = "btn-ghost";
       drop.type = "button";
@@ -209,7 +219,7 @@ async function renderDash(d) {
       }
       table.appendChild(tr);
     }
-    card.appendChild(table);
+    if (!v.corrupt) card.appendChild(table);
   }
   show($("dash-card"), true);
   renderHist(d);

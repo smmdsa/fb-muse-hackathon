@@ -392,8 +392,9 @@ export function deleteVersion(
 ): { deleted: boolean } {
   const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
   if (!agent || agent.leader_id !== input.leaderId) throw new Error("agent not found for this leader");
-  const version = getVersion(store, input.versionId);
-  if (!version || version.agentId !== input.agentId) throw new Error("unknown version for this agent");
+  // Read the row raw: a corrupt draft must stay deletable, never parse-gated.
+  const version = store.db.prepare("SELECT * FROM versions WHERE id = ?").get(input.versionId) as Record<string, unknown> | null;
+  if (!version || version.agent_id !== input.agentId) throw new Error("unknown version for this agent");
   if (agent.active_version_id === input.versionId) throw new Error("the active version fights on: install another first");
   const fights = store.db.prepare("SELECT id FROM matches WHERE a_version = ? OR b_version = ? LIMIT 1").get(input.versionId, input.versionId);
   if (fights) throw new Error("this version has fights: history keeps it");
@@ -484,9 +485,32 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
   const leader = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown>;
   const rank = rankFor(leader.ap as number);
   const versionRows = store.db.prepare("SELECT * FROM versions WHERE agent_id = ? ORDER BY created_at").all(agentId) as Record<string, unknown>[];
+  // One unreadable draft never blanks the dashboard. It shows flagged,
+  // and the owner can delete it from the same card.
   const versions = versionRows.map((v) => {
     const fights = store.db.prepare("SELECT * FROM matches WHERE a_version = ? OR b_version = ?").all(v.id, v.id) as Record<string, unknown>[];
-    const policy = JSON.parse(v.policy_json as string) as { dna: Record<string, number>; rules: { id: string; move: string; fire?: boolean; when: unknown }[] };
+    let policy: { dna: Record<string, number>; rules: { id: string; move: string; fire?: boolean; when: unknown }[] } | null = null;
+    try {
+      policy = JSON.parse(v.policy_json as string) as { dna: Record<string, number>; rules: { id: string; move: string; fire?: boolean; when: unknown }[] };
+      if (!policy || !Array.isArray(policy.rules)) policy = null;
+    } catch {
+      policy = null;
+    }
+    if (!policy) {
+      return {
+        versionId: v.id,
+        provider: v.provider ?? "mock",
+        isMock: (v.is_mock ?? 1) === 1,
+        createdAt: v.created_at,
+        corrupt: true,
+        chips: [],
+        dna: null,
+        fights: fights.length,
+        wins: 0,
+        winRate: 0,
+        avgTicks: 0,
+      };
+    }
     const triggers: Record<string, number> = {};
     let wins = 0;
     let ticks = 0;
@@ -508,6 +532,7 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
       provider: v.provider ?? "mock",
       isMock: (v.is_mock ?? 1) === 1,
       createdAt: v.created_at,
+      corrupt: false,
       chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, when: r.when ?? null, triggers: triggers[r.id] ?? 0 })),
       dna: policy.dna,
       fights: fights.length,
