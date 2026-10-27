@@ -10,7 +10,8 @@ import { buildStandings } from "@agent-wars/leaderboard";
 import { explainerFromEnv, hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
 import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, DAY_MS, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
-import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket } from "@agent-wars/tournaments";
+import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket, transition as transitionEvent } from "@agent-wars/tournaments";
+import type { EventPhase } from "@agent-wars/tournaments";
 import type { Championship } from "@agent-wars/tournaments";
 import { CATALOG } from "@agent-wars/economy";
 import { pickBot } from "@agent-wars/battle-core";
@@ -767,18 +768,28 @@ export function autobattleDigest(store: Store, leaderId: string, now = Date.now(
   };
 }
 
-// One open cup. Bootstrap on first read; organizers gate creation later.
+// One open cup. Bootstrap on first read; organizers author the rest.
 const CUP_ID = "s1-kickoff";
 
-function readCup(store: Store): { row: Record<string, unknown> | null } {
-  const row = store.db.prepare("SELECT * FROM tournaments WHERE id = ?").get(CUP_ID) as Record<string, unknown> | null;
-  return { row };
+function readEventRow(store: Store, eventId: string): Record<string, unknown> | null {
+  return store.db.prepare("SELECT * FROM tournaments WHERE id = ?").get(eventId) as Record<string, unknown> | null;
 }
 
-function cupView(event: Championship, games: Record<string, string[]>): Record<string, unknown> {
+function parseEvent(row: Record<string, unknown>): { event: Championship; games: Record<string, string[]> } {
+  return {
+    event: JSON.parse(row.event_json as string) as Championship,
+    games: JSON.parse(row.games_json as string) as Record<string, string[]>,
+  };
+}
+
+function saveEvent(store: Store, eventId: string, event: Championship, games: Record<string, string[]>): void {
+  store.db.prepare("UPDATE tournaments SET event_json = ?, games_json = ? WHERE id = ?").run(JSON.stringify(event), JSON.stringify(games), eventId);
+}
+
+function eventView(name: string, event: Championship, games: Record<string, string[]>): Record<string, unknown> {
   return {
     id: event.id,
-    name: "S1 Kickoff Cup",
+    name,
     phase: event.phase,
     maxPlayers: event.maxPlayers,
     minAp: event.minAp,
@@ -789,27 +800,76 @@ function cupView(event: Championship, games: Record<string, string[]>): Record<s
   };
 }
 
+function bootstrapCup(store: Store): void {
+  if (readEventRow(store, CUP_ID)) return;
+  const now = Date.now();
+  const event = createEvent({ id: CUP_ID, seed: "kickoff-s1", maxPlayers: 8, minAp: 0, registrationCloseAt: now + 30 * 24 * 60 * 60 * 1000 });
+  store.db.prepare("INSERT INTO tournaments (id, name, event_json, games_json, created_at) VALUES (?, ?, ?, ?, ?)").run(
+    CUP_ID, "S1 Kickoff Cup", JSON.stringify(event), "{}", now,
+  );
+}
+
 export function listTournaments(store: Store): Record<string, unknown>[] {
-  const { row } = readCup(store);
-  if (!row) {
-    const now = Date.now();
-    const event = createEvent({ id: CUP_ID, seed: "kickoff-s1", maxPlayers: 8, minAp: 0, registrationCloseAt: now + 30 * 24 * 60 * 60 * 1000 });
-    store.db.prepare("INSERT INTO tournaments (id, name, event_json, games_json, created_at) VALUES (?, ?, ?, ?, ?)").run(
-      CUP_ID, "S1 Kickoff Cup", JSON.stringify(event), "{}", now,
-    );
-    return [{ id: CUP_ID, name: "S1 Kickoff Cup", phase: event.phase, entries: 0, maxPlayers: 8 }];
-  }
-  const event = JSON.parse(row.event_json as string) as Championship;
-  return [{ id: CUP_ID, name: row.name, phase: event.phase, entries: event.entries.length, maxPlayers: event.maxPlayers }];
+  bootstrapCup(store);
+  const rows = store.db.prepare("SELECT * FROM tournaments ORDER BY created_at ASC").all() as Record<string, unknown>[];
+  return rows.map((row) => {
+    const { event } = parseEvent(row);
+    return { id: row.id, name: row.name, phase: event.phase, entries: event.entries.length, maxPlayers: event.maxPlayers };
+  });
 }
 
 export function getTournament(store: Store, eventId: string): Record<string, unknown> {
-  if (eventId !== CUP_ID) throw new Error("unknown tournament");
-  listTournaments(store);
-  const { row } = readCup(store);
-  const event = JSON.parse((row as Record<string, unknown>).event_json as string) as Championship;
-  const games = JSON.parse((row as Record<string, unknown>).games_json as string) as Record<string, string[]>;
-  return cupView(event, games);
+  bootstrapCup(store);
+  const row = readEventRow(store, eventId);
+  if (!row) throw new Error("unknown tournament");
+  const { event, games } = parseEvent(row);
+  return eventView(row.name as string, event, games);
+}
+
+// Organizers author events. Brackets need a power-of-two house, so the cap is one.
+export function createTournament(
+  store: Store,
+  input: { id: string; name: string; maxPlayers: number; minAp: number; registrationCloseAt: number },
+  now = Date.now(),
+): Record<string, unknown> {
+  const id = input.id.trim().toLowerCase();
+  if (!/^[a-z0-9-]{3,40}$/.test(id)) throw new Error("event id must be a 3-40 char slug");
+  if (readEventRow(store, id)) throw new Error(`event ${id} already exists`);
+  const name = input.name.trim().slice(0, 80);
+  if (!name) throw new Error("event name is required");
+  const maxPlayers = Math.floor(input.maxPlayers);
+  if (![2, 4, 8, 16, 32, 64].includes(maxPlayers)) throw new Error("maxPlayers must be a power of two from 2 to 64");
+  const minAp = Math.floor(input.minAp);
+  if (!(minAp >= 0)) throw new Error("minAp must be zero or more");
+  if (!(input.registrationCloseAt > now)) throw new Error("registrationCloseAt must be in the future");
+  const event: Championship = { ...createEvent({ id, seed: `${id}-seed`, maxPlayers, minAp, registrationCloseAt: input.registrationCloseAt }), phase: "DRAFT" };
+  store.db.prepare("INSERT INTO tournaments (id, name, event_json, games_json, created_at) VALUES (?, ?, ?, ?, ?)").run(
+    id, name, JSON.stringify(event), "{}", now,
+  );
+  return eventView(name, event, {});
+}
+
+// Organizers walk the chain one step at a time. Locks freeze versions; live seeds the bracket.
+const PHASES: EventPhase[] = ["DRAFT", "ANNOUNCED", "REGISTRATION_OPEN", "LOCKED", "SEEDED", "LIVE", "COMPLETED", "CANCELLED"];
+
+export function transitionTournament(
+  store: Store,
+  input: { eventId: string; to: string },
+): Record<string, unknown> {
+  if (!(PHASES as string[]).includes(input.to)) throw new Error(`unknown phase ${input.to}`);
+  const row = readEventRow(store, input.eventId);
+  if (!row) throw new Error("unknown tournament");
+  let { event, games } = parseEvent(row);
+  const to = input.to as EventPhase;
+  if (to === "LOCKED") {
+    if (event.entries.length < 2) throw new Error("lock needs at least two entries");
+    event = lock(transitionEvent(event, to));
+  } else {
+    if (to === "LIVE" && !event.bracket) event = seedBracket(event);
+    event = transitionEvent(event, to);
+  }
+  saveEvent(store, input.eventId, event, games);
+  return eventView(row.name as string, event, games);
 }
 
 function leaderOf(event: Championship, versionId: string): string | null {
@@ -865,21 +925,18 @@ function playBracket(store: Store, event: Championship, games: Record<string, st
   return { event: ev, games };
 }
 
-function saveCup(store: Store, event: Championship, games: Record<string, string[]>): void {
-  store.db.prepare("UPDATE tournaments SET event_json = ?, games_json = ? WHERE id = ?").run(JSON.stringify(event), JSON.stringify(games), CUP_ID);
-}
-
-// Register the active version. The eighth seat locks, seeds, and plays.
+// Register the active version. A full house locks and seeds.
+// The kickoff cup also plays to a champion on the spot.
 export function registerTournament(
   store: Store,
   input: { eventId: string; leaderId: string; versionId: string; now?: number },
 ): { entered: boolean; started: boolean; event: Record<string, unknown> } {
-  if (input.eventId !== CUP_ID) throw new Error("unknown tournament");
-  listTournaments(store);
+  bootstrapCup(store);
   const now = input.now ?? Date.now();
-  const { row } = readCup(store);
-  let event = JSON.parse((row as Record<string, unknown>).event_json as string) as Championship;
-  const games = JSON.parse((row as Record<string, unknown>).games_json as string) as Record<string, string[]>;
+  const row = readEventRow(store, input.eventId);
+  if (!row) throw new Error("unknown tournament");
+  let { event, games } = parseEvent(row);
+  const name = row.name as string;
   const agent = store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(input.leaderId) as Record<string, unknown> | null;
   if (!agent) throw new Error("breed a hero first");
   if (agent.active_version_id !== input.versionId) throw new Error("register your active version");
@@ -891,13 +948,15 @@ export function registerTournament(
   if (event.entries.length >= event.maxPlayers) {
     event = seedBracket(lock(event));
     started = true;
-    const done = playBracket(store, event, games);
-    event = done.event;
-    saveCup(store, event, done.games);
-    return { entered: true, started, event: cupView(event, done.games) };
+    if (input.eventId === CUP_ID) {
+      const done = playBracket(store, event, games);
+      event = done.event;
+      saveEvent(store, input.eventId, event, done.games);
+      return { entered: true, started, event: eventView(name, event, done.games) };
+    }
   }
-  saveCup(store, event, games);
-  return { entered: true, started, event: cupView(event, games) };
+  saveEvent(store, input.eventId, event, games);
+  return { entered: true, started, event: eventView(name, event, games) };
 }
 
 // The armory sells looks, never power. Skins, trails, and banners only.

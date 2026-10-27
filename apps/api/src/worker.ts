@@ -3,7 +3,8 @@
 import { explainerFromEnv, hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
 import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, DAY_MS, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
-import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket } from "@agent-wars/tournaments";
+import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket, transition as transitionEvent } from "@agent-wars/tournaments";
+import type { EventPhase } from "@agent-wars/tournaments";
 import type { Championship } from "@agent-wars/tournaments";
 import { CATALOG } from "@agent-wars/economy";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies, pickBot } from "@agent-wars/battle-core";
@@ -37,6 +38,7 @@ export type WorkerEnv = {
   META_API_BASE?: string;
   AGENT_WARS_MODEL_COMPILE?: string;
   AGENT_WARS_MODEL_PORTRAIT?: string;
+  ADMIN_KEY?: string;
 };
 
 type D1Database = {
@@ -687,6 +689,76 @@ export default {
       await env.DB.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").bind(id, handle, token).run();
       return json({ token, leaderId: id });
     }
+    const adminOk = (given: string): boolean => {
+      const expected = (env as WorkerEnv).ADMIN_KEY ?? "";
+      if (!expected || given.length !== expected.length) return false;
+      let diff = 0;
+      for (let i = 0; i < given.length; i += 1) diff |= given.charCodeAt(i) ^ expected.charCodeAt(i);
+      return diff === 0;
+    };
+    const adminGate = (): Response | null => {
+      if (!((env as WorkerEnv).ADMIN_KEY)) return json({ error: "admin console is disabled: set ADMIN_KEY first" }, 503);
+      return null;
+    };
+    if (request.method === "POST" && url.pathname === "/v1/admin/events") {
+      const closed = adminGate();
+      if (closed) return closed;
+      if (!adminOk(request.headers.get("x-admin-key") ?? "")) return json({ error: "admin sign-in required" }, 401);
+      const body = await readBody(request);
+      if (body === null) return json({ error: "bad json" }, 400);
+      const id = typeof body.id === "string" ? body.id.trim().toLowerCase() : "";
+      const name = typeof body.name === "string" ? body.name.trim().slice(0, 80) : "";
+      const maxPlayers = typeof body.maxPlayers === "number" ? Math.floor(body.maxPlayers) : 0;
+      const minAp = typeof body.minAp === "number" ? Math.floor(body.minAp) : 0;
+      const registrationCloseAt = typeof body.registrationCloseAt === "number" ? body.registrationCloseAt : 0;
+      if (!/^[a-z0-9-]{3,40}$/.test(id)) return json({ error: "event id must be a 3-40 char slug" }, 422);
+      if (!name) return json({ error: "event name is required" }, 422);
+      if (![2, 4, 8, 16, 32, 64].includes(maxPlayers)) return json({ error: "maxPlayers must be a power of two from 2 to 64" }, 422);
+      if (!(minAp >= 0)) return json({ error: "minAp must be zero or more" }, 422);
+      if (!(registrationCloseAt > Date.now())) return json({ error: "registrationCloseAt must be in the future" }, 422);
+      const dup = await env.DB.prepare("SELECT id FROM tournaments WHERE id = ?").bind(id).first<Record<string, unknown>>();
+      if (dup) return json({ error: `event ${id} already exists` }, 422);
+      const event: Championship = { ...createEvent({ id, seed: `${id}-seed`, maxPlayers, minAp, registrationCloseAt }), phase: "DRAFT" };
+      await env.DB.prepare("INSERT INTO tournaments (id, name, event_json, games_json, created_at) VALUES (?, ?, ?, ?, ?)").bind(
+        id, name, JSON.stringify(event), "{}", Date.now(),
+      ).run();
+      return json({ id: event.id, name, phase: event.phase, maxPlayers: event.maxPlayers, minAp: event.minAp, registrationCloseAt: event.registrationCloseAt, entries: [], bracket: null, games: {} }, 201);
+    }
+    const adminTransMatch = request.method === "POST" && /^\/v1\/admin\/events\/[^/]+\/transition$/.exec(url.pathname);
+    if (adminTransMatch) {
+      const closed = adminGate();
+      if (closed) return closed;
+      if (!adminOk(request.headers.get("x-admin-key") ?? "")) return json({ error: "admin sign-in required" }, 401);
+      const body = await readBody(request);
+      if (body === null) return json({ error: "bad json" }, 400);
+      const to = typeof body.to === "string" ? body.to : "";
+      const phases: EventPhase[] = ["DRAFT", "ANNOUNCED", "REGISTRATION_OPEN", "LOCKED", "SEEDED", "LIVE", "COMPLETED", "CANCELLED"];
+      if (!(phases as string[]).includes(to)) return json({ error: `unknown phase ${to}` }, 422);
+      const row = await env.DB.prepare("SELECT * FROM tournaments WHERE id = ?").bind(decodeURIComponent(adminTransMatch[0].split("/")[4])).first<Record<string, unknown>>();
+      if (!row) return json({ error: "unknown tournament" }, 404);
+      let event = JSON.parse(row.event_json as string) as Championship;
+      const games = JSON.parse(row.games_json as string) as Record<string, string[]>;
+      try {
+        if (to === "LOCKED") {
+          if (event.entries.length < 2) return json({ error: "lock needs at least two entries" }, 422);
+          event = lock(transitionEvent(event, to as EventPhase));
+        } else {
+          if (to === "LIVE" && !event.bracket) event = seedBracket(event);
+          event = transitionEvent(event, to as EventPhase);
+        }
+      } catch (err) {
+        return json({ error: (err as Error).message }, 422);
+      }
+      await env.DB.prepare("UPDATE tournaments SET event_json = ?, games_json = ? WHERE id = ?").bind(JSON.stringify(event), JSON.stringify(games), row.id as string).run();
+      return json({
+        id: event.id,
+        name: row.name,
+        phase: event.phase,
+        entries: event.entries.map((e) => ({ leaderId: e.leaderId, lockedVersionId: e.lockedVersionId, registeredAt: e.registeredAt })),
+        bracket: event.bracket,
+        games,
+      }, 200);
+    }
     const me = await bearer(request, env);
     if (!me) return json({ error: "bearer token is required: call POST /v1/auth/session first" }, 401);
     if (request.method === "GET" && url.pathname === "/v1/me") {
@@ -969,9 +1041,9 @@ export default {
       }
     }
     const CUP_ID = "s1-kickoff";
-    const cupView = (event: Championship, games: Record<string, string[]>): Record<string, unknown> => ({
+    const cupView = (name: string, event: Championship, games: Record<string, string[]>): Record<string, unknown> => ({
       id: event.id,
-      name: "S1 Kickoff Cup",
+      name,
       phase: event.phase,
       maxPlayers: event.maxPlayers,
       minAp: event.minAp,
@@ -980,40 +1052,58 @@ export default {
       bracket: event.bracket,
       games,
     });
-    const readCup = async (): Promise<{ event: Championship; games: Record<string, string[]> }> => {
-      let row = await env.DB.prepare("SELECT * FROM tournaments WHERE id = ?").bind(CUP_ID).first<Record<string, unknown>>();
-      if (!row) {
-        const now = Date.now();
-        const fresh = createEvent({ id: CUP_ID, seed: "kickoff-s1", maxPlayers: 8, minAp: 0, registrationCloseAt: now + 30 * 24 * 60 * 60 * 1000 });
-        await env.DB.prepare("INSERT INTO tournaments (id, name, event_json, games_json, created_at) VALUES (?, ?, ?, ?, ?)").bind(
-          CUP_ID, "S1 Kickoff Cup", JSON.stringify(fresh), "{}", now,
-        ).run();
-        row = await env.DB.prepare("SELECT * FROM tournaments WHERE id = ?").bind(CUP_ID).first<Record<string, unknown>>();
-      }
+    const readEvent = async (eventId: string): Promise<{ name: string; event: Championship; games: Record<string, string[]> } | null> => {
+      const row = await env.DB.prepare("SELECT * FROM tournaments WHERE id = ?").bind(eventId).first<Record<string, unknown>>();
+      if (!row) return null;
       return {
-        event: JSON.parse((row as Record<string, unknown>).event_json as string) as Championship,
-        games: JSON.parse((row as Record<string, unknown>).games_json as string) as Record<string, string[]>,
+        name: row.name as string,
+        event: JSON.parse(row.event_json as string) as Championship,
+        games: JSON.parse(row.games_json as string) as Record<string, string[]>,
       };
     };
+    const bootstrapCup = async (): Promise<void> => {
+      const row = await env.DB.prepare("SELECT * FROM tournaments WHERE id = ?").bind(CUP_ID).first<Record<string, unknown>>();
+      if (row) return;
+      const now = Date.now();
+      const fresh = createEvent({ id: CUP_ID, seed: "kickoff-s1", maxPlayers: 8, minAp: 0, registrationCloseAt: now + 30 * 24 * 60 * 60 * 1000 });
+      await env.DB.prepare("INSERT INTO tournaments (id, name, event_json, games_json, created_at) VALUES (?, ?, ?, ?, ?)").bind(
+        CUP_ID, "S1 Kickoff Cup", JSON.stringify(fresh), "{}", now,
+      ).run();
+    };
+    const saveEvent = async (eventId: string, event: Championship, games: Record<string, string[]>): Promise<void> => {
+      await env.DB.prepare("UPDATE tournaments SET event_json = ?, games_json = ? WHERE id = ?").bind(JSON.stringify(event), JSON.stringify(games), eventId).run();
+    };
     if (request.method === "GET" && url.pathname === "/v1/tournaments") {
-      const { event } = await readCup();
-      return json({ tournaments: [{ id: CUP_ID, name: "S1 Kickoff Cup", phase: event.phase, entries: event.entries.length, maxPlayers: event.maxPlayers }] });
+      await bootstrapCup();
+      const { results: rows } = await env.DB.prepare("SELECT * FROM tournaments ORDER BY created_at ASC").bind().all<Record<string, unknown>>();
+      return json({
+        tournaments: rows.map((row) => {
+          const event = JSON.parse(row.event_json as string) as Championship;
+          return { id: row.id, name: row.name, phase: event.phase, entries: event.entries.length, maxPlayers: event.maxPlayers };
+        }),
+      });
     }
     const tournMatch = request.method === "GET" && /^\/v1\/tournaments\/[^/]+$/.exec(url.pathname);
     if (tournMatch) {
-      if (url.pathname.split("/")[3] !== CUP_ID) return json({ error: "unknown tournament" }, 404);
-      const { event, games } = await readCup();
-      return json(cupView(event, games));
+      await bootstrapCup();
+      const found = await readEvent(url.pathname.split("/")[3]);
+      if (!found) return json({ error: "unknown tournament" }, 404);
+      return json(cupView(found.name, found.event, found.games));
     }
     const regMatch = request.method === "POST" && /^\/v1\/tournaments\/[^/]+\/register$/.test(url.pathname);
     if (regMatch) {
       try {
-      if (url.pathname.split("/")[3] !== CUP_ID) return json({ error: "unknown tournament" }, 404);
+      const eventId = url.pathname.split("/")[3];
       const body = await readBody(request);
       if (body === null) return json({ error: "bad json" }, 400);
       const versionId = typeof body.versionId === "string" ? body.versionId : "";
       if (!versionId) return json({ error: "versionId is required" }, 400);
-      let { event, games } = await readCup();
+      await bootstrapCup();
+      const found = await readEvent(eventId);
+      if (!found) return json({ error: "unknown tournament" }, 404);
+      let event = found.event;
+      const games = found.games;
+      const name = found.name;
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(me.id as string).first<Record<string, unknown>>();
       if (!agent) return json({ error: "breed a hero first" }, 404);
       if (agent.active_version_id !== versionId) return json({ error: "register your active version" }, 404);
@@ -1025,6 +1115,10 @@ export default {
       if (event.entries.length >= event.maxPlayers) {
         event = seedBracket(lock(event));
         started = true;
+        if (eventId !== CUP_ID) {
+          await saveEvent(eventId, event, games);
+          return json({ entered: true, started, event: cupView(name, event, games) }, 201);
+        }
         const leaderOf = (version: string): string | null => {
           const hit = event.entries.find((e) => e.lockedVersionId === version || e.agentVersionId === version);
           return hit ? hit.leaderId : null;
@@ -1057,8 +1151,8 @@ export default {
           }
         }
       }
-      await env.DB.prepare("UPDATE tournaments SET event_json = ?, games_json = ? WHERE id = ?").bind(JSON.stringify(event), JSON.stringify(games), CUP_ID).run();
-      return json({ entered: true, started, event: cupView(event, games) }, 201);
+      await saveEvent(eventId, event, games);
+      return json({ entered: true, started, event: cupView(name, event, games) }, 201);
       } catch (err) {
         return json({ error: (err as Error).message }, 404);
       }

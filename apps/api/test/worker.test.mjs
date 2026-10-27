@@ -109,13 +109,13 @@ describe("worker writes", () => {
     db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0010_reports.sql", import.meta.url), "utf8"));
     // Reuse the shared shim: it carries batch, like the real D1 binding.
-    const wenv = { DB: shim(db), ASSETS: assetsStub };
-    const call = (method, path, body, token) => {
+    const wenv = { DB: shim(db), ASSETS: assetsStub, ADMIN_KEY: "test-admin" };
+    const call = (method, path, body, token, extraHeaders) => {
       if (method !== "POST") throw new Error("writes only");
       return entry.fetch(
         new Request(`http://local${path}`, {
           method,
-          headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+          headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}), ...(extraHeaders || {}) },
           body: body ? JSON.stringify(body) : undefined,
         }),
         wenv,
@@ -242,6 +242,50 @@ describe("worker writes", () => {
     assert.ok(["A leads", "B leads", "too close to call"].includes(lab.json.verdict));
     const ghostAn = await call("POST", "/v1/battles/ghost/analysis", {}, sa.json.token);
     assert.equal(ghostAn.status, 404);
+    const ADMIN = { "x-admin-key": "test-admin" };
+    const noKey = await call("POST", "/v1/admin/events", { id: "w-cup", name: "W", maxPlayers: 2, minAp: 0, registrationCloseAt: Date.now() + 1000 }, null, {});
+    assert.equal(noKey.status, 401);
+    const mk = await call("POST", "/v1/admin/events", { id: "w-cup", name: "W Cup", maxPlayers: 2, minAp: 0, registrationCloseAt: Date.now() + 86_400_000 }, null, ADMIN);
+    assert.equal(mk.status, 201);
+    assert.equal(mk.json.phase, "DRAFT");
+    for (const to of ["ANNOUNCED", "REGISTRATION_OPEN"]) {
+      const step = await call("POST", "/v1/admin/events/w-cup/transition", { to }, null, ADMIN);
+      assert.equal(step.status, 200);
+    }
+    const ra = await entry.fetch(new Request("http://local/v1/tournaments/w-cup/register", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${sa.json.token}` },
+      body: JSON.stringify({ versionId: va.json.versionId }),
+    }), wenv);
+    assert.equal(ra.status, 201);
+    const rb = await entry.fetch(new Request("http://local/v1/tournaments/w-cup/register", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${sb.json.token}` },
+      body: JSON.stringify({ versionId: vb.json.versionId }),
+    }), wenv);
+    assert.equal(rb.status, 201);
+    assert.equal((await rb.json()).event.phase, "SEEDED");
+    for (const to of ["LIVE", "COMPLETED"]) {
+      const step = await call("POST", "/v1/admin/events/w-cup/transition", { to }, null, ADMIN);
+      assert.equal(step.status, 200);
+      assert.equal(step.json.phase, to);
+    }
+    const jump = await call("POST", "/v1/admin/events/s1-kickoff/transition", { to: "COMPLETED" }, null, ADMIN);
+    assert.equal(jump.status, 422);
+  });
+
+  it("stays dark with no admin key", async () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
+    const darkEnv = { DB: shim(db), ASSETS: assetsStub };
+    const res = await entry.fetch(new Request("http://local/v1/admin/events", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-admin-key": "anything" },
+      body: JSON.stringify({ id: "x", name: "X", maxPlayers: 2, minAp: 0, registrationCloseAt: Date.now() + 1000 }),
+    }), darkEnv);
+    assert.equal(res.status, 503);
   });
 
   it("refuses a second open ticket in the same mode", async () => {

@@ -1,7 +1,7 @@
 // In-memory HTTP harness. Drives the real router with no socket.
 
 export function makeCaller(handler) {
-  return (method, path, body = null, token = null) =>
+  return (method, path, body = null, token = null, extraHeaders = {}) =>
     new Promise((resolve, reject) => {
       const listeners = {};
       const req = {
@@ -10,6 +10,7 @@ export function makeCaller(handler) {
         headers: {
           "content-type": "application/json",
           ...(token ? { authorization: `Bearer ${token}` } : {}),
+          ...extraHeaders,
         },
         on: (event, cb) => {
           listeners[event] = cb;

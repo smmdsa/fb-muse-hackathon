@@ -2,10 +2,11 @@
 
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, equipItem, evolutionLab, getLeader, getTournament, getVersion, installVersion, listTournaments, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, validateRanked, withMatch } from "./flow.ts";
+import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, createTournament, dashboard, energyFor, energyView, equipItem, evolutionLab, getLeader, getTournament, getVersion, installVersion, listTournaments, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -31,7 +32,7 @@ function send(res: ServerResponse, code: number, body: unknown): void {
     "content-type": "application/json",
     "content-length": Buffer.byteLength(text),
     "access-control-allow-origin": "*",
-    "access-control-allow-headers": "authorization, content-type",
+    "access-control-allow-headers": "authorization, content-type, x-admin-key",
   });
   res.end(text);
 }
@@ -54,6 +55,28 @@ function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
       }
     });
   });
+}
+
+// Admin calls carry a shared secret, never a leader token.
+// No key configured means the console stays dark: fail closed.
+function adminKey(req: IncomingMessage): string {
+  const raw = req.headers["x-admin-key"];
+  return typeof raw === "string" ? raw : "";
+}
+
+function adminDenied(req: IncomingMessage, res: ServerResponse): boolean {
+  const expected = process.env.ADMIN_KEY ?? "";
+  if (!expected) {
+    send(res, 503, { error: "admin console is disabled: set ADMIN_KEY first" });
+    return true;
+  }
+  const a = Buffer.from(adminKey(req));
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    send(res, 401, { error: "admin sign-in required" });
+    return true;
+  }
+  return false;
 }
 
 function bearer(req: IncomingMessage, ctx: Ctx): Record<string, unknown> | null {
@@ -96,6 +119,32 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           send(res, 200, publicProfile(ctx.store, decodeURIComponent(url.pathname.split("/")[3])));
         } catch (err) {
           send(res, 404, { error: (err as Error).message });
+        }
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/admin/events") {
+        if (adminDenied(req, res)) return;
+        const id = typeof body.id === "string" ? body.id : "";
+        const name = typeof body.name === "string" ? body.name : "";
+        const maxPlayers = typeof body.maxPlayers === "number" ? body.maxPlayers : 0;
+        const minAp = typeof body.minAp === "number" ? body.minAp : 0;
+        const registrationCloseAt = typeof body.registrationCloseAt === "number" ? body.registrationCloseAt : 0;
+        try {
+          send(res, 201, createTournament(ctx.store, { id, name, maxPlayers, minAp, registrationCloseAt }));
+        } catch (err) {
+          send(res, 422, { error: (err as Error).message });
+        }
+        return;
+      }
+      const adminTransMatch = req.method === "POST" && /^\/v1\/admin\/events\/[^/]+\/transition$/.test(url.pathname);
+      if (adminTransMatch) {
+        if (adminDenied(req, res)) return;
+        const to = typeof body.to === "string" ? body.to : "";
+        try {
+          send(res, 200, transitionTournament(ctx.store, { eventId: decodeURIComponent(url.pathname.split("/")[4]), to }));
+        } catch (err) {
+          const msg = (err as Error).message;
+          send(res, /unknown tournament/.test(msg) ? 404 : 422, { error: msg });
         }
         return;
       }
