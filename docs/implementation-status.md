@@ -33,6 +33,8 @@ Date: 2026-10-26. Sprint: sprint-006. This file tells the truth about what runs.
 - Worker is live at https://agent-wars-api.smmdsa.workers.dev: D1 `agent-wars` migrated, seed match replays identical, leaderboard serves two ranks.
 - Worker write-port done in code: the worker entry runs auth, agents, compile, training, and ranked end to end on an async D1 store. Ranked moves AP, pays AC, replays identical, and dedupes keys. API suite is 15/15 and the bundle dry-run is clean. Deploy waits on the user token.
 - Overnight loop: energy gates every manual match through the stamina machine, the queue pairs nearest-ELO humans, casual falls back to a same-band bot after 30s, ranked waits 10min. Arena has a quick match card, profile shows energy. Slices A-C committed; hand tests cover queue plus energy.
+- Live verify 2026-10-27: user migrated plus deployed. `/v1/me` serves energy 10/10. Breeding plus compile answer 201, dashboard works. BUT both calls fell back: portrait null, provider mock. The Meta secrets do not reach worker `fb-muse-hackathon` — likely set on the old `agent-wars-api` worker. Move both secrets over, then re-probe.
+- Next session: confirm live provider plus portrait, clean prod test rows (`keycheck-spark`, `debug-breed`, `live-proof`), OAuth pick, AutoBattle lease UI, team modes call, visual rounds 2-3.
 - Seasons slice done: `packages/seasons` archives the frozen board and resets every leader for the next season.
 - Accounts, AI compile, and publish flow: planned for later S2 slices.
 - Ranked AP ±12 to ±28, AutoBattle leases, championships, shop (S3 and S4): planned.
