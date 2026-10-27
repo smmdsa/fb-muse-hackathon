@@ -4,7 +4,8 @@ import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
-import { BENCH_POLICY, board, compileAndPublish, fightPolicies, getLeader, getVersion, runRanked, runTraining } from "./flow.ts";
+import { BENCH_POLICY, fightPolicies } from "@agent-wars/battle-core";
+import { board, compileAndPublish, getLeader, getVersion, runRanked, runTraining } from "./flow.ts";
 
 type Ctx = { store: Store };
 

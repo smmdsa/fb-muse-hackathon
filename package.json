@@ -11,6 +11,7 @@
   "scripts": {
     "test": "pnpm -r test",
     "build": "pnpm -r build",
-    "demo": "node ./scripts/e2e-demo.mjs"
+    "demo": "node ./scripts/e2e-demo.mjs",
+    "bench": "node ./scripts/bench.mjs"
   }
 }
