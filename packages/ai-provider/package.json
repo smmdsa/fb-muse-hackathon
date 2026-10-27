@@ -7,6 +7,6 @@
     "@agent-wars/behavior-dna": "workspace:*"
   },
   "scripts": {
-    "test": "node --test ./test/mock.test.mjs ./test/registry.test.mjs ./test/meta.test.mjs"
+    "test": "node --test ./test/mock.test.mjs ./test/registry.test.mjs ./test/meta.test.mjs ./test/portrait.test.mjs"
   }
 }

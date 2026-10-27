@@ -29,7 +29,8 @@ export function openStore(path: string): Store {
       active_version_id TEXT,
       name TEXT,
       concept TEXT,
-      portrait_url TEXT
+      portrait_url TEXT,
+      portrait_status TEXT NOT NULL DEFAULT 'faceless'
     );
     CREATE TABLE IF NOT EXISTS versions (
       id TEXT PRIMARY KEY,

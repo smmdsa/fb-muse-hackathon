@@ -207,23 +207,28 @@ export async function createAgent(
   store: Store,
   env: FlowEnv,
   input: { leaderId: string; name: string; concept: string },
-): Promise<{ agentId: string; portraitUrl: string | null }> {
+): Promise<{ agentId: string; portraitUrl: string | null; portraitStatus: string }> {
   const id = mintId("agent");
+  // The hero always records how breeding ended: ready, failed, or faceless.
+  // Faceless means no key existed; failed means the image call dropped.
   let portraitUrl: string | null = null;
+  let portraitStatus = "faceless";
   if (hasKey("portrait", env)) {
     try {
       const art = await portraitFromEnv(env).generatePortrait({
         prompt: portraitPromptFor(`${input.name || "arena robot"}: ${input.concept || "arena fighter"}`),
       });
       portraitUrl = art.url;
+      portraitStatus = "ready";
     } catch {
       portraitUrl = null;
+      portraitStatus = "failed";
     }
   }
-  store.db.prepare("INSERT INTO agents (id, leader_id, active_version_id, name, concept, portrait_url) VALUES (?, ?, NULL, ?, ?, ?)").run(
-    id, input.leaderId, input.name || null, input.concept || null, portraitUrl,
+  store.db.prepare("INSERT INTO agents (id, leader_id, active_version_id, name, concept, portrait_url, portrait_status) VALUES (?, ?, NULL, ?, ?, ?, ?)").run(
+    id, input.leaderId, input.name || null, input.concept || null, portraitUrl, portraitStatus,
   );
-  return { agentId: id, portraitUrl };
+  return { agentId: id, portraitUrl, portraitStatus };
 }
 
 // Compile plus validate plus publish in one honest step for the milestone.
@@ -317,7 +322,7 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
     };
   });
   return {
-    agent: { id: agent.id, name: agent.name ?? null, concept: agent.concept ?? null, portraitUrl: agent.portrait_url ?? null, activeVersionId: agent.active_version_id ?? null },
+    agent: { id: agent.id, name: agent.name ?? null, concept: agent.concept ?? null, portraitUrl: agent.portrait_url ?? null, portraitStatus: agent.portrait_status ?? "faceless", activeVersionId: agent.active_version_id ?? null },
     leader: { handle: leader.handle, ap: leader.ap, ac: leader.ac, tier: rank.tier, division: rank.division },
     energy: energyView(energyFor(store, leaderId)),
     versions,

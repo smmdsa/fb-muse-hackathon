@@ -232,7 +232,7 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
     });
   }
   return {
-    agent: { id: agent.id, name: agent.name ?? null, concept: agent.concept ?? null, portraitUrl: agent.portrait_url ?? null, activeVersionId: agent.active_version_id ?? null },
+    agent: { id: agent.id, name: agent.name ?? null, concept: agent.concept ?? null, portraitUrl: agent.portrait_url ?? null, portraitStatus: agent.portrait_status ?? "faceless", activeVersionId: agent.active_version_id ?? null },
     leader: { handle: leader.handle, ap: leader.ap, ac: leader.ac, tier: rank.tier, division: rank.division },
     energy: energyView(await energyFor(env, leaderId)),
     versions,
@@ -509,21 +509,24 @@ export default {
       const name = typeof created.name === "string" ? created.name.slice(0, 60) : "";
       const concept = typeof created.concept === "string" ? created.concept.slice(0, 280) : "";
       let portraitUrl: string | null = null;
+      let portraitStatus = "faceless";
       if (hasKey("portrait", env)) {
         try {
           const art = await portraitFromEnv(env).generatePortrait({
             prompt: portraitPromptFor(`${name || "arena robot"}: ${concept || "arena fighter"}`),
           });
           portraitUrl = art.url;
+          portraitStatus = "ready";
         } catch {
           portraitUrl = null;
+          portraitStatus = "failed";
         }
       }
       const id = mintId("agent");
       await env.DB.prepare(
-        "INSERT INTO agents (id, leader_id, active_version_id, name, concept, portrait_url) VALUES (?, ?, NULL, ?, ?, ?)",
-      ).bind(id, me.id as string, name || null, concept || null, portraitUrl).run();
-      return json({ agentId: id, portraitUrl }, 201);
+        "INSERT INTO agents (id, leader_id, active_version_id, name, concept, portrait_url, portrait_status) VALUES (?, ?, NULL, ?, ?, ?, ?)",
+      ).bind(id, me.id as string, name || null, concept || null, portraitUrl, portraitStatus).run();
+      return json({ agentId: id, portraitUrl, portraitStatus }, 201);
       } catch (err) {
         return json({ error: `server error: ${(err as Error).message}` }, 500);
       }

@@ -109,7 +109,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const name = typeof body.name === "string" ? body.name.slice(0, 60) : "";
         const concept = typeof body.concept === "string" ? body.concept.slice(0, 280) : "";
         const bred = await createAgent(ctx.store, process.env, { leaderId: me.id as string, name, concept });
-        send(res, 201, { agentId: bred.agentId, portraitUrl: bred.portraitUrl });
+        send(res, 201, { agentId: bred.agentId, portraitUrl: bred.portraitUrl, portraitStatus: bred.portraitStatus });
         return;
       }
       const dashMatch = req.method === "GET" && /^\/v1\/agents\/[^/]+\/dashboard$/.test(url.pathname);

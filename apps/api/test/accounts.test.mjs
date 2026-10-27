@@ -31,9 +31,44 @@ describe("accounts", () => {
     const first = await call("POST", "/v1/agents", { name: "Wasp", concept: "fast striker" }, keys.commander);
     assert.equal(first.status, 201);
     assert.equal(first.json.portraitUrl, null);
+    assert.equal(first.json.portraitStatus, "faceless");
     keys.agent = first.json.agentId;
     const second = await call("POST", "/v1/agents", {}, keys.commander);
     assert.equal(second.status, 409);
+  });
+
+  it("marks the portrait ready when the image call lands", async () => {
+    process.env.META_IMAGE_KEY = "test-image-key";
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ data: [{ url: "https://cdn.example/wasp.png" }] }) });
+    try {
+      const s = await call("POST", "/v1/auth/session", { handle: "painter" });
+      const a = await call("POST", "/v1/agents", { name: "Wasp", concept: "fast striker" }, s.json.token);
+      assert.equal(a.status, 201);
+      assert.equal(a.json.portraitStatus, "ready");
+      assert.equal(a.json.portraitUrl, "https://cdn.example/wasp.png");
+      const seen = await call("GET", `/v1/agents/${a.json.agentId}/dashboard`, null, s.json.token);
+      assert.equal(seen.json.agent.portraitStatus, "ready");
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.META_IMAGE_KEY;
+    }
+  });
+
+  it("marks the portrait failed when the image call drops", async () => {
+    process.env.META_IMAGE_KEY = "test-image-key";
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
+    try {
+      const s = await call("POST", "/v1/auth/session", { handle: "unlucky" });
+      const a = await call("POST", "/v1/agents", { name: "Rust", concept: "junk brawler" }, s.json.token);
+      assert.equal(a.status, 201);
+      assert.equal(a.json.portraitStatus, "failed");
+      assert.equal(a.json.portraitUrl, null);
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.META_IMAGE_KEY;
+    }
   });
 
   it("compiles and publishes a valid draft", async () => {
