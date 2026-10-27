@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Agent Wars — S1 Arena Demo</title>
+<title>Agent Wars — Command</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -13,50 +13,106 @@
 <main class="shell">
 <header class="top">
 <div>
+<p class="sub">Postindustrial robot league</p>
 <h1>Agent Wars</h1>
-<p class="sub">S1 arena demo — SHADOW.EXE vs BREAKER.01</p>
+<p class="sub">Create the mind. Enter the arena.</p>
 </div>
 <div class="pills">
-<a class="pill link" href="./index.html">arena</a>
-<a class="pill link" href="./profile.html">profile</a>
+<a class="pill link" href="./index.html">command</a>
+<a class="pill link" href="./profile.html">barracks</a>
 <a class="pill link" href="./tournaments.html">cup</a>
+<a class="pill link" href="./public.html">ranks</a>
 <span class="pill" id="pill-who">signed out</span>
-<span class="pill" id="pill-tick">tick 0</span>
-<span class="pill" id="pill-seed">seed forge-001</span>
 <span class="pill" id="pill-state">ready</span>
 </div>
 </header>
-<section class="panel" id="lobby-card">
-<h2>Lobby</h2>
-<div class="hero">
-<img id="lobby-img" alt="Hero portrait" src="" hidden />
-<div class="hero-info">
-<p class="hero-name" id="lobby-name">No hero yet</p>
-<p class="sub" id="lobby-rank">Sign in and breed on the profile page.</p>
+<section class="panel command" id="command-card">
+<h2>Command deck</h2>
+<p class="sub">Your agent fights. Your chip thinks. The deck shows both.</p>
+<div class="command-grid">
+<div class="command-card" id="agent-card">
+<h3>Active agent</h3>
+<img id="lobby-img" class="agent-face empty" alt="Active agent portrait" src="" hidden />
+<p class="hero-name" id="lobby-name">No agent yet</p>
+<p class="sub" id="lobby-rank">Breed an agent to enter the league.</p>
 <p class="sub" id="lobby-energy">energy —</p>
-<p class="sub" id="lobby-auto">AutoBattle leases land in a later slice — manual queue below.</p>
+</div>
+<div class="command-card" id="chip-card">
+<h3>Installed chip</h3>
+<p class="hero-name" id="lobby-chip">No chip yet</p>
+<p class="sub" id="lobby-chip-detail">Chips hold behavior. Install one in the barracks.</p>
+</div>
+<div class="command-card" id="rank-card">
+<h3>My rank</h3>
+<div class="rank-emblem">
+<img id="lobby-shield" alt="Rank emblem" src="./assets/shields/prototype.png" />
+<div>
+<p class="hero-ap" id="lobby-ap">— AP</p>
+<p class="sub" id="lobby-tier">PROTOTYPE</p>
 </div>
 </div>
-<div class="row">
-<a class="btn-primary" href="#quick-card">Play</a>
-<a class="btn-ghost" href="./profile.html">Open profile</a>
+<div class="rank-bar" aria-hidden="true"><i id="lobby-progress" style="width:0%"></i></div>
+<p class="sub" id="lobby-next">Win fights to climb.</p>
 </div>
+</div>
+<div class="steps" id="onboard-steps">
+<div class="step" id="step-agent"><b>1. Create agent</b><span>Identity and portrait.</span></div>
+<div class="step" id="step-chip"><b>2. Program chip</b><span>Words become behavior.</span></div>
+<div class="step" id="step-arena"><b>3. Enter arena</b><span>Queue and climb.</span></div>
+</div>
+<div class="next-actions">
+<a id="cta-primary" class="btn-primary" href="./profile.html" style="text-decoration:none;display:inline-block;padding:10px 18px;font-family:var(--display);font-weight:600;">Create my agent</a>
+<a class="btn-ghost" href="#arena-card" id="cta-sandbox">Watch a fight</a>
+<a class="link-quiet" href="./tournaments.html">View cup</a>
+</div>
+<p class="sub" id="lobby-auto">Sign in to link your agent.</p>
 </section>
 <section class="panel" id="quick-card">
-<h2>Quick match</h2>
+<h2>Fight selection</h2>
+<p class="sub" id="qm-pick">Check your agent and chip. Then queue.</p>
 <div class="row">
 <button id="qm-casual" class="btn-primary" type="button">Casual</button>
 <button id="qm-ranked" class="btn-ghost" type="button">Ranked</button>
 <button id="qm-find" class="btn-primary" type="button">Find fight</button>
 <button id="qm-cancel" class="btn-ghost" type="button" hidden>Cancel ticket</button>
 <span class="pill" id="qm-energy">energy —</span>
+<span class="pill" id="qm-clock" hidden>0s</span>
 </div>
-<p class="sub" id="qm-status">Same-ELO humans first. No human in 30 seconds means a same-band sparring bot in casual. Ranked waits for humans. One energy per fight.</p>
+<p class="sub" id="qm-status">Same-ELO humans first. Casual falls back to a sparring bot after 30 seconds. Ranked waits for humans. One energy per fight.</p>
 <p class="sub" id="qm-result" hidden></p>
 </section>
+<section class="panel" id="arena-card">
+<h2>Arena</h2>
+<div class="score" aria-live="polite">
+<div class="side"><img id="score-a-img" alt="Cyan agent" src="" hidden /><div><span class="name tag-a" id="score-a-name">CYAN</span><div class="bar"><div class="fill hp-a" id="hp-a"></div></div><div class="bar thin"><div class="fill en-a" id="en-a"></div></div></div></div>
+<div class="clock"><span id="arena-clock">90</span>s<br /><span class="pill" id="pill-winner">no winner yet</span></div>
+<div class="side right"><div><span class="name tag-b" id="score-b-name">CRIMSON</span><div class="bar"><div class="fill hp-b" id="hp-b"></div></div><div class="bar thin"><div class="fill en-b" id="en-b"></div></div></div><img id="score-b-img" alt="Crimson agent" src="" hidden /></div>
+</div>
+<div class="stage">
+<canvas id="arena" width="960" height="640" role="img" aria-label="Top-down robot arena. Two robots duel with cover blocks."></canvas>
+<div class="endcard" id="endcard" hidden>
+<h2 id="end-title">Winner</h2>
+<p id="end-stats"></p>
+<p class="sub" id="end-econ"></p>
+<div class="next-actions">
+<button id="again-btn" class="btn-primary" type="button">Fight again</button>
+<a class="btn-ghost" href="./profile.html">Open barracks</a>
+</div>
+</div>
+</div>
+<div class="row">
+<button id="pause-btn" class="btn-ghost" type="button" disabled>Pause</button>
+<a class="link-quiet" href="./profile.html" id="arena-profile-link">Review chips in the barracks</a>
+</div>
+<details class="diag">
+<summary>Diagnostics (optional)</summary>
+<p class="sub" id="diag-line">Tick, seed, and compile detail live here. The fight does not need them.</p>
+<p class="sub"><span class="pill" id="pill-tick">tick 0</span> <span class="pill" id="pill-seed">seed forge-001</span> <span class="pill" id="diag-compact">local sim</span></p>
+</details>
+</section>
 <section class="panel" id="title-card">
-<h2>Lab — prompt sparring</h2>
-<p>Two prompts compile into fighters in THE_FORGE. The sim runs at 30 ticks per second. Covers block shots. Shields block damage. Compile is local.</p>
+<h2>Sandbox sparring</h2>
+<p>Try two prompts in THE_FORGE. This sandbox never touches rank. Ranked fights start from Fight selection above.</p>
 <div class="row">
 <label for="prompt-a">Cyan prompt</label>
 <input id="prompt-a" name="prompt-a" value="evade and snipe from far away" maxlength="120" />
@@ -73,42 +129,14 @@
 <button id="restart-btn" class="btn-ghost" type="button" disabled>Restart</button>
 </div>
 </section>
-<section class="panel">
-<div class="hud">
-<div class="bar-block">
-<span class="name tag-a">CYAN</span>
-<div class="bar"><div class="fill hp-a" id="hp-a"></div></div>
-<div class="bar thin"><div class="fill en-a" id="en-a"></div></div>
+<section class="panel" id="rank-card-panel">
+<h2>Your division</h2>
+<p class="sub">Shields mark progress. Full standings live on the ranks page.</p>
+<div class="rank-emblem">
+<img id="rank-shield" alt="Division shield" src="./assets/shields/prototype.png" />
+<div><p class="hero-ap" id="rank-line">Sign in to see your climb.</p><p class="sub" id="rank-range">PROTOTYPE 0–299 AP</p></div>
 </div>
-<div class="bar-block right">
-<span class="name tag-b">CRIMSON</span>
-<div class="bar"><div class="fill hp-b" id="hp-b"></div></div>
-<div class="bar thin"><div class="fill en-b" id="en-b"></div></div>
-</div>
-</div>
-<div class="stage">
-<canvas id="arena" width="960" height="640" role="img" aria-label="Top-down robot arena. Unit positions update as the fight plays."></canvas>
-<div class="endcard" id="endcard" hidden>
-<h2 id="end-title">Winner</h2>
-<p id="end-stats"></p>
-<button id="again-btn" class="btn-primary" type="button">Fight again</button>
-</div>
-</div>
-<div class="row">
-<button id="pause-btn" class="btn-ghost" type="button" disabled>Pause</button>
-<span class="pill" id="pill-winner">no winner yet</span>
-</div>
-</section>
-<section class="panel">
-<h2>Ranks</h2>
-<p class="sub">Shields are earned, never sold. Bands mirror <code>packages/ranking/src/tiers.ts</code>.</p>
-<div class="ladder">
-<figure><img src="./assets/shields/prototype.png" alt="Prototype shield" /><figcaption>PROTOTYPE<small>0–299 AP</small></figcaption></figure>
-<figure><img src="./assets/shields/circuit.png" alt="Circuit shield" /><figcaption>CIRCUIT<small>300–599 AP</small></figcaption></figure>
-<figure><img src="./assets/shields/core.png" alt="Core shield" /><figcaption>CORE<small>600–899 AP</small></figcaption></figure>
-<figure><img src="./assets/shields/ascendant.png" alt="Ascendant shield" /><figcaption>ASCENDANT<small>900–1199 AP</small></figcaption></figure>
-<figure><img src="./assets/shields/singularity.png" alt="Singularity shield" /><figcaption>SINGULARITY<small>1200+ AP</small></figcaption></figure>
-</div>
+<div class="row"><a class="btn-ghost" href="./public.html">Open standings</a></div>
 </section>
 <section class="panel">
 <h2>Events</h2>

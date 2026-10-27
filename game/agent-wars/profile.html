@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Agent Wars — Profile</title>
+<title>Agent Wars — Barracks</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -13,15 +13,27 @@
 <main class="shell">
 <header class="top">
 <div>
+<p class="sub">Barracks — build your fighter</p>
 <h1>Agent Wars</h1>
-<p class="sub">Player profile — breed a hero, train its chips, watch it climb.</p>
+<p class="sub">Create agent, program chip, enter arena.</p>
 </div>
 <div class="pills">
-<a class="pill link" href="./index.html">arena</a>
+<a class="pill link" href="./index.html">command</a>
+<a class="pill link" href="./profile.html">barracks</a>
 <a class="pill link" href="./tournaments.html">cup</a>
+<a class="pill link" href="./public.html">ranks</a>
 <span class="pill" id="pill-who">signed out</span>
 </div>
 </header>
+<section class="panel command" id="welcome-card">
+<h2>Your path to the arena</h2>
+<p class="sub">Three acts. Each act unlocks the next.</p>
+<div class="steps">
+<div class="step" id="w-agent"><b>1. Create agent</b><span>Identity and portrait.</span></div>
+<div class="step" id="w-chip"><b>2. Program chip</b><span>Words become behavior.</span></div>
+<div class="step" id="w-arena"><b>3. Enter arena</b><span>Queue and climb.</span></div>
+</div>
+</section>
 <section class="panel" id="login-card">
 <h2>Leader</h2>
 <div class="row">
@@ -32,9 +44,10 @@
 <p class="sub" id="login-msg">One handle owns one hero. New leaders start at 500 AP in CIRCUIT I.</p>
 </section>
 <section class="panel" id="hero-card" hidden>
-<h2>My hero</h2>
+<h2>Creation station</h2>
+<p class="sub">The birth prompt paints the look. The chip prompt drives the mind. They stay separate.</p>
 <div class="hero">
-<img id="hero-img" alt="Agent portrait" src="" hidden />
+<div class="breed-frame"><img id="hero-img" class="agent-face" alt="Agent portrait" src="" hidden /></div>
 <div class="hero-info">
 <p class="hero-name" id="hero-name">—</p>
 <p class="sub" id="hero-concept">—</p>
@@ -55,16 +68,22 @@
 <input id="hero-concept-in" name="hero-concept-in" value="" maxlength="280" placeholder="fast striker, kites at range" />
 <button id="breed-btn" class="btn-primary" type="button">Breed hero</button>
 </div>
+<p class="sub">Try: “scarred veteran, rust-red plates” or “sleek scout, azure visor”.</p>
 <p class="sub" id="breed-msg" hidden>Breeding paints the portrait in the house style. No image key on the server means a faceless hero.</p>
 <p class="sub" id="hero-art-status" hidden></p>
 <button id="retry-btn" class="btn-ghost" type="button" hidden>Retry portrait</button>
+<div class="next-actions" id="hero-next" hidden>
+<a class="btn-primary" href="#train-card" style="text-decoration:none;display:inline-block;padding:10px 18px;font-family:var(--display);font-weight:600;">Program first chip</a>
+</div>
 <div class="row">
 <button id="share-btn" class="btn-ghost" type="button">Copy public card link</button>
 </div>
 <p class="sub" id="share-msg" hidden>Link copied. The card shows rank and record only.</p>
 </section>
 <section class="panel" id="train-card" hidden>
-<h2>Train chips</h2>
+<h2>Chip workbench</h2>
+<p class="sub">Words become behavior. Compile mints a draft. Install sends one draft to the arena.</p>
+<p class="sub">Try: “Keep range and use cover” means the chip prefers distance and cover.</p>
 <div class="row">
 <label for="prompt">Prompt</label>
 <input id="prompt" name="prompt" value="" maxlength="280" placeholder="rush them down up close" />
