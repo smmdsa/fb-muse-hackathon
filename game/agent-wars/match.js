@@ -32,15 +32,42 @@ async function qmCall(method, path, body) {
   return { status: res.status, data };
 }
 
+function lobbySay(name, rank, energy) {
+  const set = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  set("lobby-name", name);
+  set("lobby-rank", rank);
+  set("lobby-energy", energy);
+}
+
 async function qmBoot() {
+  const who = document.getElementById("pill-who");
+  if (who) who.textContent = qmToken ? (localStorage.getItem("aw_handle") || "signed in") : "signed out";
   if (!qmToken) {
     qmEnergy.textContent = "energy —";
+    lobbySay("No hero yet", "Sign in and breed on the profile page.", "energy —");
     return;
   }
   const me = await qmCall("GET", "/v1/me");
   if (me.status !== 200) return;
   qmVersion = (me.data.agent && me.data.agent.active_version_id) || "";
   qmEnergy.textContent = `energy ${me.data.energy.energy}/${me.data.energy.energyMax}`;
+  if (!me.data.agent) {
+    lobbySay("No hero yet", "Breed one on the profile page, then queue.", `energy ${me.data.energy.energy}/${me.data.energy.energyMax}`);
+    return;
+  }
+  const img = document.getElementById("lobby-img");
+  if (img && me.data.agent.portrait_url) {
+    img.src = me.data.agent.portrait_url;
+    img.hidden = false;
+  }
+  lobbySay(
+    me.data.agent.name || "Unnamed hero",
+    `${me.data.leader.ap} AP — breed, train, and climb.`,
+    `energy ${me.data.energy.energy}/${me.data.energy.energyMax} — one per fight.`,
+  );
 }
 
 async function qmPoll(ticketId, left) {

@@ -253,6 +253,15 @@ input {
   background: var(--panel-low);
 }
 
+#lobby-img {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border: 2px solid var(--outline);
+  border-radius: 3px;
+  background: var(--panel-low);
+}
+
 .hero-name { font-family: var(--display); font-weight: 700; font-size: 20px; margin: 0; }
 
 #hero-shield { width: 56px; height: 56px; object-fit: contain; }
@@ -274,6 +283,11 @@ table.chips th { font-family: var(--display); color: var(--dim); font-weight: 60
 @media (max-width: 640px) {
   h1 { font-size: 32px; }
   .shell { padding: 12px 16px 24px; }
+  .row { flex-direction: column; align-items: stretch; }
+  .hero { flex-direction: column; }
+  #hero-img, #lobby-img { width: 120px; height: auto; }
+  #arena { width: 100%; height: auto; }
+  .ladder { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {
