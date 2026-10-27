@@ -25,7 +25,14 @@ If a command fails, read the error and fix the cause before you retry.
 
 Start it: `pnpm --filter @agent-wars/api dev`. It serves `http://127.0.0.1:8787` with a file database in `data/`.
 
-Prove it by hand (needs a shell that can bind ports):
+Deploy it to Cloudflare (needs your account and one D1 id):
+
+- `wrangler d1 create agent-wars` gives the database id. Set it in `wrangler.toml`.
+- `wrangler d1 migrations apply DB --local` applies `migrations/0001_schema.sql`.
+- `wrangler dev` serves the worker locally. Health, leaderboard, and replay reads run on D1.
+- `wrangler deploy` ships it. Write routes still run on the Node API until the store ports to async D1.
+
+Prove the local API by hand (needs a shell that can bind ports):
 
 - `curl -X POST http://127.0.0.1:8787/v1/auth/session -d '{"handle":"you"}'` returns a token.
 - `curl -X POST http://127.0.0.1:8787/v1/agents -H "Authorization: Bearer TOKEN"` creates one agent.

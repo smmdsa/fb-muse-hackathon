@@ -28,6 +28,7 @@ Date: 2026-10-26. Sprint: sprint-006. This file tells the truth about what runs.
 - Matchmaker slice done: `packages/matchmaker` picks server-owned opponents with eligibility, rolling pair caps, and nearest-rating order.
 - Standings slice done: `packages/leaderboard` orders placed leaders by AP with deterministic breaks and top-N cuts.
 - Local API slice done in code: `apps/api` serves demo-key auth, one-agent rule, mock compile plus validated publish, training, rated fights with replay, and standings. 10 route tests pass in-memory because this shell denies listening sockets; `curl` proof steps live in README for a hand run.
+- Workers readiness done: `wrangler.toml`, `migrations/0001_schema.sql`, and a worker entry with health, leaderboard, and replay reads. Write routes stay on Node until the store ports to async D1.
 - Accounts, AI compile, and publish flow: planned for later S2 slices.
 - Ranked AP ±12 to ±28, AutoBattle leases, championships, shop (S3 and S4): planned.
 - Full acceptance suite from GDD section 14: planned. S1 covers gameplay rows only.

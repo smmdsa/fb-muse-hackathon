@@ -1,0 +1,12 @@
+name = "agent-wars-api"
+main = "apps/api/src/worker.ts"
+compatibility_date = "2026-10-26"
+
+[vars]
+SEASON_ID = "local-s1"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "agent-wars"
+database_id = "REPLACE_WITH_D1_ID"
+migrations_dir = "migrations"
