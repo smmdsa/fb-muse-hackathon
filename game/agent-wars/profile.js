@@ -77,10 +77,10 @@ async function refresh() {
   $("hero-energy").textContent = d.energy.energy >= d.energy.energyMax
     ? `energy ${d.energy.energy}/${d.energy.energyMax} — full`
     : `energy ${d.energy.energy}/${d.energy.energyMax} — +1 in ${mins || 1} min`;
-  renderDash(d);
+  await renderDash(d);
 }
 
-function renderDash(d) {
+async function renderDash(d) {
   const box = $("dash");
   box.textContent = "";
   if (!d.versions.length) {
@@ -141,6 +141,34 @@ function renderDash(d) {
   }
   show($("dash-card"), true);
   renderHist(d);
+  await renderAuto();
+}
+
+async function renderAuto() {
+  const r = await call("GET", "/v1/autobattle/digest");
+  if (r.status !== 200) {
+    $("auto-status").textContent = "AutoBattle unavailable.";
+    show($("auto-card"), true);
+    return;
+  }
+  const d = r.data;
+  const lease = d.leaseExpiresAt ? `lease ends ${new Date(d.leaseExpiresAt).toLocaleString()}` : "no lease";
+  $("auto-status").textContent = d.optIn
+    ? `Running — ${d.state}, energy ${d.energy.energy}/${d.energy.energyMax}, ${lease}, ${d.stopReason}.`
+    : `Off — ${d.stopReason}. Press start for a 24h lease.`;
+  const box = $("auto-recent");
+  box.textContent = "";
+  for (const h of d.recent || []) {
+    const p = document.createElement("p");
+    p.className = "sub";
+    p.textContent = `${h.winner} wins in ${h.ticks} ticks — AP ${h.myDelta >= 0 ? "+" : ""}${h.myDelta} · ${h.myPaid} AC `;
+    const a = document.createElement("a");
+    a.href = `./index.html?replay=${h.matchId}`;
+    a.textContent = "replay";
+    p.appendChild(a);
+    box.appendChild(p);
+  }
+  show($("auto-card"), true);
 }
 
 function renderHist(d) {
@@ -224,6 +252,21 @@ $("breed-btn").addEventListener("click", async () => {
   $("breed-msg").textContent = r.data.portraitUrl
     ? "Hero bred with a portrait."
     : `Hero bred ${r.data.portraitStatus} — art can retry later, fights start now.`;
+  await refresh();
+});
+
+$("auto-opt").addEventListener("click", async () => {
+  $("auto-status").textContent = "Starting the 24h lease…";
+  const r = await call("POST", "/v1/autobattle/opt-in");
+  if (r.status !== 200) {
+    $("auto-status").textContent = `Start failed: ${r.data.error || r.status}.`;
+    return;
+  }
+  await refresh();
+});
+
+$("auto-pause").addEventListener("click", async () => {
+  await call("POST", "/v1/autobattle/pause");
   await refresh();
 });
 

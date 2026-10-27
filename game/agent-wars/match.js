@@ -56,8 +56,13 @@ async function qmBoot() {
   if (me.status !== 200) return;
   qmVersion = (me.data.agent && me.data.agent.active_version_id) || "";
   qmEnergy.textContent = `energy ${me.data.energy.energy}/${me.data.energy.energyMax}`;
+  const autoLine = me.data.auto && me.data.auto.optIn
+    ? `AutoBattle on — ${me.data.auto.state}, ${me.data.auto.ran} fought on this visit.`
+    : "AutoBattle off — start it on the profile page.";
   if (!me.data.agent) {
     lobbySay("No hero yet", "Breed one on the profile page, then queue.", `energy ${me.data.energy.energy}/${me.data.energy.energyMax}`);
+    const autoEl = document.getElementById("lobby-auto");
+    if (autoEl) autoEl.textContent = autoLine;
     return;
   }
   const img = document.getElementById("lobby-img");
@@ -70,6 +75,8 @@ async function qmBoot() {
     `${me.data.leader.ap} AP — breed, train, and climb.`,
     `energy ${me.data.energy.energy}/${me.data.energy.energyMax} — one per fight.`,
   );
+  const autoEl = document.getElementById("lobby-auto");
+  if (autoEl) autoEl.textContent = autoLine;
 }
 
 async function qmPoll(ticketId, left) {

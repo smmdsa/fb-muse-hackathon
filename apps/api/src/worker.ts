@@ -1,7 +1,7 @@
 // Cloudflare Worker entry. Full API on D1: auth, publish, fights, replay.
 
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
-import { draft, refresh, refundManualMatch, spendManualMatch, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
+import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies, pickBot } from "@agent-wars/battle-core";
 import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
@@ -196,6 +196,99 @@ async function refundEnergy(env: WorkerEnv, leaderId: string, now = Date.now()):
   const cur = await energyFor(env, leaderId, now);
   const next = refundManualMatch(cur, now);
   await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(next), leaderId).run();
+}
+
+// Explicit opt-in only. Reads never renew the lease.
+async function optInAutoD1(env: WorkerEnv, leaderId: string, now: number): Promise<{ leaseExpiresAt: number; state: string }> {
+  const cur = await energyFor(env, leaderId, now);
+  if (!cur.published) throw new Error("install a published version first");
+  const next = activate({ ...cur, optIn: true }, now);
+  await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(next), leaderId).run();
+  return { leaseExpiresAt: next.leaseExpiresAt as number, state: next.state };
+}
+
+async function pauseAutoD1(env: WorkerEnv, leaderId: string, now: number): Promise<{ state: string }> {
+  const cur = await energyFor(env, leaderId, now);
+  const next = pause(cur);
+  await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(next), leaderId).run();
+  return { state: next.state };
+}
+
+// One background pass. Ranked vs a live published foe, bot sparring alone.
+async function autoTickD1(
+  env: WorkerEnv,
+  leaderId: string,
+  now: number,
+  max = 10,
+): Promise<{ ran: number; matches: Record<string, unknown>[]; stopped: string }> {
+  const matches: Record<string, unknown>[] = [];
+  let ran = 0;
+  for (let i = 0; i < max; i += 1) {
+    const cur = await energyFor(env, leaderId, now);
+    const go = startOwnerMatch(cur, now);
+    await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(go.status), leaderId).run();
+    if (!go.guard.ok) break;
+    const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(leaderId).first<Record<string, unknown>>();
+    const seed = `ab-${leaderId}-${go.status.attackAt.length}`;
+    const foe = await findHumanOpponent(env, leaderId, now);
+    if (foe) {
+      const settled = await settleRankedD1(env, { aVersionId: agent?.active_version_id as string, bVersionId: foe.versionId, seed, key: `abm-${seed}` });
+      matches.push(settled as Record<string, unknown>);
+    } else {
+      const casual = await runCasualD1(env, { aVersionId: agent?.active_version_id as string, leaderId, useBot: true, seed });
+      const row = await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(casual.matchId).first<Record<string, unknown>>();
+      if (row) matches.push(row);
+    }
+    ran += 1;
+    const done = finishMatch(go.status, now);
+    await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(done), leaderId).run();
+  }
+  return { ran, matches, stopped: await autoStopD1(env, leaderId, now) };
+}
+
+// The stop reason in plain words. Reads never change the lease.
+async function autoStopD1(env: WorkerEnv, leaderId: string, now: number): Promise<string> {
+  const st = await energyFor(env, leaderId, now);
+  if (st.state === "PAUSED_MANUAL" || (st.optIn === false && st.leaseExpiresAt !== null)) return "paused";
+  if (!st.optIn) return "opted out";
+  if (st.state === "IDLE_EXPIRED" || (st.leaseExpiresAt !== null && now >= st.leaseExpiresAt)) return "lease expired";
+  if (st.stamina < 1) return "energy depleted";
+  if (st.attackAt.length >= MAX_ATTACK_PER_DAY) return "daily cap reached";
+  if (!st.published) return "no published version";
+  return "ready";
+}
+
+// The return digest: lease, energy, reason, and recent auto fights.
+async function autoDigestD1(env: WorkerEnv, leaderId: string, now: number): Promise<Record<string, unknown>> {
+  const st = await energyFor(env, leaderId, now);
+  const safe = leaderId.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const { results: rows } = await env.DB.prepare(
+    "SELECT * FROM matches WHERE seed LIKE ? ESCAPE '\\' ORDER BY created_at DESC LIMIT 10",
+  ).bind(`ab-${safe}-%`).all<Record<string, unknown>>();
+  const { results: vrows } = await env.DB.prepare(
+    "SELECT id FROM versions WHERE agent_id IN (SELECT id FROM agents WHERE leader_id = ?)",
+  ).bind(leaderId).all<Record<string, unknown>>();
+  const owned = new Set(vrows.map((v) => v.id as string));
+  return {
+    optIn: st.optIn,
+    leaseExpiresAt: st.leaseExpiresAt,
+    state: st.state,
+    energy: energyView(st, now),
+    stopReason: await autoStopD1(env, leaderId, now),
+    recent: rows.map((m) => {
+      const mine = owned.has(m.a_version as string) ? "a" : "b";
+      return {
+        matchId: m.id,
+        winner: m.winner,
+        ticks: m.ticks,
+        rated: m.rated,
+        myDelta: mine === "a" ? m.delta_a : m.delta_b,
+        myPaid: mine === "a" ? m.paid_a : m.paid_b,
+        at: m.created_at,
+        replay: `/v1/matches/${m.id}/replay`,
+      };
+    }),
+  };
 }
 
 // The dashboard serves one hero with chip stats per version.
@@ -535,8 +628,25 @@ export default {
     if (!me) return json({ error: "bearer token is required: call POST /v1/auth/session first" }, 401);
     if (request.method === "GET" && url.pathname === "/v1/me") {
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(me.id as string).first<Record<string, unknown>>();
-      const energy = energyView(await energyFor(env, me.id as string));
-      return json({ leader: me, agent, energy });
+      const auto = await autoTickD1(env, me.id as string, Date.now());
+      const st = await energyFor(env, me.id as string);
+      const energy = energyView(st, Date.now());
+      return json({ leader: me, agent, energy, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran } }, 200);
+    }
+    if (request.method === "POST" && url.pathname === "/v1/autobattle/opt-in") {
+      try {
+        const opt = await optInAutoD1(env, me.id as string, Date.now());
+        const tick = await autoTickD1(env, me.id as string, Date.now(), 3);
+        return json({ ...opt, ran: tick.ran, matches: tick.matches }, 200);
+      } catch (err) {
+        return json({ error: (err as Error).message }, 404);
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/v1/autobattle/pause") {
+      return json(await pauseAutoD1(env, me.id as string, Date.now()), 200);
+    }
+    if (request.method === "GET" && url.pathname === "/v1/autobattle/digest") {
+      return json(await autoDigestD1(env, me.id as string, Date.now()), 200);
     }
     if (request.method === "POST" && url.pathname === "/v1/agents") {
       try {

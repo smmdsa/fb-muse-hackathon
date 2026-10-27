@@ -250,6 +250,38 @@ describe("worker writes", () => {
     }), wenv);
     assert.equal((await full.json()).energy.energy, 10);
   });
+
+  it("opts in, runs background fights, and digests without renewing", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts"]) {
+      db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
+    }
+    db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l10", "auto10", "t10");
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a10", "l10", "v10");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v10", "a10", JSON.stringify({ schemaVersion: 1, agentVersionId: "v10", dna: { aggression: 80, evasion: 40, preferredDistance: 25, energyConservation: 50 }, rules: [{ id: "r", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true }] }), "shim", Date.now(),
+    );
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
+    const call = (method, path, body) => entry.fetch(new Request(`http://local${path}`, {
+      method,
+      headers: { "content-type": "application/json", authorization: "Bearer t10", ...(body ? {} : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    }), wenv).then(async (r) => ({ status: r.status, json: await r.json() }));
+    const opt = await call("POST", "/v1/autobattle/opt-in");
+    assert.equal(opt.status, 200);
+    assert.equal(opt.json.ran, 3);
+    assert.equal(opt.json.matches.length, 3);
+    const me = await call("GET", "/v1/me");
+    assert.equal(me.json.auto.optIn, true);
+    assert.equal(me.json.auto.ran, 7);
+    const pause = await call("POST", "/v1/autobattle/pause");
+    assert.equal(pause.json.state, "PAUSED_MANUAL");
+    const before = await call("GET", "/v1/autobattle/digest");
+    const after = await call("GET", "/v1/autobattle/digest");
+    assert.equal(before.json.leaseExpiresAt, after.json.leaseExpiresAt);
+    assert.equal(after.json.stopReason, "paused");
+    assert.equal(after.json.recent.length, 10);
+  });
 });
 
 describe("worker replay", () => {

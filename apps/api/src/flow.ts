@@ -8,7 +8,7 @@ import { applyRanked, createLedger, ratingFor } from "@agent-wars/ranking";
 import { rankFor } from "@agent-wars/ranking";
 import { buildStandings } from "@agent-wars/leaderboard";
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
-import { draft, refresh, refundManualMatch, spendManualMatch, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
+import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
 import { pickBot } from "@agent-wars/battle-core";
 import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
@@ -571,6 +571,98 @@ export function readTicket(
   store.db.prepare("UPDATE tickets SET status = 'expired' WHERE id = ?").run(input.ticketId);
   refundEnergy(store, input.leaderId, now);
   return { ...(store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(input.ticketId) as Record<string, unknown>) };
+}
+
+// Explicit opt-in only. Reads never call this function: the lease renews
+// on a button press, never on a visit.
+export function optInAutobattle(store: Store, leaderId: string, now = Date.now()): { leaseExpiresAt: number; state: string } {
+  const cur = energyFor(store, leaderId, now);
+  if (!cur.published) throw new Error("install a published version first");
+  const next = activate({ ...cur, optIn: true }, now);
+  store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(next), leaderId);
+  return { leaseExpiresAt: next.leaseExpiresAt as number, state: next.state };
+}
+
+// Explicit pause only. Resume needs a fresh opt-in press.
+export function pauseAutobattle(store: Store, leaderId: string, now = Date.now()): { state: string } {
+  const cur = energyFor(store, leaderId, now);
+  const next = pause(cur);
+  store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(next), leaderId);
+  return { state: next.state };
+}
+
+// One background pass. Ranked vs a live published foe, bot sparring
+// alone. Bounded per call so one read never drains the day.
+export function autobattleTick(
+  store: Store,
+  leaderId: string,
+  now = Date.now(),
+  max = 10,
+): { ran: number; matches: Record<string, unknown>[]; stopped: string } {
+  const matches: Record<string, unknown>[] = [];
+  let ran = 0;
+  for (let i = 0; i < max; i += 1) {
+    const cur = energyFor(store, leaderId, now);
+    const go = startOwnerMatch(cur, now);
+    store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(go.status), leaderId);
+    if (!go.guard.ok) break;
+    const agent = store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(leaderId) as Record<string, unknown> | null;
+    const seed = `ab-${leaderId}-${go.status.attackAt.length}`;
+    const foe = findHumanOpponent(store, leaderId, now);
+    const match = foe
+      ? runRanked(store, { aVersionId: agent?.active_version_id as string, bVersionId: foe.versionId, seed, key: `abm-${seed}` })
+      : runCasual(store, { aVersionId: agent?.active_version_id as string, bBot: true, seed, leaderId });
+    matches.push(match);
+    ran += 1;
+    const done = finishMatch(go.status, now);
+    store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(done), leaderId);
+  }
+  return { ran, matches, stopped: autobattleStop(store, leaderId, now) };
+}
+
+// The stop reason in plain words. Reads never change the lease.
+export function autobattleStop(store: Store, leaderId: string, now = Date.now()): string {
+  const st = energyFor(store, leaderId, now);
+  if (st.state === "PAUSED_MANUAL" || (st.optIn === false && st.leaseExpiresAt !== null)) return "paused";
+  if (!st.optIn) return "opted out";
+  if (st.state === "IDLE_EXPIRED" || (st.leaseExpiresAt !== null && now >= st.leaseExpiresAt)) return "lease expired";
+  if (st.stamina < 1) return "energy depleted";
+  if (st.attackAt.length >= MAX_ATTACK_PER_DAY) return "daily cap reached";
+  if (!st.published) return "no published version";
+  return "ready";
+}
+
+// The return digest: lease, energy, reason, and recent auto fights.
+export function autobattleDigest(store: Store, leaderId: string, now = Date.now()): Record<string, unknown> {
+  const st = energyFor(store, leaderId, now);
+  const safe = leaderId.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const like = `ab-${safe}-%`;
+  const rows = store.db.prepare(
+    "SELECT * FROM matches WHERE seed LIKE ? ESCAPE '\\' ORDER BY created_at DESC LIMIT 10",
+  ).all(like) as Record<string, unknown>[];
+  const owned = new Set(
+    (store.db.prepare("SELECT id FROM versions WHERE agent_id IN (SELECT id FROM agents WHERE leader_id = ?)").all(leaderId) as Record<string, unknown>[]).map((v) => v.id as string),
+  );
+  return {
+    optIn: st.optIn,
+    leaseExpiresAt: st.leaseExpiresAt,
+    state: st.state,
+    energy: energyView(st, now),
+    stopReason: autobattleStop(store, leaderId, now),
+    recent: rows.map((m) => {
+      const mine = owned.has(m.a_version as string) ? "a" : "b";
+      return {
+        matchId: m.id,
+        winner: m.winner,
+        ticks: m.ticks,
+        rated: m.rated,
+        myDelta: mine === "a" ? m.delta_a : m.delta_b,
+        myPaid: mine === "a" ? m.paid_a : m.paid_b,
+        at: m.created_at,
+        replay: `/v1/matches/${m.id}/replay`,
+      };
+    }),
+  };
 }
 
 // Cancel drops a queued ticket and returns its charge. Settled stays final.

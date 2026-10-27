@@ -130,6 +130,35 @@ describe("accounts", () => {
     }
   });
 
+  it("opts in, digests, and pauses autobattle", async () => {
+    const solo = openStore(":memory:");
+    const soloCall = makeCaller(buildRouter({ store: solo }));
+    try {
+      const bare = await soloCall("POST", "/v1/auth/session", { handle: "bare2" });
+      const denied = await soloCall("POST", "/v1/autobattle/opt-in", {}, bare.json.token);
+      assert.equal(denied.status, 404);
+      const s = await soloCall("POST", "/v1/auth/session", { handle: "auto" });
+      const a = await soloCall("POST", "/v1/agents", { name: "A", concept: "auto" }, s.json.token);
+      const v = await soloCall("POST", `/v1/agents/${a.json.agentId}/policies/compile`, { prompt: "rush them down up close" }, s.json.token);
+      await soloCall("POST", `/v1/agents/${a.json.agentId}/policies/install`, { versionId: v.json.versionId }, s.json.token);
+      const opt = await soloCall("POST", "/v1/autobattle/opt-in", {}, s.json.token);
+      assert.equal(opt.status, 200);
+      assert.equal(opt.json.ran, 3);
+      const digest = await soloCall("GET", "/v1/autobattle/digest", null, s.json.token);
+      assert.equal(digest.status, 200);
+      assert.equal(digest.json.optIn, true);
+      assert.equal(digest.json.recent.length, 3);
+      assert.equal(digest.json.stopReason, "ready");
+      const pause = await soloCall("POST", "/v1/autobattle/pause", {}, s.json.token);
+      assert.equal(pause.json.state, "PAUSED_MANUAL");
+      const after = await soloCall("GET", "/v1/autobattle/digest", null, s.json.token);
+      assert.equal(after.json.stopReason, "paused");
+      assert.equal(after.json.leaseExpiresAt, digest.json.leaseExpiresAt);
+    } finally {
+      solo.close();
+    }
+  });
+
   it("walks a fresh leader through the whole breed station", async () => {
     const s = await call("POST", "/v1/auth/session", { handle: "station" });
     const before = await call("GET", "/v1/me", null, s.json.token);

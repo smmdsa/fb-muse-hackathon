@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { board, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, installVersion, readTicket, requestMatch, retryPortrait, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
+import { autobattleDigest, autobattleTick, board, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, installVersion, optInAutobattle, pauseAutobattle, readTicket, requestMatch, retryPortrait, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -95,9 +95,29 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         return;
       }
       if (req.method === "GET" && url.pathname === "/v1/me") {
+        const auto = autobattleTick(ctx.store, me.id as string);
         const agent = ctx.store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(me.id as string);
-        const energy = energyView(energyFor(ctx.store, me.id as string));
-        send(res, 200, { leader: me, agent, energy });
+        const st = energyFor(ctx.store, me.id as string);
+        const energy = energyView(st);
+        send(res, 200, { leader: me, agent, energy, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran } });
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/autobattle/opt-in") {
+        try {
+          const opt = optInAutobattle(ctx.store, me.id as string);
+          const tick = autobattleTick(ctx.store, me.id as string, Date.now(), 3);
+          send(res, 200, { ...opt, ran: tick.ran, matches: tick.matches });
+        } catch (err) {
+          send(res, 404, { error: (err as Error).message });
+        }
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/autobattle/pause") {
+        send(res, 200, pauseAutobattle(ctx.store, me.id as string));
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/v1/autobattle/digest") {
+        send(res, 200, autobattleDigest(ctx.store, me.id as string));
         return;
       }
       if (req.method === "POST" && url.pathname === "/v1/agents") {
