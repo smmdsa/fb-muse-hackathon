@@ -261,7 +261,7 @@ export async function retryPortrait(
   return { portraitUrl, portraitStatus, retried: true };
 }
 
-// Compile plus validate plus publish in one honest step for the milestone.
+// Compile saves a draft. Nothing activates until the player installs it.
 export async function compileAndPublish(
   store: Store,
   env: FlowEnv,
@@ -282,8 +282,20 @@ export async function compileAndPublish(
     versionId, input.agentId, JSON.stringify(compiled.policy), sha, Date.now(), compiled.provider, compiled.isMock ? 1 : 0,
     compiled.promptTokens, compiled.latencyMs,
   );
-  store.db.prepare("UPDATE agents SET active_version_id = ? WHERE id = ?").run(versionId, input.agentId);
   return { versionId, errors: [], provider: compiled.provider, isMock: compiled.isMock, ...spent };
+}
+
+// Install names the fighting version. Drafts stay inert until this runs.
+export function installVersion(
+  store: Store,
+  input: { leaderId: string; agentId: string; versionId: string },
+): { activeVersionId: string } {
+  const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
+  if (!agent || agent.leader_id !== input.leaderId) throw new Error("agent not found for this leader");
+  const version = getVersion(store, input.versionId);
+  if (!version || version.agentId !== input.agentId) throw new Error("unknown version for this agent");
+  store.db.prepare("UPDATE agents SET active_version_id = ? WHERE id = ?").run(input.versionId, input.agentId);
+  return { activeVersionId: input.versionId };
 }
 
 // Energy reads the persisted machine, refreshes regen, and saves it back.

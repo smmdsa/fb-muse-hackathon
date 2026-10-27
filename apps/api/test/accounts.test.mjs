@@ -122,12 +122,24 @@ describe("accounts", () => {
     assert.equal(dash.json.agent.portraitStatus, "faceless");
   });
 
-  it("compiles and publishes a valid draft", async () => {
+  it("compiles and saves a valid draft", async () => {
     const r = await call("POST", `/v1/agents/${keys.agent}/policies/compile`, { prompt: "rush them down up close" }, keys.commander);
     assert.equal(r.status, 201);
     assert.ok(r.json.versionId);
     assert.equal(r.json.provider, "mock");
     keys.version = r.json.versionId;
+  });
+
+  it("installs a draft as the fighting version", async () => {
+    const before = await call("GET", "/v1/me", null, keys.commander);
+    assert.ok(!before.json.agent.active_version_id);
+    const bad = await call("POST", `/v1/agents/${keys.agent}/policies/install`, { versionId: "v-nope" }, keys.commander);
+    assert.equal(bad.status, 404);
+    const r = await call("POST", `/v1/agents/${keys.agent}/policies/install`, { versionId: keys.version }, keys.commander);
+    assert.equal(r.status, 200);
+    assert.equal(r.json.activeVersionId, keys.version);
+    const after = await call("GET", "/v1/me", null, keys.commander);
+    assert.equal(after.json.agent.active_version_id, keys.version);
   });
 
   it("shows the dashboard with chips", async () => {

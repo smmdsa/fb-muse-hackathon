@@ -592,8 +592,25 @@ export default {
       await env.DB.prepare(
         "INSERT INTO versions (id, agent_id, policy_json, sha, created_at, provider, is_mock, tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(versionId, agentId, JSON.stringify(compiled.policy), hex, Date.now(), compiled.provider, compiled.isMock ? 1 : 0, compiled.promptTokens, compiled.latencyMs).run();
-      await env.DB.prepare("UPDATE agents SET active_version_id = ? WHERE id = ?").bind(versionId, agentId).run();
       return json({ versionId, provider: compiled.provider, isMock: compiled.isMock, ...spent }, 201);
+      } catch (err) {
+        return json({ error: `server error: ${(err as Error).message}` }, 500);
+      }
+    }
+    const installMatch = request.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/install$/.test(url.pathname);
+    if (installMatch) {
+      try {
+      const agentId = url.pathname.split("/")[3];
+      const target = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
+      if (!target || target.leader_id !== me.id) return json({ error: "agent not found for this leader" }, 404);
+      const body = await readBody(request);
+      if (body === null) return json({ error: "bad json" }, 400);
+      const versionId = typeof body.versionId === "string" ? body.versionId : "";
+      if (!versionId) return json({ error: "versionId is required" }, 400);
+      const version = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(versionId).first<Record<string, unknown>>();
+      if (!version || version.agent_id !== agentId) return json({ error: "unknown version for this agent" }, 404);
+      await env.DB.prepare("UPDATE agents SET active_version_id = ? WHERE id = ?").bind(versionId, agentId).run();
+      return json({ activeVersionId: versionId }, 200);
       } catch (err) {
         return json({ error: `server error: ${(err as Error).message}` }, 500);
       }

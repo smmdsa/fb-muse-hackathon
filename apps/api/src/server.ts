@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { board, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, readTicket, requestMatch, retryPortrait, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
+import { board, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, installVersion, readTicket, requestMatch, retryPortrait, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -152,6 +152,21 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           return;
         }
         send(res, 201, { versionId: out.versionId, provider: out.provider, isMock: out.isMock, tokens: out.tokens, latencyMs: out.latencyMs });
+        return;
+      }
+      const installMatch = req.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/install$/.test(url.pathname);
+      if (installMatch) {
+        const agentId = url.pathname.split("/")[3];
+        const versionId = typeof body.versionId === "string" ? body.versionId : "";
+        if (!versionId) {
+          send(res, 400, { error: "versionId is required" });
+          return;
+        }
+        try {
+          send(res, 200, installVersion(ctx.store, { leaderId: me.id as string, agentId, versionId }));
+        } catch (err) {
+          send(res, 404, { error: (err as Error).message });
+        }
         return;
       }
       if (req.method === "POST" && url.pathname === "/v1/matches/training") {

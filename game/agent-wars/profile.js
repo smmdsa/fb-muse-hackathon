@@ -105,6 +105,20 @@ function renderDash(d) {
       .map((k) => `${k} ${traits[k] ?? "—"}`)
       .join(" · ");
     card.appendChild(dna);
+    if (v.versionId !== d.agent.activeVersionId) {
+      const fit = document.createElement("button");
+      fit.className = "btn-ghost";
+      fit.type = "button";
+      fit.textContent = "Install this version";
+      fit.addEventListener("click", async () => {
+        const r = await call("POST", `/v1/agents/${d.agent.id}/policies/install`, { versionId: v.versionId });
+        $("train-msg").textContent = r.status === 200
+          ? "Version installed. The queue takes the active version."
+          : `Install failed: ${r.data.error || r.status}.`;
+        await refresh();
+      });
+      card.appendChild(fit);
+    }
     const table = document.createElement("table");
     table.className = "chips";
     const top = document.createElement("tr");
@@ -213,7 +227,7 @@ $("compile-btn").addEventListener("click", async () => {
     return;
   }
   latestVersion = r.data.versionId;
-  $("train-msg").textContent = `Version minted by ${r.data.isMock ? "mock" : r.data.provider}. Run a training fight.`;
+  $("train-msg").textContent = `Draft minted by ${r.data.isMock ? "mock" : r.data.provider}. Install it below, then queue.`;
   $("fight-btn").disabled = false;
   await refresh();
 });

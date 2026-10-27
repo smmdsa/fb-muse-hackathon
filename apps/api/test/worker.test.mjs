@@ -129,6 +129,13 @@ describe("worker writes", () => {
     assert.ok(va.json.tokens > 0);
     const vb = await call("POST", `/v1/agents/${ab.json.agentId}/policies/compile`, { prompt: "evade and stay far away" }, sb.json.token);
     assert.equal(vb.status, 201);
+    const ia = await call("POST", `/v1/agents/${aa.json.agentId}/policies/install`, { versionId: va.json.versionId }, sa.json.token);
+    assert.equal(ia.status, 200);
+    assert.equal(ia.json.activeVersionId, va.json.versionId);
+    const ib = await call("POST", `/v1/agents/${ab.json.agentId}/policies/install`, { versionId: vb.json.versionId }, sb.json.token);
+    assert.equal(ib.status, 200);
+    const alienInstall = await call("POST", `/v1/agents/${aa.json.agentId}/policies/install`, { versionId: va.json.versionId }, sb.json.token);
+    assert.equal(alienInstall.status, 404);
     const retry = await call("POST", `/v1/agents/${aa.json.agentId}/portrait/retry`, {}, sa.json.token);
     assert.equal(retry.status, 200);
     assert.equal(retry.json.retried, true);

@@ -11,6 +11,7 @@ async function leader(handle, prompt) {
   const s = await call("POST", "/v1/auth/session", { handle });
   const a = await call("POST", "/v1/agents", {}, s.json.token);
   const v = await call("POST", `/v1/agents/${a.json.agentId}/policies/compile`, { prompt }, s.json.token);
+  await call("POST", `/v1/agents/${a.json.agentId}/policies/install`, { versionId: v.json.versionId }, s.json.token);
   return { token: s.json.token, version: v.json.versionId };
 }
 
