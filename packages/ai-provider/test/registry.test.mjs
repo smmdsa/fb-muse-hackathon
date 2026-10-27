@@ -2,9 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   MUSE_SUITE,
+  PORTRAIT_STYLE,
   hasKey,
   keyFor,
   metaApiBase,
+  portraitPromptFor,
   providerFromEnv,
   resolveModel,
   taskKeyName,
@@ -48,6 +50,15 @@ describe("model registry", () => {
     assert.equal(keyFor("portrait", { META_SPARK_KEY: "s", META_IMAGE_KEY: "i" }), "i");
     assert.equal(keyFor("compile", { META_API_KEY: "shared" }), "shared");
     assert.equal(keyFor("portrait", {}), "");
+  });
+
+  it("locks the portrait style for every subject", () => {
+    const a = portraitPromptFor("Wasp: fast striker");
+    const b = portraitPromptFor("Tank: slow guard");
+    assert.ok(a.startsWith("Wasp: fast striker, "));
+    assert.ok(a.endsWith(PORTRAIT_STYLE));
+    assert.ok(b.endsWith(PORTRAIT_STYLE));
+    assert.equal(portraitPromptFor("  "), `arena robot, ${PORTRAIT_STYLE}`);
   });
 
   it("detects each key alone", () => {

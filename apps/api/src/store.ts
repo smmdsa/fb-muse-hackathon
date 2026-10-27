@@ -26,14 +26,19 @@ export function openStore(path: string): Store {
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
       leader_id TEXT UNIQUE NOT NULL REFERENCES leaders(id),
-      active_version_id TEXT
+      active_version_id TEXT,
+      name TEXT,
+      concept TEXT,
+      portrait_url TEXT
     );
     CREATE TABLE IF NOT EXISTS versions (
       id TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL REFERENCES agents(id),
       policy_json TEXT NOT NULL,
       sha TEXT NOT NULL,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      provider TEXT NOT NULL DEFAULT 'mock',
+      is_mock INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE IF NOT EXISTS matches (
       id TEXT PRIMARY KEY,
@@ -46,7 +51,8 @@ export function openStore(path: string): Store {
       rated INTEGER NOT NULL,
       delta_a INTEGER NOT NULL DEFAULT 0,
       delta_b INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      chips_json TEXT
     );
     CREATE TABLE IF NOT EXISTS wallet_keys (
       wallet_id TEXT NOT NULL,

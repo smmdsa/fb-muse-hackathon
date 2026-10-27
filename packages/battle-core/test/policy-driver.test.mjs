@@ -5,6 +5,7 @@ import {
   createBattle,
   DEFAULT_BATTLE,
   drive,
+  fightPolicies,
   stepBattle,
 } from "../src/index.ts";
 
@@ -63,6 +64,16 @@ describe("policy driver", () => {
   it("finishes through the fallback when no rule matches", () => {
     const s = fight(NEVER, NEVER);
     assert.equal(s.over, true);
+  });
+
+  it("tallies chip triggers deterministically", () => {
+    const a = fightPolicies(RUSH, TURTLE, "tally-1");
+    const b = fightPolicies(RUSH, TURTLE, "tally-1");
+    assert.deepEqual(a.chipsA, b.chipsA);
+    assert.deepEqual(a.chipsB, b.chipsB);
+    const firedA = Object.values(a.chipsA).reduce((n, c) => n + c, 0);
+    assert.equal(firedA, a.ticks);
+    assert.ok((a.chipsA["close-fire"] ?? 0) > 0);
   });
 
   it("drives every movement intent without NaN", () => {

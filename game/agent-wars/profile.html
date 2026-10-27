@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Wars — Profile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+<main class="shell">
+<header class="top">
+<div>
+<h1>Agent Wars</h1>
+<p class="sub">Player profile — breed a hero, train its chips, watch it climb.</p>
+</div>
+<div class="pills">
+<a class="pill link" href="./index.html">arena</a>
+<span class="pill" id="pill-who">signed out</span>
+</div>
+</header>
+<section class="panel" id="login-card">
+<h2>Leader</h2>
+<div class="row">
+<label for="handle">Handle</label>
+<input id="handle" name="handle" value="" maxlength="40" placeholder="your callsign" />
+<button id="login-btn" class="btn-primary" type="button">Sign in</button>
+</div>
+<p class="sub" id="login-msg">One handle owns one hero. New leaders start at 500 AP in CIRCUIT I.</p>
+</section>
+<section class="panel" id="hero-card" hidden>
+<h2>My hero</h2>
+<div class="hero">
+<img id="hero-img" alt="Agent portrait" src="" hidden />
+<div class="hero-info">
+<p class="hero-name" id="hero-name">—</p>
+<p class="sub" id="hero-concept">—</p>
+<div class="row">
+<img id="hero-shield" alt="Rank shield" src="" hidden />
+<div>
+<p class="hero-ap" id="hero-ap">—</p>
+<p class="sub" id="hero-ac">—</p>
+</div>
+</div>
+</div>
+</div>
+<div class="row" id="breed-row" hidden>
+<label for="hero-name-in">Name</label>
+<input id="hero-name-in" name="hero-name-in" value="" maxlength="60" placeholder="Wasp" />
+<label for="hero-concept-in">Concept</label>
+<input id="hero-concept-in" name="hero-concept-in" value="" maxlength="280" placeholder="fast striker, kites at range" />
+<button id="breed-btn" class="btn-primary" type="button">Breed hero</button>
+</div>
+<p class="sub" id="breed-msg" hidden>Breeding paints the portrait in the house style. No image key on the server means a faceless hero.</p>
+</section>
+<section class="panel" id="train-card" hidden>
+<h2>Train chips</h2>
+<div class="row">
+<label for="prompt">Prompt</label>
+<input id="prompt" name="prompt" value="" maxlength="280" placeholder="rush them down up close" />
+<button id="compile-btn" class="btn-primary" type="button">Compile</button>
+<button id="fight-btn" class="btn-ghost" type="button" disabled>Training fight</button>
+</div>
+<p class="sub" id="train-msg">Compile turns words into chips. Fight runs the version against the benchmark.</p>
+</section>
+<section class="panel" id="dash-card" hidden>
+<h2>Chips dashboard</h2>
+<div id="dash"></div>
+</section>
+</main>
+<script src="./profile.js"></script>
+</body>
+</html>

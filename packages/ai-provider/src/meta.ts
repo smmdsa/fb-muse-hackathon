@@ -72,6 +72,17 @@ export type MetaProvider = AiProvider & {
   generatePortrait: (req: PortraitRequest) => Promise<PortraitResult>;
 };
 
+// One style line keeps every agent portrait in the same art family:
+// three-quarter view, vector esports look, dark navy field, no text.
+export const PORTRAIT_STYLE =
+  "three-quarter view fighting robot portrait, flat vector esports style, glowing visor, dark navy background, no text, no letters";
+
+// The prompter locks the art direction. The subject changes, the style never does.
+export function portraitPromptFor(subject: string): string {
+  const clean = subject.trim().slice(0, 200) || "arena robot";
+  return `${clean}, ${PORTRAIT_STYLE}`;
+}
+
 // The factory builds a provider bound to both task keys, base URL, and map.
 // Each call carries its own task key so Spark spend stays apart from images.
 export function createMetaProvider(env: MetaEnv, fetchFn: FetchFn = defaultFetch): MetaProvider {

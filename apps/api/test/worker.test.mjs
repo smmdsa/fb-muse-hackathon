@@ -29,6 +29,7 @@ const assetsStub = {
 before(() => {
   const db = new DatabaseSync(":memory:");
   db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
   db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     "l1", "commander", "t1", 1020000, 520, 5, 1,
   );
@@ -66,6 +67,7 @@ describe("worker writes", () => {
   it("runs auth, agent, compile, training, and ranked end to end", async () => {
     const db = new DatabaseSync(":memory:");
     db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
     const shimmed = {
       prepare: (query) => ({
         bind: (...values) => ({
@@ -90,13 +92,16 @@ describe("worker writes", () => {
     const sa = await call("POST", "/v1/auth/session", { handle: "wa" });
     assert.equal(sa.status, 200);
     const sb = await call("POST", "/v1/auth/session", { handle: "wb" });
-    const aa = await call("POST", "/v1/agents", {}, sa.json.token);
+    const aa = await call("POST", "/v1/agents", { name: "Wasp", concept: "fast striker" }, sa.json.token);
     assert.equal(aa.status, 201);
+    assert.equal(aa.json.portraitUrl, null);
     const dup = await call("POST", "/v1/agents", {}, sa.json.token);
     assert.equal(dup.status, 409);
     const ab = await call("POST", "/v1/agents", {}, sb.json.token);
     const va = await call("POST", `/v1/agents/${aa.json.agentId}/policies/compile`, { prompt: "rush them down up close" }, sa.json.token);
     assert.equal(va.status, 201);
+    assert.equal(va.json.provider, "mock");
+    assert.equal(va.json.isMock, true);
     const vb = await call("POST", `/v1/agents/${ab.json.agentId}/policies/compile`, { prompt: "evade and stay far away" }, sb.json.token);
     assert.equal(vb.status, 201);
     const t = await call("POST", "/v1/matches/training", { versionId: va.json.versionId, seed: "wt-1" }, sa.json.token);
@@ -110,6 +115,18 @@ describe("worker writes", () => {
     assert.equal((await replay.json()).identical, true);
     const self = await call("POST", "/v1/matches/ranked", { aVersionId: va.json.versionId, bVersionId: va.json.versionId, seed: "ws-1", key: "ws-1" }, sa.json.token);
     assert.equal(self.status, 422);
+    const board = await entry.fetch(new Request(`http://local/v1/agents/${aa.json.agentId}/dashboard`, {
+      headers: { authorization: `Bearer ${sa.json.token}` },
+    }), wenv);
+    assert.equal(board.status, 200);
+    const dash = await board.json();
+    assert.equal(dash.agent.name, "Wasp");
+    assert.equal(dash.leader.tier, "CIRCUIT");
+    assert.equal(dash.versions.length, 1);
+    assert.equal(dash.versions[0].fights, 2);
+    assert.equal(dash.versions[0].chips.length > 0, true);
+    const fired = dash.versions[0].chips.reduce((n, c) => n + c.triggers, 0);
+    assert.ok(fired > 0 && fired <= dash.versions[0].avgTicks * dash.versions[0].fights);
   });
 });
 
@@ -127,6 +144,7 @@ describe("worker replay", () => {
   it("replays a finished match with identical checksum", async () => {
     const db = new DatabaseSync(":memory:");
     db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
     db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
       "l9", "replay-leader", "t9", 1020000, 520, 5, 1,
     );

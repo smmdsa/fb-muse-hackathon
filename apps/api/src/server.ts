@@ -5,13 +5,18 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, fightPolicies } from "@agent-wars/battle-core";
-import { board, compileAndPublish, getLeader, getVersion, runRanked, runTraining } from "./flow.ts";
+import { board, compileAndPublish, createAgent, dashboard, getLeader, getVersion, runRanked, runTraining } from "./flow.ts";
 
 type Ctx = { store: Store };
 
 function send(res: ServerResponse, code: number, body: unknown): void {
   const text = JSON.stringify(body);
-  res.writeHead(code, { "content-type": "application/json", "content-length": Buffer.byteLength(text) });
+  res.writeHead(code, {
+    "content-type": "application/json",
+    "content-length": Buffer.byteLength(text),
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "authorization, content-type",
+  });
   res.end(text);
 }
 
@@ -85,9 +90,20 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           send(res, 409, { error: "one agent per leader in this phase" });
           return;
         }
-        const id = mintId("agent");
-        ctx.store.db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, NULL)").run(id, me.id as string);
-        send(res, 201, { agentId: id });
+        const name = typeof body.name === "string" ? body.name.slice(0, 60) : "";
+        const concept = typeof body.concept === "string" ? body.concept.slice(0, 280) : "";
+        const bred = await createAgent(ctx.store, process.env, { leaderId: me.id as string, name, concept });
+        send(res, 201, { agentId: bred.agentId, portraitUrl: bred.portraitUrl });
+        return;
+      }
+      const dashMatch = req.method === "GET" && /^\/v1\/agents\/[^/]+\/dashboard$/.test(url.pathname);
+      if (dashMatch) {
+        const agentId = url.pathname.split("/")[3];
+        try {
+          send(res, 200, dashboard(ctx.store, agentId, me.id as string));
+        } catch (err) {
+          send(res, 404, { error: (err as Error).message });
+        }
         return;
       }
       const compileMatch = req.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/compile$/.test(url.pathname);
@@ -103,12 +119,12 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           send(res, 400, { error: "prompt is required" });
           return;
         }
-        const out = await compileAndPublish(ctx.store, { agentId, prompt });
+        const out = await compileAndPublish(ctx.store, process.env, { agentId, prompt });
         if (!out.versionId) {
-          send(res, 422, { error: "draft failed validation", errors: out.errors });
+          send(res, 422, { error: "draft failed validation", errors: out.errors, provider: out.provider, isMock: out.isMock });
           return;
         }
-        send(res, 201, { versionId: out.versionId });
+        send(res, 201, { versionId: out.versionId, provider: out.provider, isMock: out.isMock });
         return;
       }
       if (req.method === "POST" && url.pathname === "/v1/matches/training") {

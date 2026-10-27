@@ -238,6 +238,39 @@ input {
   font-variant-numeric: tabular-nums;
 }
 
+.pill.link { color: var(--a); text-decoration: none; }
+.pill.link:hover { background: #37e0ff22; }
+.pill.live { border-color: var(--good); color: var(--good); }
+
+.hero { display: flex; gap: 16px; align-items: start; margin-top: 12px; }
+
+#hero-img {
+  width: 160px;
+  height: 160px;
+  object-fit: cover;
+  border: 2px solid var(--outline);
+  border-radius: 3px;
+  background: var(--panel-low);
+}
+
+.hero-name { font-family: var(--display); font-weight: 700; font-size: 20px; margin: 0; }
+
+#hero-shield { width: 56px; height: 56px; object-fit: contain; }
+
+.hero-ap { font-family: var(--display); font-weight: 600; margin: 0; }
+
+.ver { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+.ver-head { margin: 0 0 8px; font-variant-numeric: tabular-nums; }
+
+table.chips { border-collapse: collapse; width: 100%; font-size: 14px; }
+table.chips th, table.chips td {
+  border: 1px solid var(--line);
+  padding: 6px 10px;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+table.chips th { font-family: var(--display); color: var(--dim); font-weight: 600; }
+
 @media (max-width: 640px) {
   h1 { font-size: 32px; }
   .shell { padding: 12px 16px 24px; }
