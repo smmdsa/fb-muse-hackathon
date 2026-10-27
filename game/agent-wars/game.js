@@ -321,11 +321,16 @@ function step() {
 function move(me, p) {
   if (!me.alive) return;
   let sp = SPEED;
-  if (p.dash && me.en >= DASH_COST) { sp *= 3.2; me.en -= DASH_COST; }
+  if (p.dash && me.en >= DASH_COST) {
+    sp *= 3.2;
+    me.en -= DASH_COST;
+    sparks.push({ x: me.x, y: me.y, age: 0, text: "DASH", color: "#ffffff" });
+  }
   if (p.shield && me.en >= SHIELD_COST && time >= me.shieldCdUntil) {
     me.en -= SHIELD_COST;
     me.shieldUntil = time + 0.8;
     me.shieldCdUntil = time + 4;
+    note((me.side === "A" ? "Cyan" : "Crimson") + " raises shield");
   }
   me.en = Math.min(MAX_EN, me.en + REGEN * TICK);
   let nx = me.x + p.mx * sp * TICK;
@@ -494,6 +499,13 @@ function unit(me, color, sx, sy) {
   ctx.moveTo(me.x * sx, me.y * sy);
   ctx.lineTo((me.x + me.ax) * sx, (me.y + me.ay) * sy);
   ctx.stroke();
+  if (time <= me.shieldUntil) {
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(me.x * sx, me.y * sy, RADIUS * sx + 6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 }
 
 function sync() {
