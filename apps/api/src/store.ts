@@ -83,10 +83,4 @@ export function openStore(path: string): Store {
   return { db, close: () => db.close() };
 }
 
-let counter = 0;
-
-// Test and route code mints ids without outside input.
-export function mintId(prefix: string): string {
-  counter += 1;
-  return `${prefix}_${Date.now().toString(36)}_${counter}`;
-}
+export { mintId, newToken } from "./ids.ts";

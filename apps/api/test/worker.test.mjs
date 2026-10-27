@@ -164,6 +164,10 @@ describe("worker writes", () => {
     }), wenv);
     assert.equal(mine.status, 200);
     assert.equal((await mine.json()).status, "settled");
+    const crossCompile = await call("POST", `/v1/agents/${aa.json.agentId}/policies/compile`, { prompt: "rush" }, sb.json.token);
+    assert.equal(crossCompile.status, 404);
+    const crossTrain = await call("POST", "/v1/matches/training", { versionId: va.json.versionId, seed: "x-1" }, sb.json.token);
+    assert.equal(crossTrain.status, 404);
     const board = await entry.fetch(new Request(`http://local/v1/agents/${aa.json.agentId}/dashboard`, {
       headers: { authorization: `Bearer ${sa.json.token}` },
     }), wenv);

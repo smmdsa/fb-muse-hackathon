@@ -8,6 +8,17 @@ import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
 import type { History } from "@agent-wars/matchmaker";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
+import { checkLimit } from "./ids.ts";
+
+// Per-route sliding windows. Memory-only per isolate.
+const authHits = new Map<string, number[]>();
+const compileHits = new Map<string, number[]>();
+const queueHits = new Map<string, number[]>();
+const trainHits = new Map<string, number[]>();
+
+function limited(log: Map<string, number[]>, key: string, windowMs: number, max: number): boolean {
+  return !checkLimit(log, key, Date.now(), windowMs, max);
+}
 import { createWallet, earnAc } from "@agent-wars/economy";
 import { buildStandings } from "@agent-wars/leaderboard";
 import { applyRanked, createLedger, rankFor, ratingFor } from "@agent-wars/ranking";
@@ -45,10 +56,18 @@ function json(body: unknown, code = 200): Response {
 
 let counter = 0;
 
-// IDs stay unique per isolate without any outside input.
+// IDs keep a time prefix plus 64 crypto-random bits per isolate.
 function mintId(prefix: string): string {
-  counter += 1;
-  return `${prefix}_${Date.now().toString(36)}_${counter}`;
+  const buf = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(buf);
+  const tail = [...buf].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `${prefix}_${Date.now().toString(36)}_${tail}`;
+}
+function newToken(kind: string): string {
+  const buf = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(buf);
+  const tail = [...buf].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `${kind}_${tail}`;
 }
 
 async function readBody(request: Request): Promise<Record<string, unknown> | null> {
@@ -444,8 +463,9 @@ export default {
       if (!handle) return json({ error: "handle is required" }, 400);
       const found = await env.DB.prepare("SELECT * FROM leaders WHERE handle = ?").bind(handle).first<Record<string, unknown>>();
       if (found) return json({ token: found.token, leaderId: found.id });
+      if (limited(authHits, handle, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);
       const id = mintId("leader");
-      const token = `demo_${id}_${Math.random().toString(36).slice(2)}`;
+      const token = newToken("demo");
       await env.DB.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").bind(id, handle, token).run();
       return json({ token, leaderId: id });
     }
@@ -495,6 +515,7 @@ export default {
     }
     const compileMatch = request.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/compile$/.test(url.pathname);
     if (compileMatch) {
+      if (limited(compileHits, me.id as string, 60_000, 6)) return json({ error: "rate limited, retry later" }, 429);
       try {
       const agentId = url.pathname.split("/")[3];
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
@@ -525,6 +546,11 @@ export default {
       const versionId = typeof body.versionId === "string" ? body.versionId : "";
       const seed = typeof body.seed === "string" && body.seed ? body.seed : `t-${Date.now().toString(36)}`;
       if (!versionId) return json({ error: "versionId is required" }, 400);
+      if (limited(trainHits, me.id as string, 60_000, 20)) return json({ error: "rate limited, retry later" }, 429);
+      const owned = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(versionId).first<Record<string, unknown>>();
+      if (!owned) return json({ error: "unknown version" }, 404);
+      const owner = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(owned.agent_id as string).first<Record<string, unknown>>();
+      if (!owner || owner.leader_id !== me.id) return json({ error: "version not found for this leader" }, 404);
       const v = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(versionId).first<Record<string, unknown>>();
       if (!v) return json({ error: "unknown version" }, 404);
       const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, BENCH_POLICY, seed);
@@ -567,6 +593,7 @@ export default {
       if (!versionId || (mode !== "casual" && mode !== "ranked")) {
         return json({ error: "versionId and mode casual|ranked are required" }, 400);
       }
+      if (limited(queueHits, me.id as string, 60_000, 6)) return json({ error: "rate limited, retry later" }, 429);
       try {
         const ticket = await requestMatchD1(env, { leaderId: me.id as string, versionId, mode }, Date.now());
         return json(await withMatchD1(env, ticket), 201);

@@ -60,4 +60,24 @@ describe("accounts", () => {
     assert.ok(r.json.agent);
     assert.equal(r.json.energy.energy, 10);
   });
+
+  it("denies compiling on a stranger's agent", async () => {
+    const other = await call("POST", "/v1/auth/session", { handle: "intruder" });
+    const r = await call("POST", `/v1/agents/${keys.agent}/policies/compile`, { prompt: "rush" }, other.json.token);
+    assert.equal(r.status, 404);
+  });
+
+  it("denies training on a stranger's version", async () => {
+    const other = await call("POST", "/v1/auth/session", { handle: "snoop" });
+    const r = await call("POST", "/v1/matches/training", { versionId: keys.version, seed: "snoop-1" }, other.json.token);
+    assert.equal(r.status, 404);
+  });
+
+  it("throttles rapid compiles", async () => {
+    for (let i = 0; i < 5; i += 1) {
+      await call("POST", `/v1/agents/${keys.agent}/policies/compile`, { prompt: "rush" }, keys.commander);
+    }
+    const r = await call("POST", `/v1/agents/${keys.agent}/policies/compile`, { prompt: "rush" }, keys.commander);
+    assert.equal(r.status, 429);
+  });
 });

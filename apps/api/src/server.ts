@@ -6,7 +6,20 @@ import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
 import { board, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, readTicket, requestMatch, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
+import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
+
+// Per-route sliding windows. Memory-only; a restart clears history.
+const authHits = new Map<string, number[]>();
+const compileHits = new Map<string, number[]>();
+const queueHits = new Map<string, number[]>();
+const trainHits = new Map<string, number[]>();
+
+function limited(res: ServerResponse, log: Map<string, number[]>, key: string, windowMs: number, max: number): boolean {
+  if (checkLimit(log, key, Date.now(), windowMs, max)) return false;
+  send(res, 429, { error: "rate limited, retry later" });
+  return true;
+}
 
 type Ctx = { store: Store };
 
@@ -64,13 +77,14 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           send(res, 400, { error: "handle is required" });
           return;
         }
+        if (limited(res, authHits, handle, 60_000, 10)) return;
         const found = ctx.store.db.prepare("SELECT * FROM leaders WHERE handle = ?").get(handle) as Record<string, unknown> | null;
         if (found) {
           send(res, 200, { token: found.token, leaderId: found.id });
           return;
         }
         const id = mintId("leader");
-        const token = `demo_${id}_${Math.random().toString(36).slice(2)}`;
+        const token = newToken("demo");
         ctx.store.db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run(id, handle, token);
         send(res, 200, { token, leaderId: id });
         return;
@@ -110,6 +124,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
       }
       const compileMatch = req.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/compile$/.test(url.pathname);
       if (compileMatch) {
+        if (limited(res, compileHits, me.id as string, 60_000, 6)) return;
         const agentId = url.pathname.split("/")[3];
         const agent = ctx.store.db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as Record<string, unknown> | null;
         if (!agent || agent.leader_id !== me.id) {
@@ -134,6 +149,17 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const seed = typeof body.seed === "string" && body.seed ? body.seed : `t-${Date.now().toString(36)}`;
         if (!versionId) {
           send(res, 400, { error: "versionId is required" });
+          return;
+        }
+        if (limited(res, trainHits, me.id as string, 60_000, 20)) return;
+        const owned = getVersion(ctx.store, versionId);
+        if (!owned) {
+          send(res, 404, { error: "unknown version" });
+          return;
+        }
+        const owner = ctx.store.db.prepare("SELECT * FROM agents WHERE id = ?").get(owned.agentId) as Record<string, unknown> | null;
+        if (!owner || owner.leader_id !== me.id) {
+          send(res, 404, { error: "version not found for this leader" });
           return;
         }
         try {
@@ -185,6 +211,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           send(res, 400, { error: "versionId and mode casual|ranked are required" });
           return;
         }
+        if (limited(res, queueHits, me.id as string, 60_000, 6)) return;
         try {
           const ticket = requestMatch(ctx.store, { leaderId: me.id as string, versionId, mode: mode as TicketMode });
           send(res, 201, withMatch(ctx.store, ticket));
