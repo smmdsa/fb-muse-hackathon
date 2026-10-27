@@ -33,6 +33,7 @@ describe("matches", () => {
     assert.ok(r.json.checksum);
     const me = await call("GET", "/v1/me", null, keys.a.token);
     assert.equal(me.json.leader.ap, 500);
+    assert.equal(me.json.energy.energy, 10);
   });
 
   it("settles ranked with AP, pay, and replay", async () => {
@@ -74,5 +75,30 @@ describe("matches", () => {
       keys.a.token,
     );
     assert.equal(r.status, 422);
+  });
+
+  it("spends one energy per ranked fight", async () => {
+    const me = await call("GET", "/v1/me", null, keys.a.token);
+    assert.equal(me.json.energy.energy, 9);
+  });
+
+  it("denies ranked at zero energy", async () => {
+    for (let i = 2; i <= 10; i += 1) {
+      const r = await call(
+        "POST",
+        "/v1/matches/ranked",
+        { aVersionId: keys.a.version, bVersionId: keys.b.version, seed: `rank-${i}`, key: `rank-${i}` },
+        keys.a.token,
+      );
+      assert.equal(r.status, 201);
+    }
+    const out = await call(
+      "POST",
+      "/v1/matches/ranked",
+      { aVersionId: keys.a.version, bVersionId: keys.b.version, seed: "rank-11", key: "rank-11" },
+      keys.a.token,
+    );
+    assert.equal(out.status, 409);
+    assert.match(out.json.error, /energy empty/);
   });
 });

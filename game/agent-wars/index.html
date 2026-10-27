@@ -42,6 +42,17 @@
 <button id="restart-btn" class="btn-ghost" type="button" disabled>Restart</button>
 </div>
 </section>
+<section class="panel" id="quick-card">
+<h2>Quick match</h2>
+<div class="row">
+<button id="qm-casual" class="btn-primary" type="button">Casual</button>
+<button id="qm-ranked" class="btn-ghost" type="button">Ranked</button>
+<button id="qm-find" class="btn-primary" type="button">Find fight</button>
+<span class="pill" id="qm-energy">energy —</span>
+</div>
+<p class="sub" id="qm-status">Same-ELO humans first. No human in 30 seconds means a same-band sparring bot in casual. Ranked waits for humans. One energy per fight.</p>
+<p class="sub" id="qm-result" hidden></p>
+</section>
 <section class="panel">
 <div class="hud">
 <div class="bar-block">
@@ -85,5 +96,6 @@
 </section>
 </main>
 <script src="./game.js"></script>
+<script src="./match.js"></script>
 </body>
 </html>

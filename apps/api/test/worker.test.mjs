@@ -30,6 +30,7 @@ before(() => {
   const db = new DatabaseSync(":memory:");
   db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
   db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     "l1", "commander", "t1", 1020000, 520, 5, 1,
   );
@@ -87,6 +88,7 @@ describe("worker writes", () => {
     const db = new DatabaseSync(":memory:");
     db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
     const shimmed = {
       prepare: (query) => ({
         bind: (...values) => ({
@@ -129,11 +131,39 @@ describe("worker writes", () => {
     const r = await call("POST", "/v1/matches/ranked", { aVersionId: va.json.versionId, bVersionId: vb.json.versionId, seed: "wr-1", key: "wr-1" }, sa.json.token);
     assert.equal(r.status, 201);
     assert.equal(r.json.deltaB, -r.json.deltaA);
+    const me = await entry.fetch(new Request("http://local/v1/me", {
+      headers: { authorization: `Bearer ${sa.json.token}` },
+    }), wenv);
+    assert.equal((await me.json()).energy.energy, 9);
     const replay = await entry.fetch(new Request("http://local/v1/matches/wr-1/replay"), wenv);
     assert.equal(replay.status, 200);
     assert.equal((await replay.json()).identical, true);
     const self = await call("POST", "/v1/matches/ranked", { aVersionId: va.json.versionId, bVersionId: va.json.versionId, seed: "ws-1", key: "ws-1" }, sa.json.token);
     assert.equal(self.status, 422);
+    const meBefore = await (await entry.fetch(new Request("http://local/v1/me", {
+      headers: { authorization: `Bearer ${sa.json.token}` },
+    }), wenv)).json();
+    const q = await call("POST", "/v1/matchmaking/request", { versionId: va.json.versionId, mode: "casual" }, sa.json.token);
+    assert.equal(q.status, 201);
+    assert.equal(q.json.status, "settled");
+    assert.equal(q.json.foe_version, vb.json.versionId);
+    assert.equal(q.json.match.rated, 0);
+    const meAfter = await (await entry.fetch(new Request("http://local/v1/me", {
+      headers: { authorization: `Bearer ${sa.json.token}` },
+    }), wenv)).json();
+    assert.equal(meAfter.leader.ap, meBefore.leader.ap);
+    assert.equal(meAfter.energy.energy, meBefore.energy.energy - 1);
+    const badMode = await call("POST", "/v1/matchmaking/request", { versionId: va.json.versionId, mode: "arena" }, sa.json.token);
+    assert.equal(badMode.status, 400);
+    const foreign = await entry.fetch(new Request(`http://local/v1/matchmaking/${q.json.id}`, {
+      headers: { authorization: `Bearer ${sb.json.token}` },
+    }), wenv);
+    assert.equal(foreign.status, 404);
+    const mine = await entry.fetch(new Request(`http://local/v1/matchmaking/${q.json.id}`, {
+      headers: { authorization: `Bearer ${sa.json.token}` },
+    }), wenv);
+    assert.equal(mine.status, 200);
+    assert.equal((await mine.json()).status, "settled");
     const board = await entry.fetch(new Request(`http://local/v1/agents/${aa.json.agentId}/dashboard`, {
       headers: { authorization: `Bearer ${sa.json.token}` },
     }), wenv);
@@ -142,7 +172,7 @@ describe("worker writes", () => {
     assert.equal(dash.agent.name, "Wasp");
     assert.equal(dash.leader.tier, "CIRCUIT");
     assert.equal(dash.versions.length, 1);
-    assert.equal(dash.versions[0].fights, 2);
+    assert.equal(dash.versions[0].fights, 3);
     assert.equal(dash.versions[0].chips.length > 0, true);
     const fired = dash.versions[0].chips.reduce((n, c) => n + c.triggers, 0);
     assert.ok(fired > 0 && fired <= dash.versions[0].avgTicks * dash.versions[0].fights);
@@ -164,6 +194,7 @@ describe("worker replay", () => {
     const db = new DatabaseSync(":memory:");
     db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
     db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
       "l9", "replay-leader", "t9", 1020000, 520, 5, 1,
     );

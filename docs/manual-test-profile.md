@@ -1,4 +1,4 @@
-# Manual test — profile and platform
+# Manual test — profile, platform, and queue
 
 Run on the deployed URL. Sign out (clear `aw_token`) between runs.
 
@@ -12,3 +12,12 @@ Run on the deployed URL. Sign out (clear `aw_token`) between runs.
 8. Triggers across chips of one fight add up to at most fights times avg ticks.
 9. Reload the page. Token persists, hero still shows.
 10. Open `/` again. Arena plus Ranks still play and display.
+
+## Queue and energy (needs two handles in two browsers)
+
+11. Sign in on the arena. Energy shows 10/10.
+12. Casual quick match with no other human: countdown runs, bot settles it.
+13. Result names a `bot:` foe and links the dashboard. Energy drops by one.
+14. Second handle queues ranked at once: immediate human pairing, AP moves.
+15. Ranked with no humans: ticket stays queued, expires after ten minutes.
+16. Drain energy with repeated fights. Queue at zero answers `energy empty`.

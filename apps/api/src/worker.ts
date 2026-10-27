@@ -1,7 +1,11 @@
 // Cloudflare Worker entry. Full API on D1: auth, publish, fights, replay.
 
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
-import { BENCH_POLICY, fightPolicies } from "@agent-wars/battle-core";
+import { draft, refresh, spendManualMatch, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
+import type { Status } from "@agent-wars/autobattle";
+import { BENCH_POLICY, fightPolicies, pickBot } from "@agent-wars/battle-core";
+import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
+import type { History } from "@agent-wars/matchmaker";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
 import { createWallet, earnAc } from "@agent-wars/economy";
@@ -128,6 +132,30 @@ async function pay(
   return res.credited;
 }
 
+// Energy reads the persisted machine, refreshes regen, and saves it back.
+async function energyFor(env: WorkerEnv, leaderId: string, now = Date.now()): Promise<Status> {
+  const row = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>();
+  if (!row) throw new Error("unknown leader");
+  const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(leaderId).first<Record<string, unknown>>();
+  let st: Status = row.autobattle_json ? (JSON.parse(row.autobattle_json as string) as Status) : draft(leaderId, now);
+  st = { ...st, leaderId, published: !!agent?.active_version_id };
+  st = refresh(st, now);
+  await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(st), leaderId).run();
+  return st;
+}
+
+function energyView(st: Status, now = Date.now()): { energy: number; energyMax: number; nextRegenMs: number } {
+  const nextRegenMs = st.stamina >= st.staminaMax ? 0 : Math.max(0, st.lastStaminaAt + REGEN_MS - now);
+  return { energy: st.stamina, energyMax: st.staminaMax ?? STAMINA_MAX, nextRegenMs };
+}
+
+async function spendEnergy(env: WorkerEnv, leaderId: string, now = Date.now()): Promise<{ ok: boolean; reason?: string }> {
+  const cur = await energyFor(env, leaderId, now);
+  const r = spendManualMatch(cur, now);
+  await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(r.status), leaderId).run();
+  return r.guard.ok ? { ok: true } : { ok: false, reason: (r.guard as { reason: string }).reason };
+}
+
 // The dashboard serves one hero with chip stats per version.
 async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string): Promise<Record<string, unknown>> {
   const agent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
@@ -171,8 +199,207 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
   return {
     agent: { id: agent.id, name: agent.name ?? null, concept: agent.concept ?? null, portraitUrl: agent.portrait_url ?? null, activeVersionId: agent.active_version_id ?? null },
     leader: { handle: leader.handle, ap: leader.ap, ac: leader.ac, tier: rank.tier, division: rank.division },
+    energy: energyView(await energyFor(env, leaderId)),
     versions,
   };
+}
+
+export const BOT_SETTLE_MS = 30_000;
+export const RANKED_TICKET_MS = 10 * 60_000;
+
+// Nearest ELO human with a published version. Never self, never over the pair cap.
+async function findHumanOpponent(env: WorkerEnv, leaderId: string, now: number): Promise<{ leaderId: string; versionId: string } | null> {
+  const me = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>();
+  if (!me) return null;
+  const { results: rows } = await env.DB.prepare(
+    `SELECT m.created_at AS at, aa.leader_id AS a, ab.leader_id AS b FROM matches m
+     JOIN versions va ON va.id = m.a_version JOIN agents aa ON aa.id = va.agent_id
+     JOIN versions vb ON vb.id = m.b_version JOIN agents ab ON ab.id = vb.agent_id
+     WHERE m.rated = 1`
+  ).bind().all<Record<string, unknown>>();
+  const history: History = { marks: rows.map((m) => ({ a: m.a as string, b: m.b as string, at: m.at as number })) };
+  const { results: agents } = await env.DB.prepare("SELECT * FROM agents WHERE active_version_id IS NOT NULL").bind().all<Record<string, unknown>>();
+  let best: { leaderId: string; versionId: string } | null = null;
+  let bestGap = Infinity;
+  for (const a of agents) {
+    const other = a.leader_id as string;
+    if (other === leaderId) continue;
+    const row = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(other).first<Record<string, unknown>>();
+    if (!row) continue;
+    if (pairMeetings(history, leaderId, other, now) >= MAX_PAIR_MEETINGS) continue;
+    const gap = Math.abs((row.ap as number) - (me.ap as number));
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = { leaderId: other, versionId: a.active_version_id as string };
+    }
+  }
+  return best;
+}
+
+async function creditAc(env: WorkerEnv, leaderId: string, matchKey: string, side: string, kind: string): Promise<number> {
+  const row = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>();
+  if (!row) return 0;
+  const wallet = createWallet(leaderId, 0);
+  wallet.ac = row.ac as number;
+  wallet.rp = row.rp as number;
+  const keys = await env.DB.prepare("SELECT key FROM wallet_keys WHERE wallet_id = ?").bind(leaderId).all<{ key: string }>();
+  for (const k of keys.results) wallet.keys.add(k.key);
+  const before = wallet.txns.length;
+  const res = earnAc(wallet, { key: `${matchKey}-${side}`, kind: kind as "win" | "loss" | "no-contest", suspicious: false, now: Date.now() });
+  await env.DB.prepare("INSERT OR IGNORE INTO wallet_keys (wallet_id, key) VALUES (?, ?)").bind(leaderId, `${matchKey}-${side}`).run();
+  for (const t of wallet.txns.slice(before)) {
+    await env.DB.prepare("INSERT INTO wallet_txns (wallet_id, idem_key, currency, delta, reason, at) VALUES (?, ?, ?, ?, ?, ?)").bind(
+      leaderId, t.idempotencyKey, t.currency, t.delta, t.reason, t.at,
+    ).run();
+  }
+  await env.DB.prepare("UPDATE leaders SET ac = ?, rp = ? WHERE id = ?").bind(wallet.ac, wallet.rp, leaderId).run();
+  return res.credited;
+}
+
+async function runCasualD1(
+  env: WorkerEnv,
+  input: { aVersionId: string; bVersionId?: string; leaderId: string; useBot: boolean; seed: string },
+): Promise<{ matchId: string; winner: string; ticks: number; checksum: string; foe: string; bot: boolean; paid: number }> {
+  const v = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(input.aVersionId).first<Record<string, unknown>>();
+  if (!v) throw new Error("unknown version");
+  let foeLabel = input.bVersionId ?? "";
+  let foePolicy: AgentPolicy | null = null;
+  if (input.bVersionId) {
+    const foeRow = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(input.bVersionId).first<Record<string, unknown>>();
+    if (foeRow) foePolicy = JSON.parse(foeRow.policy_json as string) as AgentPolicy;
+  }
+  if (!foePolicy) {
+    const row = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(input.leaderId).first<Record<string, unknown>>();
+    const bot = pickBot((row?.ap as number) ?? 500);
+    foeLabel = bot.id;
+    foePolicy = bot.policy;
+  }
+  const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, foePolicy, input.seed);
+  const id = mintId("m");
+  await env.DB.prepare(
+    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)"
+  ).bind(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })).run();
+  const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
+  const paid = await creditAc(env, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
+  return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !input.bVersionId, paid };
+}
+
+async function settleTicketD1(env: WorkerEnv, ticket: Record<string, unknown>, foeVersion: string | null): Promise<Record<string, unknown>> {
+  const mode = ticket.mode as string;
+  let matchId: string;
+  if (mode === "ranked" && foeVersion) {
+    const settled = await settleRankedD1(env, ticket, foeVersion);
+    matchId = settled;
+  } else {
+    const settled = await runCasualD1(env, {
+      aVersionId: ticket.version_id as string,
+      bVersionId: foeVersion ?? undefined,
+      leaderId: ticket.leader_id as string,
+      useBot: !foeVersion,
+      seed: `q-${ticket.id}`,
+    });
+    matchId = settled.matchId;
+  }
+  await env.DB.prepare("UPDATE tickets SET status = 'settled', foe_version = ?, match_id = ? WHERE id = ?").bind(
+    foeVersion ?? `bot:${ticket.leader_id}`, matchId, ticket.id,
+  ).run();
+  return (await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(ticket.id).first<Record<string, unknown>>()) as Record<string, unknown>;
+}
+
+async function settleRankedD1(
+  env: WorkerEnv,
+  input: { aVersionId: string; bVersionId: string; seed: string; key: string },
+): Promise<Record<string, unknown>> {
+  const a = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(input.aVersionId).first<Record<string, unknown>>();
+  const b = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(input.bVersionId).first<Record<string, unknown>>();
+  if (!a || !b) throw new Error("unknown version");
+  const aAgent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(a.agent_id as string).first<Record<string, unknown>>();
+  const bAgent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(b.agent_id as string).first<Record<string, unknown>>();
+  if (!aAgent || !bAgent) throw new Error("unknown agent");
+  if (aAgent.leader_id === bAgent.leader_id) throw new Error("self match denied");
+  const out = fightPolicies(
+    JSON.parse(a.policy_json as string) as AgentPolicy,
+    JSON.parse(b.policy_json as string) as AgentPolicy,
+    input.seed,
+  );
+  const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
+  const ledger = createLedger("local-s1");
+  const rows = await env.DB.prepare("SELECT * FROM leaders").bind().all<Record<string, unknown>>();
+  for (const row of rows.results) {
+    const r = ratingFor(ledger, row.id as string);
+    r.ratingMilli = row.rating_milli as number;
+    r.placementGames = row.placement as number;
+    r.placed = (row.placed as number) === 1;
+  }
+  const applied = applyRanked(ledger, {
+    matchId: input.key,
+    leaderA: aAgent.leader_id as string,
+    leaderB: bAgent.leader_id as string,
+    winner: winner as "A" | "B" | "DRAW",
+    rated: true,
+  });
+  for (const [id, st] of ledger.ratings) {
+    await env.DB.prepare("UPDATE leaders SET rating_milli = ?, ap = ?, placement = ?, placed = ? WHERE id = ?").bind(
+      st.ratingMilli, st.ap, st.placementGames, st.placed ? 1 : 0, id,
+    ).run();
+  }
+  const paidA = await pay(env, aAgent.leader_id as string, input.key, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
+  const paidB = await pay(env, bAgent.leader_id as string, input.key, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
+  await env.DB.prepare(
+    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)"
+  ).bind(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })).run();
+  return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA, paidB };
+}
+
+async function requestMatchD1(
+  env: WorkerEnv,
+  input: { leaderId: string; versionId: string; mode: string },
+  now: number,
+): Promise<Record<string, unknown>> {
+  if (input.mode !== "casual" && input.mode !== "ranked") throw new Error("unknown mode");
+  const owned = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(input.leaderId).first<Record<string, unknown>>();
+  const version = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(input.versionId).first<Record<string, unknown>>();
+  if (!version || !owned || version.agent_id !== owned.id) throw new Error("unknown version");
+  if (owned.active_version_id !== input.versionId) throw new Error("queue your active version");
+  const spent = await spendEnergy(env, input.leaderId, now);
+  if (!spent.ok) throw new Error(spent.reason ?? "energy empty");
+  const id = mintId("t");
+  const wait = input.mode === "casual" ? BOT_SETTLE_MS : RANKED_TICKET_MS;
+  await env.DB.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)").bind(
+    id, input.leaderId, input.versionId, input.mode, now, now + wait,
+  ).run();
+  const foe = await findHumanOpponent(env, input.leaderId, now);
+  const row = (await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(id).first<Record<string, unknown>>()) as Record<string, unknown>;
+  if (foe) return settleTicketD1(env, row, foe.versionId);
+  return row;
+}
+
+async function readTicketD1(
+  env: WorkerEnv,
+  input: { ticketId: string; leaderId: string },
+  now: number,
+): Promise<Record<string, unknown>> {
+  const ticket = await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(input.ticketId).first<Record<string, unknown>>();
+  if (!ticket || ticket.leader_id !== input.leaderId) throw new Error("unknown ticket");
+  if (ticket.status !== "queued") return withMatchD1(env, ticket);
+  if (now < (ticket.settle_at as number)) {
+    if (ticket.mode === "ranked") {
+      const foe = await findHumanOpponent(env, input.leaderId, now);
+      if (foe) return withMatchD1(env, await settleTicketD1(env, ticket, foe.versionId));
+    }
+    return { ...ticket };
+  }
+  if (ticket.mode === "casual") return withMatchD1(env, await settleTicketD1(env, ticket, null));
+  await env.DB.prepare("UPDATE tickets SET status = 'expired' WHERE id = ?").bind(input.ticketId).run();
+  return (await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(input.ticketId).first<Record<string, unknown>>()) as Record<string, unknown>;
+}
+
+async function withMatchD1(env: WorkerEnv, ticket: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const out = { ...ticket };
+  if (ticket.match_id) {
+    out.match = (await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(ticket.match_id as string).first<Record<string, unknown>>()) ?? undefined;
+  }
+  return out;
 }
 
 export default {
@@ -216,7 +443,8 @@ export default {
     if (!me) return json({ error: "bearer token is required: call POST /v1/auth/session first" }, 401);
     if (request.method === "GET" && url.pathname === "/v1/me") {
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(me.id as string).first<Record<string, unknown>>();
-      return json({ leader: me, agent });
+      const energy = energyView(await energyFor(env, me.id as string));
+      return json({ leader: me, agent, energy });
     }
     if (request.method === "POST" && url.pathname === "/v1/agents") {
       try {
@@ -313,43 +541,37 @@ export default {
       const bAgent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(b.agent_id as string).first<Record<string, unknown>>();
       if (!aAgent || !bAgent) return json({ error: "unknown agent" }, 404);
       if (aAgent.leader_id === bAgent.leader_id) return json({ error: "self match denied" }, 422);
-      const out = fightPolicies(
-        JSON.parse(a.policy_json as string) as AgentPolicy,
-        JSON.parse(b.policy_json as string) as AgentPolicy,
-        seed,
-      );
-      const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
-      const ledger = createLedger("local-s1");
-      const rows = await env.DB.prepare("SELECT * FROM leaders").bind().all<Record<string, unknown>>();
-      for (const row of rows.results) {
-        const r = ratingFor(ledger, row.id as string);
-        r.ratingMilli = row.rating_milli as number;
-        r.placementGames = row.placement as number;
-        r.placed = (row.placed as number) === 1;
-      }
-      let applied;
+      const spent = await spendEnergy(env, me.id as string);
+      if (!spent.ok) return json({ error: spent.reason }, 409);
       try {
-        applied = applyRanked(ledger, {
-          matchId: key,
-          leaderA: aAgent.leader_id as string,
-          leaderB: bAgent.leader_id as string,
-          winner: winner as "A" | "B" | "DRAW",
-          rated: true,
-        });
+        return json(await settleRankedD1(env, { aVersionId, bVersionId, seed, key }), 201);
       } catch (err) {
         return json({ error: (err as Error).message }, 409);
       }
-      for (const [id, st] of ledger.ratings) {
-        await env.DB.prepare("UPDATE leaders SET rating_milli = ?, ap = ?, placement = ?, placed = ? WHERE id = ?").bind(
-          st.ratingMilli, st.ap, st.placementGames, st.placed ? 1 : 0, id,
-        ).run();
+    }
+    if (request.method === "POST" && url.pathname === "/v1/matchmaking/request") {
+      const body = await readBody(request);
+      if (body === null) return json({ error: "bad json" }, 400);
+      const versionId = typeof body.versionId === "string" ? body.versionId : "";
+      const mode = typeof body.mode === "string" ? body.mode : "";
+      if (!versionId || (mode !== "casual" && mode !== "ranked")) {
+        return json({ error: "versionId and mode casual|ranked are required" }, 400);
       }
-      const paidA = await pay(env, aAgent.leader_id as string, key, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
-      const paidB = await pay(env, bAgent.leader_id as string, key, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
-      await env.DB.prepare(
-        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)"
-      ).bind(key, seed, aVersionId, bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })).run();
-      return json({ matchId: key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA, paidB }, 201);
+      try {
+        const ticket = await requestMatchD1(env, { leaderId: me.id as string, versionId, mode }, Date.now());
+        return json(await withMatchD1(env, ticket), 201);
+      } catch (err) {
+        return json({ error: (err as Error).message }, 409);
+      }
+    }
+    const ticketRead = request.method === "GET" && /^\/v1\/matchmaking\/[^/]+$/.exec(url.pathname);
+    if (ticketRead) {
+      const ticketId = url.pathname.split("/")[3];
+      try {
+        return json(await readTicketD1(env, { ticketId, leaderId: me.id as string }, Date.now()));
+      } catch (err) {
+        return json({ error: (err as Error).message }, 404);
+      }
     }
     return json({ error: "unknown route" }, 404);
   },
