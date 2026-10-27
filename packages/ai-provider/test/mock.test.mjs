@@ -51,7 +51,8 @@ describe("mock compile", () => {
     assert.equal(providerFromEnv({}).name, "mock");
   });
 
-  it("refuses to fake a Meta call", () => {
-    assert.throws(() => providerFromEnv({ META_API_KEY: "x" }), /not implemented yet/);
+  it("picks meta when the Spark key is set", () => {
+    assert.equal(providerFromEnv({ META_SPARK_KEY: "x" }).name, "meta");
+    assert.equal(providerFromEnv({ META_IMAGE_KEY: "x" }).name, "mock");
   });
 });

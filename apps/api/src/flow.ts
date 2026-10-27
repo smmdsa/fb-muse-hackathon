@@ -7,7 +7,7 @@ import { earnAc, createWallet } from "@agent-wars/economy";
 import { applyRanked, createLedger, ratingFor } from "@agent-wars/ranking";
 import { rankFor } from "@agent-wars/ranking";
 import { buildStandings } from "@agent-wars/leaderboard";
-import { compileMock } from "@agent-wars/ai-provider";
+import { providerFromEnv } from "@agent-wars/ai-provider";
 import type { Store } from "./store.ts";
 import { mintId } from "./store.ts";
 
@@ -124,7 +124,7 @@ export async function compileAndPublish(
   const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
   if (!agent) throw new Error("unknown agent");
   const versionId = mintId("v");
-  const compiled = await compileMock({ prompt: input.prompt, agentVersionId: versionId });
+  const compiled = await providerFromEnv(process.env).compileStrategy({ prompt: input.prompt, agentVersionId: versionId });
   if (!compiled.policy) return { versionId: "", errors: compiled.errors };
   const check = validatePolicy(compiled.policy);
   if (!check.ok) return { versionId: "", errors: check.errors };

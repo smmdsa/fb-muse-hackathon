@@ -1,6 +1,6 @@
 // Cloudflare Worker entry. Full API on D1: auth, publish, fights, replay.
 
-import { compileMock } from "@agent-wars/ai-provider";
+import { providerFromEnv } from "@agent-wars/ai-provider";
 import { BENCH_POLICY, fightPolicies } from "@agent-wars/battle-core";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
@@ -10,6 +10,11 @@ import { applyRanked, createLedger, rankFor, ratingFor } from "@agent-wars/ranki
 
 export type WorkerEnv = {
   DB: D1Database;
+  META_SPARK_KEY?: string;
+  META_IMAGE_KEY?: string;
+  META_API_BASE?: string;
+  AGENT_WARS_MODEL_COMPILE?: string;
+  AGENT_WARS_MODEL_PORTRAIT?: string;
 };
 
 type D1Database = {
@@ -166,7 +171,7 @@ export default {
       const prompt = typeof body.prompt === "string" ? body.prompt : "";
       if (!prompt) return json({ error: "prompt is required" }, 400);
       const versionId = mintId("v");
-      const compiled = await compileMock({ prompt, agentVersionId: versionId });
+      const compiled = await providerFromEnv(env).compileStrategy({ prompt, agentVersionId: versionId });
       if (!compiled.policy) return json({ error: "draft failed validation", errors: compiled.errors }, 422);
       const check = validatePolicy(compiled.policy);
       if (!check.ok) return json({ error: "draft failed validation", errors: check.errors }, 422);
