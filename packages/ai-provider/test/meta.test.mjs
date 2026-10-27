@@ -100,4 +100,34 @@ describe("meta provider", () => {
   it("refuses portraits without a key", () => {
     assert.throws(() => portraitFromEnv({}), /META_IMAGE_KEY/);
   });
+
+  it("reads inline b64_json the way Meta answers", async () => {
+    const webp = "UklGRtaAAAAA" + "A".repeat(40);
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ created: 1793137810, data: [{ b64_json: webp }] }) });
+    const meta = createMetaProvider({ META_SPARK_KEY: "s", META_IMAGE_KEY: "i" }, fetchFn);
+    const out = await meta.generatePortrait({ prompt: "chrome wasp" });
+    assert.ok(out.url.startsWith("data:image/webp;base64,UklGR"));
+  });
+
+  it("sniffs jpeg, png, and gif prefixes", async () => {
+    const cases = [
+      ["/9j/4AAQ", "data:image/jpeg;base64,/9j/4AAQ"],
+      ["iVBORw0KGgoAAA", "data:image/png;base64,iVBORw0KGgoAAA"],
+      ["R0lGODlhAQAB", "data:image/gif;base64,R0lGODlhAQAB"],
+    ];
+    for (const [b64, want] of cases) {
+      const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ data: [{ b64_json: b64 }] }) });
+      const meta = createMetaProvider({ META_IMAGE_KEY: "i" }, fetchFn);
+      const out = await meta.generatePortrait({ prompt: "x" });
+      assert.equal(out.url, want);
+    }
+  });
+
+  it("fails loudly on empty or unreadable image replies", async () => {
+    for (const body of [{ data: [] }, { data: [{}] }, { data: [{ b64_json: "zzzzz" }] }]) {
+      const fetchFn = async () => ({ ok: true, status: 200, json: async () => body });
+      const meta = createMetaProvider({ META_IMAGE_KEY: "i" }, fetchFn);
+      await assert.rejects(() => meta.generatePortrait({ prompt: "x" }), /no usable image/);
+    }
+  });
 });
