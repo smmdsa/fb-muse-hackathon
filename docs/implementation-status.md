@@ -31,6 +31,7 @@ Date: 2026-10-26. Sprint: sprint-006. This file tells the truth about what runs.
 - Workers readiness done: `wrangler.toml`, `migrations/0001_schema.sql`, and a worker entry with health, leaderboard, and replay reads. A replay test proves identical checksums on a fresh migrated DB. Write routes stay on Node until the store ports to async D1.
 - Remote is live: `feat/agent-wars-s1` at `2072569`, confirmed on origin. Walkthrough in `docs/judging-walkthrough.md`.
 - Worker is live at https://agent-wars-api.smmdsa.workers.dev: D1 `agent-wars` migrated, seed match replays identical, leaderboard serves two ranks.
+- Seasons slice done: `packages/seasons` archives the frozen board and resets every leader for the next season.
 - Accounts, AI compile, and publish flow: planned for later S2 slices.
 - Ranked AP ±12 to ±28, AutoBattle leases, championships, shop (S3 and S4): planned.
 - Full acceptance suite from GDD section 14: planned. S1 covers gameplay rows only.

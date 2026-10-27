@@ -66,4 +66,13 @@ importers:
 
   packages/ranking: {}
 
+  packages/seasons:
+    dependencies:
+      '@agent-wars/leaderboard':
+        specifier: workspace:*
+        version: link:../leaderboard
+      '@agent-wars/ranking':
+        specifier: workspace:*
+        version: link:../ranking
+
   packages/tournaments: {}

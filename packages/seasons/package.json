@@ -1,0 +1,13 @@
+{
+  "name": "@agent-wars/seasons",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@agent-wars/ranking": "workspace:*",
+    "@agent-wars/leaderboard": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test ./test/rollover.test.mjs"
+  }
+}
