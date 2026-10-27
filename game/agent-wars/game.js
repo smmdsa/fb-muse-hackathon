@@ -321,11 +321,16 @@ function step() {
 function move(me, p) {
   if (!me.alive) return;
   let sp = SPEED;
-  if (p.dash && me.en >= DASH_COST) { sp *= 3.2; me.en -= DASH_COST; }
+  if (p.dash && me.en >= DASH_COST) {
+    sp *= 3.2;
+    me.en -= DASH_COST;
+    sparks.push({ x: me.x, y: me.y, age: 0, text: "DASH", color: "#ffffff" });
+  }
   if (p.shield && me.en >= SHIELD_COST && time >= me.shieldCdUntil) {
     me.en -= SHIELD_COST;
     me.shieldUntil = time + 0.8;
     me.shieldCdUntil = time + 4;
+    note((me.side === "A" ? "Cyan" : "Crimson") + " raises shield");
   }
   me.en = Math.min(MAX_EN, me.en + REGEN * TICK);
   let nx = me.x + p.mx * sp * TICK;
@@ -494,6 +499,13 @@ function unit(me, color, sx, sy) {
   ctx.moveTo(me.x * sx, me.y * sy);
   ctx.lineTo((me.x + me.ax) * sx, (me.y + me.ay) * sy);
   ctx.stroke();
+  if (time <= me.shieldUntil) {
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(me.x * sx, me.y * sy, RADIUS * sx + 6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 }
 
 function sync() {
@@ -583,3 +595,77 @@ pauseBtn.addEventListener("click", () => {
   pauseBtn.textContent = paused ? "Resume" : "Pause";
   pillState.textContent = paused ? "paused" : "live";
 });
+
+// Server replay playback. Frames come from GET /v1/matches/:id/replay.
+let replayFrames = null;
+let replayIdx = 0;
+let replayMeta = null;
+
+function faceDelta(c, p) {
+  const dx = c - p;
+  if (dx > 0.001) return 1;
+  if (dx < -0.001) return -1;
+  return 0;
+}
+
+function playServerReplay(replay, meta) {
+  clearInterval(timer);
+  replayFrames = replay.frames || [];
+  replayIdx = 0;
+  replayMeta = meta || {};
+  shots = [];
+  sparks = [];
+  over = true;
+  paused = false;
+  winner = null;
+  pillSeed.textContent = "seed " + (replay.seed || "server");
+  pillState.textContent = "replay";
+  pillWinner.textContent = "winner: —";
+  endcard.hidden = true;
+  feed.innerHTML = "";
+  note("Server replay loads: " + replayFrames.length + " frames");
+  timer = setInterval(playStep, STEP_MS);
+}
+
+function playStep() {
+  if (!replayFrames || replayIdx >= replayFrames.length) {
+    clearInterval(timer);
+    finishReplay();
+    return;
+  }
+  const f = replayFrames[replayIdx];
+  const p = replayIdx > 0 ? replayFrames[replayIdx - 1] : f;
+  replayIdx += 1;
+  let fxA = faceDelta(f.ax, p.ax);
+  let fyA = faceDelta(f.ay, p.ay);
+  if (fxA === 0 && fyA === 0) { fxA = 1; fyA = 0; }
+  let fxB = faceDelta(f.bx, p.bx);
+  let fyB = faceDelta(f.by, p.by);
+  if (fxB === 0 && fyB === 0) { fxB = -1; fyB = 0; }
+  agents = {
+    A: { side: "A", x: f.ax, y: f.ay, hp: f.ahp, en: f.aen, ax: fxA, ay: fyA, alive: f.ahp > 0 },
+    B: { side: "B", x: f.bx, y: f.by, hp: f.bhp, en: f.ben, ax: fxB, ay: fyB, alive: f.bhp > 0 },
+  };
+  if (f.ahp < p.ahp) flash("A");
+  if (f.bhp < p.bhp) flash("B");
+  tick = f.t;
+  time = f.t * TICK;
+  draw();
+  sync();
+}
+
+function finishReplay() {
+  const m = replayMeta || {};
+  winner = m.winner || null;
+  const ok = m.checksumOk ? "checksum verified" : "checksum MISMATCH";
+  endTitle.textContent = winner === "A" ? "Cyan wins" : winner === "B" ? "Crimson wins" : "Draw";
+  endStats.textContent = (m.ticks ?? tick) + " ticks · " + ok + (m.econ ? " · " + m.econ : "");
+  pillWinner.textContent = "winner: " + (winner || "DRAW");
+  pillState.textContent = "done";
+  endcard.hidden = false;
+  note("Replay ends. " + endTitle.textContent + ". " + ok + ".");
+  replayFrames = null;
+  replayMeta = null;
+}
+
+window.playServerReplay = playServerReplay;

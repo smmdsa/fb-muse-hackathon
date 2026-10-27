@@ -18,6 +18,7 @@
 </div>
 <div class="pills">
 <a class="pill link" href="./index.html">arena</a>
+<a class="pill link" href="./tournaments.html">cup</a>
 <span class="pill" id="pill-who">signed out</span>
 </div>
 </header>
@@ -55,6 +56,12 @@
 <button id="breed-btn" class="btn-primary" type="button">Breed hero</button>
 </div>
 <p class="sub" id="breed-msg" hidden>Breeding paints the portrait in the house style. No image key on the server means a faceless hero.</p>
+<p class="sub" id="hero-art-status" hidden></p>
+<button id="retry-btn" class="btn-ghost" type="button" hidden>Retry portrait</button>
+<div class="row">
+<button id="share-btn" class="btn-ghost" type="button">Copy public card link</button>
+</div>
+<p class="sub" id="share-msg" hidden>Link copied. The card shows rank and record only.</p>
 </section>
 <section class="panel" id="train-card" hidden>
 <h2>Train chips</h2>
@@ -66,9 +73,48 @@
 </div>
 <p class="sub" id="train-msg">Compile turns words into chips. Fight runs the version against the benchmark.</p>
 </section>
+<section class="panel" id="lab-card" hidden>
+<h2>Evolution Lab</h2>
+<p class="sub">Two drafts fight the benchmark on mirrored seeds. Small samples refuse a verdict. Drafts stay drafts — install the winner below.</p>
+<div class="row">
+<label for="prompt-a">Prompt A</label>
+<input id="prompt-a" name="prompt-a" value="" maxlength="280" placeholder="rush them down up close" />
+<label for="prompt-b">Prompt B</label>
+<input id="prompt-b" name="prompt-b" value="" maxlength="280" placeholder="hold the center patiently" />
+<label for="lab-bouts">Bouts</label>
+<input id="lab-bouts" name="lab-bouts" value="10" maxlength="2" inputmode="numeric" />
+<button id="lab-btn" class="btn-primary" type="button">Run A/B</button>
+</div>
+<p class="sub" id="lab-msg"></p>
+<div id="lab-out"></div>
+</section>
 <section class="panel" id="dash-card" hidden>
 <h2>Chips dashboard</h2>
 <div id="dash"></div>
+</section>
+<section class="panel" id="armory-card" hidden>
+<h2>Armory</h2>
+<p class="sub" id="armory-wallet">Loading…</p>
+<div id="armory"></div>
+<p class="sub">Looks only. Nothing here changes combat.</p>
+</section>
+<section class="panel" id="season-card" hidden>
+<h2>Past seasons</h2>
+<div id="seasons"><p class="sub">Loading…</p></div>
+</section>
+<section class="panel" id="hist-card" hidden>
+<h2>Recent fights</h2>
+<div id="hist"><p class="sub">Loading fights…</p></div>
+</section>
+<section class="panel" id="auto-card" hidden>
+<h2>AutoBattle</h2>
+<p class="sub" id="auto-status">Loading…</p>
+<div id="auto-recent"></div>
+<div class="row">
+<button id="auto-opt" class="btn-primary" type="button">Start AutoBattle</button>
+<button id="auto-pause" class="btn-ghost" type="button">Pause</button>
+</div>
+<p class="sub">One 24h lease per press. Visits never renew it.</p>
 </section>
 </main>
 <script src="./profile.js"></script>

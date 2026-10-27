@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS reports (
+  id TEXT PRIMARY KEY,
+  handle TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);

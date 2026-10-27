@@ -17,14 +17,45 @@
 <p class="sub">S1 arena demo — SHADOW.EXE vs BREAKER.01</p>
 </div>
 <div class="pills">
+<a class="pill link" href="./index.html">arena</a>
+<a class="pill link" href="./profile.html">profile</a>
+<a class="pill link" href="./tournaments.html">cup</a>
+<span class="pill" id="pill-who">signed out</span>
 <span class="pill" id="pill-tick">tick 0</span>
 <span class="pill" id="pill-seed">seed forge-001</span>
 <span class="pill" id="pill-state">ready</span>
-<a class="pill link" href="./profile.html">profile</a>
 </div>
 </header>
+<section class="panel" id="lobby-card">
+<h2>Lobby</h2>
+<div class="hero">
+<img id="lobby-img" alt="Hero portrait" src="" hidden />
+<div class="hero-info">
+<p class="hero-name" id="lobby-name">No hero yet</p>
+<p class="sub" id="lobby-rank">Sign in and breed on the profile page.</p>
+<p class="sub" id="lobby-energy">energy —</p>
+<p class="sub" id="lobby-auto">AutoBattle leases land in a later slice — manual queue below.</p>
+</div>
+</div>
+<div class="row">
+<a class="btn-primary" href="#quick-card">Play</a>
+<a class="btn-ghost" href="./profile.html">Open profile</a>
+</div>
+</section>
+<section class="panel" id="quick-card">
+<h2>Quick match</h2>
+<div class="row">
+<button id="qm-casual" class="btn-primary" type="button">Casual</button>
+<button id="qm-ranked" class="btn-ghost" type="button">Ranked</button>
+<button id="qm-find" class="btn-primary" type="button">Find fight</button>
+<button id="qm-cancel" class="btn-ghost" type="button" hidden>Cancel ticket</button>
+<span class="pill" id="qm-energy">energy —</span>
+</div>
+<p class="sub" id="qm-status">Same-ELO humans first. No human in 30 seconds means a same-band sparring bot in casual. Ranked waits for humans. One energy per fight.</p>
+<p class="sub" id="qm-result" hidden></p>
+</section>
 <section class="panel" id="title-card">
-<h2>Build the brain. Enter the arena.</h2>
+<h2>Lab — prompt sparring</h2>
 <p>Two prompts compile into fighters in THE_FORGE. The sim runs at 30 ticks per second. Covers block shots. Shields block damage. Compile is local.</p>
 <div class="row">
 <label for="prompt-a">Cyan prompt</label>
@@ -42,17 +73,6 @@
 <button id="restart-btn" class="btn-ghost" type="button" disabled>Restart</button>
 </div>
 </section>
-<section class="panel" id="quick-card">
-<h2>Quick match</h2>
-<div class="row">
-<button id="qm-casual" class="btn-primary" type="button">Casual</button>
-<button id="qm-ranked" class="btn-ghost" type="button">Ranked</button>
-<button id="qm-find" class="btn-primary" type="button">Find fight</button>
-<span class="pill" id="qm-energy">energy —</span>
-</div>
-<p class="sub" id="qm-status">Same-ELO humans first. No human in 30 seconds means a same-band sparring bot in casual. Ranked waits for humans. One energy per fight.</p>
-<p class="sub" id="qm-result" hidden></p>
-</section>
 <section class="panel">
 <div class="hud">
 <div class="bar-block">
@@ -67,7 +87,7 @@
 </div>
 </div>
 <div class="stage">
-<canvas id="arena" width="960" height="640"></canvas>
+<canvas id="arena" width="960" height="640" role="img" aria-label="Top-down robot arena. Unit positions update as the fight plays."></canvas>
 <div class="endcard" id="endcard" hidden>
 <h2 id="end-title">Winner</h2>
 <p id="end-stats"></p>

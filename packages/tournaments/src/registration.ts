@@ -1,6 +1,26 @@
 // Registration gate. Cutoff, eligibility, and dupes each fail loudly.
 
-import type { Championship, Entry } from "./types.ts";
+import type { Championship, Entry, EventPhase } from "./types.ts";
+
+// The organizer chain. Every step needs the one before it. Terminal phases end the line.
+const NEXT: Record<EventPhase, EventPhase[]> = {
+  DRAFT: ["ANNOUNCED", "CANCELLED"],
+  ANNOUNCED: ["REGISTRATION_OPEN", "CANCELLED"],
+  REGISTRATION_OPEN: ["LOCKED", "CANCELLED"],
+  LOCKED: ["LIVE"],
+  SEEDED: ["LIVE"],
+  LIVE: ["COMPLETED"],
+  COMPLETED: [],
+  CANCELLED: [],
+};
+
+// The transition moves one legal step. Jumps and dead ends throw.
+export function transition(event: Championship, to: EventPhase): Championship {
+  if (!(NEXT[event.phase] as EventPhase[]).includes(to)) {
+    throw new Error(`transition ${event.phase} to ${to} denied`);
+  }
+  return { ...event, phase: to };
+}
 
 export type Reject = { ok: false; reason: string };
 export type Accept = { ok: true; entry: Entry };

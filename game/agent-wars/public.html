@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Wars — Fighter card</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+<main class="shell">
+<header class="top">
+<div>
+<h1>Agent Wars</h1>
+<p class="sub">Fighter card — a public career, no secrets inside.</p>
+</div>
+<div class="pills">
+<a class="pill link" href="./index.html">arena</a>
+<a class="pill link" href="./profile.html">profile</a>
+<a class="pill link" href="./tournaments.html">cup</a>
+</div>
+</header>
+<section class="panel" id="card" hidden>
+<h2 id="card-name">—</h2>
+<div class="hero">
+<img id="card-img" alt="Agent portrait" src="" hidden />
+<div class="hero-info">
+<p class="hero-ap" id="card-rank">—</p>
+<p class="sub" id="card-record">—</p>
+<p class="sub" id="card-skin">—</p>
+</div>
+</div>
+<div class="row">
+<button id="copy-btn" class="btn-ghost" type="button">Copy share link</button>
+</div>
+<p class="sub" id="copy-msg" hidden>Link copied. Send it anywhere.</p>
+</section>
+<section class="panel" id="missing" hidden>
+<h2>No such fighter</h2>
+<p class="sub">That handle never entered the arena. Check the link.</p>
+</section>
+<section class="panel" id="report-card" hidden>
+<h2>Report</h2>
+<p class="sub">Flags land in a private box. No public list, ever.</p>
+<div class="row">
+<label for="reason">Reason</label>
+<input id="reason" name="reason" value="" maxlength="280" placeholder="why this card breaks the rules" />
+<button id="report-btn" class="btn-ghost" type="button">Send report</button>
+</div>
+<p class="sub" id="report-msg" hidden></p>
+<p class="sub" id="report-login" hidden><a href="./profile.html">Sign in</a> to send a report.</p>
+</section>
+</main>
+<script src="./public.js"></script>
+</body>
+</html>

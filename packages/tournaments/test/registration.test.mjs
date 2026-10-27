@@ -1,9 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { addEntry, createEvent, lock, register } from "../src/index.ts";
+import { addEntry, createEvent, lock, register, transition } from "../src/index.ts";
 
 function open() {
   return createEvent({ id: "cup-1", seed: "s", maxPlayers: 8, minAp: 500, registrationCloseAt: 1000 });
+}
+
+function draft() {
+  return { ...open(), phase: "DRAFT" };
 }
 
 describe("registration", () => {
@@ -46,5 +50,21 @@ describe("registration", () => {
     assert.equal(e.phase, "LOCKED");
     const out = register(e, { leaderId: "b", agentVersionId: "v2", ap: 600, now: 11 });
     assert.equal(out.ok, false);
+  });
+
+  it("walks the organizer chain one step at a time", () => {
+    let e = draft();
+    for (const to of ["ANNOUNCED", "REGISTRATION_OPEN", "LOCKED", "LIVE", "COMPLETED"]) {
+      e = transition(e, to);
+      assert.equal(e.phase, to);
+    }
+  });
+
+  it("denies jumps and dead ends", () => {
+    assert.throws(() => transition(draft(), "LIVE"), /denied/);
+    assert.throws(() => transition(draft(), "COMPLETED"), /denied/);
+    const done = transition(transition(draft(), "ANNOUNCED"), "CANCELLED");
+    assert.equal(done.phase, "CANCELLED");
+    assert.throws(() => transition(done, "ANNOUNCED"), /denied/);
   });
 });

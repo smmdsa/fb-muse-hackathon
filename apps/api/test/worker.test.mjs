@@ -15,6 +15,12 @@ function shim(db) {
         run: async () => db.prepare(query).run(...values),
       }),
     }),
+    batch: async (stmts) => {
+      // No concurrent writers in one event: run the batch in order.
+      const out = [];
+      for (const s of stmts) out.push(await s.run());
+      return out;
+    },
   };
 }
 
@@ -31,6 +37,12 @@ before(() => {
   db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../../../migrations/0004_cost_audit.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../../../migrations/0005_portrait_status.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0006_match_payouts.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0007_tournaments.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0008_armory.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
   db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     "l1", "commander", "t1", 1020000, 520, 5, 1,
   );
@@ -89,22 +101,21 @@ describe("worker writes", () => {
     db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
-    const shimmed = {
-      prepare: (query) => ({
-        bind: (...values) => ({
-          first: async () => db.prepare(query).get(...values) ?? null,
-          all: async () => ({ results: db.prepare(query).all(...values) }),
-          run: async () => db.prepare(query).run(...values),
-        }),
-      }),
-    };
-    const wenv = { DB: shimmed, ASSETS: assetsStub };
-    const call = (method, path, body, token) => {
+    db.exec(readFileSync(new URL("../../../migrations/0004_cost_audit.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0005_portrait_status.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0006_match_payouts.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0007_tournaments.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0008_armory.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0010_reports.sql", import.meta.url), "utf8"));
+    // Reuse the shared shim: it carries batch, like the real D1 binding.
+    const wenv = { DB: shim(db), ASSETS: assetsStub, ADMIN_KEY: "test-admin" };
+    const call = (method, path, body, token, extraHeaders) => {
       if (method !== "POST") throw new Error("writes only");
       return entry.fetch(
         new Request(`http://local${path}`, {
           method,
-          headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+          headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}), ...(extraHeaders || {}) },
           body: body ? JSON.stringify(body) : undefined,
         }),
         wenv,
@@ -116,6 +127,7 @@ describe("worker writes", () => {
     const aa = await call("POST", "/v1/agents", { name: "Wasp", concept: "fast striker" }, sa.json.token);
     assert.equal(aa.status, 201);
     assert.equal(aa.json.portraitUrl, null);
+    assert.equal(aa.json.portraitStatus, "faceless");
     const dup = await call("POST", "/v1/agents", {}, sa.json.token);
     assert.equal(dup.status, 409);
     const ab = await call("POST", "/v1/agents", {}, sb.json.token);
@@ -123,8 +135,22 @@ describe("worker writes", () => {
     assert.equal(va.status, 201);
     assert.equal(va.json.provider, "mock");
     assert.equal(va.json.isMock, true);
+    assert.ok(va.json.tokens > 0);
     const vb = await call("POST", `/v1/agents/${ab.json.agentId}/policies/compile`, { prompt: "evade and stay far away" }, sb.json.token);
     assert.equal(vb.status, 201);
+    const ia = await call("POST", `/v1/agents/${aa.json.agentId}/policies/install`, { versionId: va.json.versionId }, sa.json.token);
+    assert.equal(ia.status, 200);
+    assert.equal(ia.json.activeVersionId, va.json.versionId);
+    const ib = await call("POST", `/v1/agents/${ab.json.agentId}/policies/install`, { versionId: vb.json.versionId }, sb.json.token);
+    assert.equal(ib.status, 200);
+    const alienInstall = await call("POST", `/v1/agents/${aa.json.agentId}/policies/install`, { versionId: va.json.versionId }, sb.json.token);
+    assert.equal(alienInstall.status, 404);
+    const retry = await call("POST", `/v1/agents/${aa.json.agentId}/portrait/retry`, {}, sa.json.token);
+    assert.equal(retry.status, 200);
+    assert.equal(retry.json.retried, true);
+    assert.equal(retry.json.portraitStatus, "faceless");
+    const alienRetry = await call("POST", `/v1/agents/${aa.json.agentId}/portrait/retry`, {}, sb.json.token);
+    assert.equal(alienRetry.status, 404);
     const t = await call("POST", "/v1/matches/training", { versionId: va.json.versionId, seed: "wt-1" }, sa.json.token);
     assert.equal(t.status, 201);
     assert.ok(t.json.checksum);
@@ -143,6 +169,8 @@ describe("worker writes", () => {
     const meBefore = await (await entry.fetch(new Request("http://local/v1/me", {
       headers: { authorization: `Bearer ${sa.json.token}` },
     }), wenv)).json();
+    const sbOpt = await call("POST", "/v1/autobattle/opt-in", {}, sb.json.token);
+    assert.equal(sbOpt.status, 200);
     const q = await call("POST", "/v1/matchmaking/request", { versionId: va.json.versionId, mode: "casual" }, sa.json.token);
     assert.equal(q.status, 201);
     assert.equal(q.json.status, "settled");
@@ -164,6 +192,12 @@ describe("worker writes", () => {
     }), wenv);
     assert.equal(mine.status, 200);
     assert.equal((await mine.json()).status, "settled");
+    const deadCancel = await call("POST", `/v1/matchmaking/${q.json.id}/cancel`, {}, sa.json.token);
+    assert.equal(deadCancel.status, 404);
+    const crossCompile = await call("POST", `/v1/agents/${aa.json.agentId}/policies/compile`, { prompt: "rush" }, sb.json.token);
+    assert.equal(crossCompile.status, 404);
+    const crossTrain = await call("POST", "/v1/matches/training", { versionId: va.json.versionId, seed: "x-1" }, sb.json.token);
+    assert.equal(crossTrain.status, 404);
     const board = await entry.fetch(new Request(`http://local/v1/agents/${aa.json.agentId}/dashboard`, {
       headers: { authorization: `Bearer ${sa.json.token}` },
     }), wenv);
@@ -176,6 +210,240 @@ describe("worker writes", () => {
     assert.equal(dash.versions[0].chips.length > 0, true);
     const fired = dash.versions[0].chips.reduce((n, c) => n + c.triggers, 0);
     assert.ok(fired > 0 && fired <= dash.versions[0].avgTicks * dash.versions[0].fights);
+    assert.ok(Array.isArray(dash.history));
+    const wr = dash.history.find((h) => h.matchId === "wr-1");
+    assert.ok(wr);
+    assert.equal(wr.rated, 1);
+    assert.equal(typeof wr.myDelta, "number");
+    assert.equal(typeof wr.replay, "string");
+    const pub = await entry.fetch(new Request("http://local/v1/leaders/wa/public"), wenv);
+    assert.equal(pub.status, 200);
+    const card = await pub.json();
+    assert.equal(card.handle, "wa");
+    assert.equal(card.agent.wins + card.agent.losses >= 1, true);
+    const raw = JSON.stringify(card);
+    assert.ok(!raw.includes("token") && !raw.includes("lease") && !raw.includes("wallet"));
+    const rep = await call("POST", "/v1/leaders/wa/report", { reason: "d1 spam" }, sb.json.token);
+    assert.equal(rep.status, 200);
+    assert.equal(rep.json.received, true);
+    const ghost = await entry.fetch(new Request("http://local/v1/leaders/ghost/public"), wenv);
+    assert.equal(ghost.status, 404);
+    const bout = await call("POST", "/v1/matches/training", { versionId: va.json.versionId, seed: "wl-1" }, sa.json.token);
+    assert.equal(bout.status, 201);
+    const an = await call("POST", `/v1/battles/${bout.json.matchId}/analysis`, {}, sa.json.token);
+    assert.equal(an.status, 200);
+    assert.equal(an.json.checksum, bout.json.checksum);
+    assert.ok(an.json.explanation.text.includes(bout.json.checksum));
+    assert.equal(an.json.explanation.grounded, true);
+    const lab = await call("POST", "/v1/lab/ab", { agentId: aa.json.agentId, promptA: "rush them down up close", promptB: "hold the center patiently", bouts: 10 }, sa.json.token);
+    assert.equal(lab.status, 201);
+    assert.equal(lab.json.bouts, 10);
+    assert.equal(lab.json.winsA + lab.json.drawsA <= 10, true);
+    assert.ok(["A leads", "B leads", "too close to call"].includes(lab.json.verdict));
+    const ghostAn = await call("POST", "/v1/battles/ghost/analysis", {}, sa.json.token);
+    assert.equal(ghostAn.status, 404);
+    const ADMIN = { "x-admin-key": "test-admin" };
+    const noKey = await call("POST", "/v1/admin/events", { id: "w-cup", name: "W", maxPlayers: 2, minAp: 0, registrationCloseAt: Date.now() + 1000 }, null, {});
+    assert.equal(noKey.status, 401);
+    const mk = await call("POST", "/v1/admin/events", { id: "w-cup", name: "W Cup", maxPlayers: 2, minAp: 0, registrationCloseAt: Date.now() + 86_400_000 }, null, ADMIN);
+    assert.equal(mk.status, 201);
+    assert.equal(mk.json.phase, "DRAFT");
+    for (const to of ["ANNOUNCED", "REGISTRATION_OPEN"]) {
+      const step = await call("POST", "/v1/admin/events/w-cup/transition", { to }, null, ADMIN);
+      assert.equal(step.status, 200);
+    }
+    const ra = await entry.fetch(new Request("http://local/v1/tournaments/w-cup/register", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${sa.json.token}` },
+      body: JSON.stringify({ versionId: va.json.versionId }),
+    }), wenv);
+    assert.equal(ra.status, 201);
+    const rb = await entry.fetch(new Request("http://local/v1/tournaments/w-cup/register", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${sb.json.token}` },
+      body: JSON.stringify({ versionId: vb.json.versionId }),
+    }), wenv);
+    assert.equal(rb.status, 201);
+    assert.equal((await rb.json()).event.phase, "SEEDED");
+    for (const to of ["LIVE", "COMPLETED"]) {
+      const step = await call("POST", "/v1/admin/events/w-cup/transition", { to }, null, ADMIN);
+      assert.equal(step.status, 200);
+      assert.equal(step.json.phase, to);
+    }
+    const jump = await call("POST", "/v1/admin/events/s1-kickoff/transition", { to: "COMPLETED" }, null, ADMIN);
+    assert.equal(jump.status, 422);
+  });
+
+  it("stays dark with no admin key", async () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
+    const darkEnv = { DB: shim(db), ASSETS: assetsStub };
+    const res = await entry.fetch(new Request("http://local/v1/admin/events", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-admin-key": "anything" },
+      body: JSON.stringify({ id: "x", name: "X", maxPlayers: 2, minAp: 0, registrationCloseAt: Date.now() + 1000 }),
+    }), darkEnv);
+    assert.equal(res.status, 503);
+  });
+
+  it("refuses a second open ticket in the same mode", async () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0004_cost_audit.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0005_portrait_status.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0006_match_payouts.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0007_tournaments.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0008_armory.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
+    db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l7", "solo7", "t7");
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a7", "l7", "v7");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v7", "a7", JSON.stringify({ schemaVersion: 1, agentVersionId: "v7", dna: { aggression: 80, evasion: 40, preferredDistance: 25, energyConservation: 50 }, rules: [{ id: "r", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true }] }), "shim", Date.now(),
+    );
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
+    const post = (path, body) => entry.fetch(new Request(`http://local${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer t7" },
+      body: JSON.stringify(body),
+    }), wenv).then(async (r) => ({ status: r.status, json: await r.json() }));
+    const first = await post("/v1/matchmaking/request", { versionId: "v7", mode: "ranked" });
+    assert.equal(first.status, 201);
+    assert.equal(first.json.status, "queued");
+    const dup = await post("/v1/matchmaking/request", { versionId: "v7", mode: "ranked" });
+    assert.equal(dup.status, 409);
+    assert.match(dup.json.error, /ticket already open/);
+    const other = await post("/v1/matchmaking/request", { versionId: "v7", mode: "casual" });
+    assert.equal(other.status, 201);
+    const cancel = await post(`/v1/matchmaking/${first.json.id}/cancel`, {});
+    assert.equal(cancel.status, 200);
+    assert.equal(cancel.json.status, "canceled");
+    const me = await entry.fetch(new Request("http://local/v1/me", {
+      headers: { authorization: "Bearer t7" },
+    }), wenv);
+    assert.equal((await me.json()).energy.energy, 9);
+    const cancelOther = await post(`/v1/matchmaking/${other.json.id}/cancel`, {});
+    assert.equal(cancelOther.status, 200);
+    const full = await entry.fetch(new Request("http://local/v1/me", {
+      headers: { authorization: "Bearer t7" },
+    }), wenv);
+    assert.equal((await full.json()).energy.energy, 10);
+  });
+
+  it("opts in, runs background fights, and digests without renewing", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives"]) {
+      db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
+    }
+    db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l10", "auto10", "t10");
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a10", "l10", "v10");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v10", "a10", JSON.stringify({ schemaVersion: 1, agentVersionId: "v10", dna: { aggression: 80, evasion: 40, preferredDistance: 25, energyConservation: 50 }, rules: [{ id: "r", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true }] }), "shim", Date.now(),
+    );
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
+    const call = (method, path, body) => entry.fetch(new Request(`http://local${path}`, {
+      method,
+      headers: { "content-type": "application/json", authorization: "Bearer t10", ...(body ? {} : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    }), wenv).then(async (r) => ({ status: r.status, json: await r.json() }));
+    const opt = await call("POST", "/v1/autobattle/opt-in");
+    assert.equal(opt.status, 200);
+    assert.equal(opt.json.ran, 3);
+    assert.equal(opt.json.matches.length, 3);
+    const me = await call("GET", "/v1/me");
+    assert.equal(me.json.auto.optIn, true);
+    assert.equal(me.json.auto.ran, 7);
+    const pause = await call("POST", "/v1/autobattle/pause");
+    assert.equal(pause.json.state, "PAUSED_MANUAL");
+    const before = await call("GET", "/v1/autobattle/digest");
+    const after = await call("GET", "/v1/autobattle/digest");
+    assert.equal(before.json.leaseExpiresAt, after.json.leaseExpiresAt);
+    assert.equal(after.json.stopReason, "paused");
+    assert.equal(after.json.recent.length, 10);
+  });
+
+  it("lists the cup and registers one hero", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives"]) {
+      db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
+    }
+    db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l11", "cup11", "t11");
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a11", "l11", "v11");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v11", "a11", JSON.stringify({ schemaVersion: 1, agentVersionId: "v11", dna: { aggression: 80, evasion: 40, preferredDistance: 25, energyConservation: 50 }, rules: [{ id: "r", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true }] }), "shim", Date.now(),
+    );
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
+    const call = (method, path, body) => entry.fetch(new Request(`http://local${path}`, {
+      method,
+      headers: { "content-type": "application/json", authorization: "Bearer t11" },
+      body: body ? JSON.stringify(body) : undefined,
+    }), wenv).then(async (r) => ({ status: r.status, json: await r.json() }));
+    const list = await call("GET", "/v1/tournaments");
+    assert.equal(list.json.tournaments.length, 1);
+    assert.equal(list.json.tournaments[0].entries, 0);
+    const reg = await call("POST", "/v1/tournaments/s1-kickoff/register", { versionId: "v11" });
+    assert.equal(reg.status, 201);
+    assert.equal(reg.json.entered, true);
+    assert.equal(reg.json.started, false);
+    const dup = await call("POST", "/v1/tournaments/s1-kickoff/register", { versionId: "v11" });
+    assert.equal(dup.status, 404);
+    const one = await call("GET", "/v1/tournaments/s1-kickoff");
+    assert.equal(one.json.entries.length, 1);
+    assert.equal(one.json.phase, "REGISTRATION_OPEN");
+  });
+
+  it("sells and equips cosmetics without touching combat", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives"]) {
+      db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
+    }
+    db.prepare("INSERT INTO leaders (id, handle, token, ac) VALUES (?, ?, ?, ?)").run("l12", "shop12", "t12", 120);
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a12", "l12", "v12");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v12", "a12", JSON.stringify({ schemaVersion: 1, agentVersionId: "v12", dna: { aggression: 80, evasion: 40, preferredDistance: 25, energyConservation: 50 }, rules: [{ id: "r", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true }] }), "shim", Date.now(),
+    );
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
+    const call = (method, path, body) => entry.fetch(new Request(`http://local${path}`, {
+      method,
+      headers: { "content-type": "application/json", authorization: "Bearer t12" },
+      body: body ? JSON.stringify(body) : undefined,
+    }), wenv).then(async (r) => ({ status: r.status, json: await r.json() }));
+    const list = await call("GET", "/v1/armory");
+    assert.equal(list.status, 200);
+    assert.ok(list.json.catalog.length >= 4);
+    const buy = await call("POST", "/v1/armory/buy", { itemId: "skin-ember" });
+    assert.equal(buy.status, 200);
+    assert.equal(buy.json.ac, 20);
+    const again = await call("POST", "/v1/armory/buy", { itemId: "skin-ember" });
+    assert.equal(again.status, 200);
+    assert.equal(again.json.ac, 20);
+    const poor = await call("POST", "/v1/armory/buy", { itemId: "skin-tide" });
+    assert.equal(poor.status, 422);
+    const fit = await call("POST", "/v1/armory/equip", { slot: "skin", itemId: "skin-ember" });
+    assert.equal(fit.status, 200);
+    assert.equal(fit.json.equipped.skin, "skin-ember");
+  });
+
+  it("reads back frozen season archives", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const m of ["0001_schema", "0009_season_archives"]) {
+      db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
+    }
+    db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l13", "hist13", "t13");
+    db.prepare("INSERT INTO season_archives (season_id, closed_at, archive_json) VALUES (?, ?, ?)").run(
+      "s0", 1000, JSON.stringify({ rows: [{ rank: 1, leaderId: "l-old", ap: 640 }] }),
+    );
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
+    const r = await entry.fetch(new Request("http://local/v1/seasons", {
+      headers: { authorization: "Bearer t13" },
+    }), wenv);
+    assert.equal(r.status, 200);
+    const body = await r.json();
+    assert.equal(body.seasons.length, 1);
+    assert.equal(body.seasons[0].rows[0].ap, 640);
   });
 });
 
@@ -195,6 +463,12 @@ describe("worker replay", () => {
     db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0004_cost_audit.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0005_portrait_status.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0006_match_payouts.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0007_tournaments.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0008_armory.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
     db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
       "l9", "replay-leader", "t9", 1020000, 520, 5, 1,
     );
@@ -230,5 +504,45 @@ describe("worker replay", () => {
     assert.equal(body.identical, true);
     assert.equal(body.recomputed.checksum, body.stored.checksum);
     assert.equal(body.recomputed.ticks, body.stored.ticks);
+    assert.ok(body.replay.frames.length > 10);
+    assert.equal(body.replay.checksum, body.stored.checksum);
+    assert.equal(body.replay.frames[0].t, 0);
+  });
+
+  it("replays a bot fight from the preset", async () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec(readFileSync(new URL("../../../migrations/0001_schema.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0002_platform.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0003_matchmaking.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0004_cost_audit.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0005_portrait_status.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0006_match_payouts.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0007_tournaments.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0008_armory.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
+    db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+      "l8", "bot-leader", "t8", 1020000, 520, 5, 1,
+    );
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a8", "l8", "v8");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v8", "a8", JSON.stringify(rush), "shim", Date.now(),
+    );
+    db.prepare(
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+    ).run("m8", "bot-seed-1", "v8", "bot:bench", "A", 2700, "shim", Date.now(), "{}");
+    const shimmed = {
+      prepare: (query) => ({
+        bind: (...values) => ({
+          first: async () => db.prepare(query).get(...values) ?? null,
+          all: async () => ({ results: db.prepare(query).all(...values) }),
+          run: async () => db.prepare(query).run(...values),
+        }),
+      }),
+    };
+    const res = await entry.fetch(new Request("http://local/v1/matches/m8/replay"), { DB: shimmed, ASSETS: assetsStub });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.identical, false);
+    assert.ok(body.replay.frames.length > 10);
   });
 });

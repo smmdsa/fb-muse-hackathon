@@ -5,7 +5,8 @@ import { validatePolicy } from "@agent-wars/behavior-dna";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { keyFor, metaApiBase, resolveModel } from "./models.ts";
 import { repairOnce } from "./mock.ts";
-import type { AiProvider, CompileRequest, CompileResult, PortraitRequest, PortraitResult } from "./types.ts";
+import { explainMock } from "./mock.ts";
+import type { AiProvider, BattleTelemetry, CompileRequest, CompileResult, ExplainResult, PortraitRequest, PortraitResult } from "./types.ts";
 
 type FetchFn = (url: string, init: Record<string, unknown>) => Promise<{
   ok: boolean;
@@ -70,12 +71,14 @@ export type MetaEnv = {
 
 export type MetaProvider = AiProvider & {
   generatePortrait: (req: PortraitRequest) => Promise<PortraitResult>;
+  explainBattle: (t: BattleTelemetry) => Promise<ExplainResult>;
 };
 
-// One style line keeps every agent portrait in the same art family:
-// three-quarter view, vector esports look, dark navy field, no text.
+// One style line keeps every agent portrait in the same art family.
+// The contract fixes the canon: one full-body robot, camera-left,
+// feet on one baseline, chest chip slot, navy field, no text ever.
 export const PORTRAIT_STYLE =
-  "three-quarter view fighting robot portrait, flat vector esports style, glowing visor, dark navy background, no text, no letters";
+  "one full-body fighting robot portrait, front three-quarter view facing camera-left, neutral ready stance, head arms legs and feet fully visible on one baseline, flat vector esports style, glowing visor, chest chip slot, dark navy background, no text, no watermark, no letters";
 
 // The prompter locks the art direction. The subject changes, the style never does.
 export function portraitPromptFor(subject: string): string {
@@ -171,5 +174,44 @@ export function createMetaProvider(env: MetaEnv, fetchFn: FetchFn = defaultFetch
     return { provider: "meta", url, model: resolveModel("portrait", env), latencyMs: Date.now() - started };
   };
 
-  return { name: "meta", compileStrategy, generatePortrait };
+  // The explainer grounds every claim in telemetry. The reply must echo
+  // the winner and the receipt, or the call counts as ungrounded.
+  const explainBattle = async (t: BattleTelemetry): Promise<ExplainResult> => {
+    const started = Date.now();
+    const fallback = async (grounded: boolean): Promise<ExplainResult> => {
+      const mock = await explainMock(t);
+      return { ...mock, provider: "meta", isMock: false, grounded, latencyMs: Date.now() - started };
+    };
+    if (!keyFor("compile", env)) return explainMock(t);
+    let text: string | null = null;
+    try {
+      const res = await fetchFn(`${base}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${keyFor("compile", env)}` },
+        body: JSON.stringify({
+          model: resolveModel("compile", env),
+          messages: [
+            {
+              role: "system",
+              content: [
+                "You explain one finished AGENT WARS fight.",
+                "Use ONLY the numbers in the user message. Never invent damage, health, or events.",
+                "Reply in two sentences. Name the winner, the ticks, and the top chip per side.",
+                "Echo the receipt checksum exactly.",
+              ].join(" "),
+            },
+            { role: "user", content: JSON.stringify(t) },
+          ],
+          temperature: 0.2,
+        }),
+      });
+      if (res.ok) text = textOf(await res.json());
+    } catch {
+      text = null;
+    }
+    if (!text || !text.includes(t.winner) || !text.includes(t.checksum)) return fallback(false);
+    return { provider: "meta", isMock: false, grounded: true, text, latencyMs: Date.now() - started };
+  };
+
+  return { name: "meta", compileStrategy, generatePortrait, explainBattle };
 }

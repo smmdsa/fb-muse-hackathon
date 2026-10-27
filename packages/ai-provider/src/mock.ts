@@ -2,7 +2,31 @@
 
 import { validatePolicy } from "@agent-wars/behavior-dna";
 import type { AgentPolicy, BehaviorRule, DnaTraits } from "@agent-wars/behavior-dna";
-import type { CompileRequest, CompileResult } from "./types.ts";
+import type { BattleTelemetry, CompileRequest, CompileResult, ExplainResult } from "./types.ts";
+
+// The explainer names the top trigger per side. Every word traces to telemetry.
+function topChip(chips: Record<string, number>): string {
+  let best = "no chip";
+  let bestN = -1;
+  for (const [id, n] of Object.entries(chips)) {
+    if (n > bestN) {
+      best = id;
+      bestN = n;
+    }
+  }
+  return bestN > 0 ? `${best} (${bestN} triggers)` : "no chip";
+}
+
+// The mock explains with a fixed template. No invention, only counts.
+export async function explainMock(t: BattleTelemetry): Promise<ExplainResult> {
+  const started = Date.now();
+  const text = [
+    `Winner ${t.winner} in ${t.ticks} ticks (receipt ${t.checksum}).`,
+    `Side A leaned on ${topChip(t.chipsA)}; side B leaned on ${topChip(t.chipsB)}.`,
+    t.rated ? "The bout moved AP." : "The bout moved no AP.",
+  ].join(" ");
+  return { provider: "mock", isMock: true, grounded: true, text, latencyMs: Date.now() - started };
+}
 
 function hash(text: string): number {
   let h = 0x811c9dc5;

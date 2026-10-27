@@ -11,6 +11,7 @@ async function leader(handle, prompt) {
   const s = await call("POST", "/v1/auth/session", { handle });
   const a = await call("POST", "/v1/agents", {}, s.json.token);
   const v = await call("POST", `/v1/agents/${a.json.agentId}/policies/compile`, { prompt }, s.json.token);
+  await call("POST", `/v1/agents/${a.json.agentId}/policies/install`, { versionId: v.json.versionId }, s.json.token);
   return { token: s.json.token, version: v.json.versionId };
 }
 
@@ -77,9 +78,40 @@ describe("matches", () => {
     assert.equal(r.status, 422);
   });
 
+  it("audits compile cost on the stored version", async () => {
+    const s = await call("POST", "/v1/auth/session", { handle: "audit" });
+    const a = await call("POST", "/v1/agents", {}, s.json.token);
+    const v = await call("POST", `/v1/agents/${a.json.agentId}/policies/compile`, { prompt: "rush them down up close" }, s.json.token);
+    assert.equal(v.status, 201);
+    assert.equal(v.json.provider, "mock");
+    assert.equal(v.json.isMock, true);
+    assert.ok(v.json.tokens > 0);
+    assert.ok(v.json.latencyMs >= 0);
+    const row = store.db.prepare("SELECT provider, is_mock, tokens, latency_ms FROM versions WHERE id = ?").get(v.json.versionId);
+    assert.equal(row.provider, "mock");
+    assert.equal(row.is_mock, 1);
+    assert.equal(row.tokens, v.json.tokens);
+    assert.equal(row.latency_ms, v.json.latencyMs);
+  });
+
   it("spends one energy per ranked fight", async () => {
     const me = await call("GET", "/v1/me", null, keys.a.token);
     assert.equal(me.json.energy.energy, 9);
+  });
+
+  it("stores payouts and lists recent fights with replay links", async () => {
+    const row = store.db.prepare("SELECT paid_a, paid_b, rated FROM matches WHERE id = ?").get("rank-1");
+    assert.equal(row.rated, 1);
+    assert.ok(row.paid_a >= 0 && row.paid_b >= 0);
+    const me = await call("GET", "/v1/me", null, keys.a.token);
+    const dash = await call("GET", `/v1/agents/${me.json.agent.id}/dashboard`, null, keys.a.token);
+    assert.ok(Array.isArray(dash.json.history));
+    const first = dash.json.history.find((h) => h.matchId === "rank-1");
+    assert.ok(first);
+    assert.equal(first.rated, 1);
+    assert.equal(typeof first.myDelta, "number");
+    assert.equal(first.myPaid, row.paid_a);
+    assert.equal(typeof first.replay, "string");
   });
 
   it("denies ranked at zero energy", async () => {

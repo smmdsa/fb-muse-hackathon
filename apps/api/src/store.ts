@@ -21,7 +21,9 @@ export function openStore(path: string): Store {
       placed INTEGER NOT NULL DEFAULT 0,
       ac INTEGER NOT NULL DEFAULT 0,
       rp INTEGER NOT NULL DEFAULT 100,
-      autobattle_json TEXT
+      autobattle_json TEXT,
+      owned_json TEXT NOT NULL DEFAULT '[]',
+      equipped_json TEXT NOT NULL DEFAULT '{"skin":null,"trail":null,"banner":null}'
     );
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
@@ -29,7 +31,8 @@ export function openStore(path: string): Store {
       active_version_id TEXT,
       name TEXT,
       concept TEXT,
-      portrait_url TEXT
+      portrait_url TEXT,
+      portrait_status TEXT NOT NULL DEFAULT 'faceless'
     );
     CREATE TABLE IF NOT EXISTS versions (
       id TEXT PRIMARY KEY,
@@ -38,7 +41,9 @@ export function openStore(path: string): Store {
       sha TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       provider TEXT NOT NULL DEFAULT 'mock',
-      is_mock INTEGER NOT NULL DEFAULT 1
+      is_mock INTEGER NOT NULL DEFAULT 1,
+      tokens INTEGER NOT NULL DEFAULT 0,
+      latency_ms INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS matches (
       id TEXT PRIMARY KEY,
@@ -51,6 +56,8 @@ export function openStore(path: string): Store {
       rated INTEGER NOT NULL,
       delta_a INTEGER NOT NULL DEFAULT 0,
       delta_b INTEGER NOT NULL DEFAULT 0,
+      paid_a INTEGER NOT NULL DEFAULT 0,
+      paid_b INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       chips_json TEXT
     );
@@ -70,6 +77,24 @@ export function openStore(path: string): Store {
       created_at INTEGER NOT NULL,
       settle_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS tournaments (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      event_json TEXT NOT NULL,
+      games_json TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS season_archives (
+      season_id TEXT PRIMARY KEY,
+      closed_at INTEGER NOT NULL,
+      archive_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS reports (
+      id TEXT PRIMARY KEY,
+      handle TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS wallet_txns (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       wallet_id TEXT NOT NULL,
@@ -83,10 +108,4 @@ export function openStore(path: string): Store {
   return { db, close: () => db.close() };
 }
 
-let counter = 0;
-
-// Test and route code mints ids without outside input.
-export function mintId(prefix: string): string {
-  counter += 1;
-  return `${prefix}_${Date.now().toString(36)}_${counter}`;
-}
+export { mintId, newToken } from "./ids.ts";

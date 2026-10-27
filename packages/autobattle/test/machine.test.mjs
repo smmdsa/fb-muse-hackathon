@@ -9,6 +9,7 @@ import {
   pause,
   recordDefense,
   refresh,
+  refundManualMatch,
   spendManualMatch,
   startOwnerMatch,
   LEASE_MS,
@@ -116,6 +117,16 @@ describe("manual matches", () => {
   it("denies drafts with no published version", () => {
     const r = spendManualMatch(draft("leader-1", 0), 1000);
     assert.equal(r.guard.ok, false);
+  });
+
+  it("refunds a reservation without starting a fight", () => {
+    const d = { ...draft("leader-1", 0), published: true };
+    const spent = spendManualMatch(d, 1000).status;
+    assert.equal(spent.stamina, 9);
+    assert.equal(spent.attackAt.length, 1);
+    const back = refundManualMatch(spent, 2000);
+    assert.equal(back.stamina, 10);
+    assert.equal(back.attackAt.length, 0);
   });
 
   it("denies empty energy and caps the day", () => {

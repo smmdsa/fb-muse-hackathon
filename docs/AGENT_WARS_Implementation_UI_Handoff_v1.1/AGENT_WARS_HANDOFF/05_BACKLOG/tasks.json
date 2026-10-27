@@ -1,0 +1,557 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-10-27",
+  "repository": "smmdsa/fb-muse-hackathon",
+  "tasks": [
+    {
+      "id": "T001",
+      "priority": "P0",
+      "epic": "FOUNDATION",
+      "title": "Audit deployed HEAD vs repo and rebaseline task statuses",
+      "dependsOn": [],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Record commit SHAs, actual deployed routes, working tests; identify drift; no unproven claims.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T002",
+      "priority": "P0",
+      "epic": "FOUNDATION",
+      "title": "Consolidate canonical battle engine and replay render",
+      "dependsOn": [
+        "T001"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Viewer consumes canonical simulation/replay snapshots; 100 seeded outcomes and checksums match server.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T003",
+      "priority": "P0",
+      "epic": "FOUNDATION",
+      "title": "Secure auth and ownership",
+      "dependsOn": [
+        "T001"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Only owner can mutate agent/chip/tickets, separate admin; sessions work across reload and browser.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T004",
+      "priority": "P0",
+      "epic": "FOUNDATION",
+      "title": "Transactional idempotent ranked settlement",
+      "dependsOn": [
+        "T003"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Concurrent duplicate settle changes rating, AP, AC once; retry safe; no half-commits.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T005",
+      "priority": "P0",
+      "epic": "AI",
+      "title": "Wire real Muse Spark compile end-to-end",
+      "dependsOn": [
+        "T003"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Live key path invoked server side; invalid JSON rejected, mocks always labeled; audited costs.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T006",
+      "priority": "P0",
+      "epic": "BREED",
+      "title": "Implement stable portrait art pipeline and storage",
+      "dependsOn": [
+        "T003"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "One canonical full-body 3/4 robot portrait; statuses; 10-prompt visual QA; R2/fallback.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T007",
+      "priority": "P0",
+      "epic": "BREED",
+      "title": "Build Breed Station in shared app shell",
+      "dependsOn": [
+        "T006"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Fresh user creates one agent; handles pending/failed art; impossible to create second.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T008",
+      "priority": "P0",
+      "epic": "CHIPS",
+      "title": "Build full chip compiler and tactical preview UI",
+      "dependsOn": [
+        "T005",
+        "T007"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Shows DNA values and legal policy rules; errors meaningful; version saved; no implicit install.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T009",
+      "priority": "P0",
+      "epic": "CHIPS",
+      "title": "Implement explicit install chip contract and UI",
+      "dependsOn": [
+        "T008"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Atomic validated install; selected version matches active version after refresh; install blocked invalid.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T010",
+      "priority": "P0",
+      "epic": "UI",
+      "title": "Implement polished unified app shell and lobby",
+      "dependsOn": [
+        "T003"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Real navigation, no debug home; above-fold agent/Rank/AP/Autobattle/Play; desktop+mobile.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T011",
+      "priority": "P0",
+      "epic": "MATCH",
+      "title": "Agent selection and queue mode selection",
+      "dependsOn": [
+        "T009",
+        "T010"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "One agent card selected, Training/Casual/Ranked; no chip prevents queue; no duplicated tickets.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T012",
+      "priority": "P0",
+      "epic": "MATCH",
+      "title": "Fix queue energy reservation and timeout refunds",
+      "dependsOn": [
+        "T011",
+        "T004"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "No charge spent for canceled/expired unmatched ticket; spending only on match start.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T013",
+      "priority": "P0",
+      "epic": "MATCH",
+      "title": "Server-linked Arena viewer and result screen",
+      "dependsOn": [
+        "T002",
+        "T011"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Rendered replay matches stored match checksum; mode-specific AP+AC shown once.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T014",
+      "priority": "P0",
+      "epic": "AUTOBATTLE",
+      "title": "Wire automatic scheduling and 24h authorization",
+      "dependsOn": [
+        "T004",
+        "T011"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Background fights occur when energy+lease valid, stop on expiration and energy depleted; user need not stay online.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T015",
+      "priority": "P0",
+      "epic": "AUTOBATTLE",
+      "title": "Create return digest and explicit reactivation UI",
+      "dependsOn": [
+        "T014"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Offline summary, energy, reasons, reactivation action; visiting never renews lease.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T016",
+      "priority": "P0",
+      "epic": "TOURNAMENT",
+      "title": "Championship enrollment page and bracket integration",
+      "dependsOn": [
+        "T010",
+        "T011"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "8-agent free event; register eligible frozen policy; view live/complete bracket and replay.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T017",
+      "priority": "P0",
+      "epic": "RELEASE",
+      "title": "E2E smoke, mobile, deploy and judge path",
+      "dependsOn": [
+        "T013",
+        "T015",
+        "T016"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Fresh-user entire path recorded with trace/screenshots; stable Workers site and verified Muse real-mode.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T018",
+      "priority": "P1",
+      "epic": "UI",
+      "title": "Rank/leaderboard and match history presentation",
+      "dependsOn": [
+        "T010",
+        "T013"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "All tiers/divisions correct, AP progress, history and replay links, loading/empty states.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T019",
+      "priority": "P1",
+      "epic": "GAMEPLAY",
+      "title": "Arena polish including hit feedback and objectives",
+      "dependsOn": [
+        "T002"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Hits/shield/dash clear; cover and TTI fixed; center objective; motion reduced option.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T020",
+      "priority": "P1",
+      "epic": "AI",
+      "title": "Battle analysis and Evolution Lab",
+      "dependsOn": [
+        "T013",
+        "T005"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Muse explanations grounded in telemetry; changes tested A/B, no unverified winrate claims.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T021",
+      "priority": "P1",
+      "epic": "ECONOMY",
+      "title": "Armory mock catalog, AC/RP wallets, equip cosmetics",
+      "dependsOn": [
+        "T003",
+        "T010"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Idempotent purchases and entitlement equip; no gameplay stat effects; real money disabled.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T022",
+      "priority": "P1",
+      "epic": "TOURNAMENT",
+      "title": "Organizer admin event authoring and status transitions",
+      "dependsOn": [
+        "T016",
+        "T003"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Admin-only DRAFT→ANNOUNCED→REGISTRATION→LOCKED→LIVE→COMPLETED.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T023",
+      "priority": "P1",
+      "epic": "AUTOBATTLE",
+      "title": "Defense caps, opponent fairness and audit",
+      "dependsOn": [
+        "T014"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Offline pool enforces published version, pair caps, defense limit; observable reasons.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T024",
+      "priority": "P1",
+      "epic": "PERFORMANCE",
+      "title": "Load/latency/cost benchmarks and observability",
+      "dependsOn": [
+        "T017"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Measure latency/CPU per fight, Muse spend, D1 concurrency, queue, errors.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T025",
+      "priority": "P1",
+      "epic": "UI",
+      "title": "UX accessibility and responsive regression",
+      "dependsOn": [
+        "T017"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "390px, 768px, 1440px screenshots; keyboard, focus, reduced motion, contrast, no horizontal overflow.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T026",
+      "priority": "P2",
+      "epic": "SEASONS",
+      "title": "Season history, placement and award distribution",
+      "dependsOn": [
+        "T018"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Archive standings once, soft reset, placement consistency, no duplicate rewards.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T027",
+      "priority": "P2",
+      "epic": "SOCIAL",
+      "title": "Public leader profiles, shared matches and discoverability",
+      "dependsOn": [
+        "T018"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Public share pages respect privacy and report abuse controls.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T028",
+      "priority": "P2",
+      "epic": "COSMETICS",
+      "title": "Expanded avatar skins and animation library",
+      "dependsOn": [
+        "T021"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "All visuals preserve canonical silhouette/framing, no gameplay impact.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T029",
+      "priority": "P2",
+      "epic": "TOURNAMENT",
+      "title": "Swiss/double elimination and season circuits",
+      "dependsOn": [
+        "T022"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "More formats isolated from first 8-person bracket; fairness tests.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    },
+    {
+      "id": "T030",
+      "priority": "BLOCKED",
+      "epic": "PAYMENTS",
+      "title": "Real RP purchase / paid entry / cash prizes",
+      "dependsOn": [
+        "legal approval"
+      ],
+      "status": "VERIFY_AT_HEAD",
+      "acceptance": "Disabled until payments, legal, age, jurisdiction and abuse reviews; no active checkout.",
+      "evidenceNeeded": [
+        "unit/integration evidence",
+        "browser screenshot/trace if UI",
+        "commit SHA and changed paths"
+      ],
+      "owner": "Muse Code",
+      "notes": "Do not rewrite implemented logic; verify current source and integrate."
+    }
+  ]
+}

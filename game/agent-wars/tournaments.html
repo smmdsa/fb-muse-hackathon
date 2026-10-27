@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Wars — Tournaments</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+<main class="shell">
+<header class="top">
+<div>
+<h1>Agent Wars</h1>
+<p class="sub">Championship — 8-agent free event, frozen policies.</p>
+</div>
+<div class="pills">
+<a class="pill link" href="./index.html">arena</a>
+<a class="pill link" href="./profile.html">profile</a>
+<a class="pill link" href="./tournaments.html">cup</a>
+<span class="pill" id="pill-who">signed out</span>
+</div>
+</header>
+<section class="panel" id="cup-card">
+<h2>S1 Kickoff Cup</h2>
+<p class="sub" id="cup-status">Loading…</p>
+<div class="row">
+<button id="cup-register" class="btn-primary" type="button">Register active version</button>
+</div>
+</section>
+<section class="panel" id="bracket-card" hidden>
+<h2>Bracket</h2>
+<div id="bracket"></div>
+</section>
+<section class="panel" id="cup-games-card" hidden>
+<h2>Games and replays</h2>
+<div id="cup-games"></div>
+</section>
+<section class="panel" id="admin-card">
+<h2>Organizer</h2>
+<p class="sub">The admin key lives in this tab only. It never touches disk.</p>
+<div class="row">
+<label for="admin-key">Admin key</label>
+<input id="admin-key" name="admin-key" value="" maxlength="200" placeholder="paste ADMIN_KEY" autocomplete="off" />
+</div>
+<div class="row">
+<label for="ev-id">ID</label>
+<input id="ev-id" name="ev-id" value="" maxlength="40" placeholder="winter-cup" />
+<label for="ev-name">Name</label>
+<input id="ev-name" name="ev-name" value="" maxlength="80" placeholder="Winter Cup" />
+<label for="ev-size">Seats</label>
+<input id="ev-size" name="ev-size" value="8" maxlength="2" inputmode="numeric" />
+<button id="ev-create" class="btn-primary" type="button">Create draft</button>
+</div>
+<p class="sub" id="admin-msg"></p>
+<div id="events"></div>
+</section>
+</main>
+<script src="./tournaments.js"></script>
+</body>
+</html>
