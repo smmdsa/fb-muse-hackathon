@@ -105,6 +105,23 @@ describe("accounts", () => {
     assert.equal(r.status, 404);
   });
 
+  it("walks a fresh leader through the whole breed station", async () => {
+    const s = await call("POST", "/v1/auth/session", { handle: "station" });
+    const before = await call("GET", "/v1/me", null, s.json.token);
+    assert.ok(!before.json.agent);
+    const bred = await call("POST", "/v1/agents", { name: "Station", concept: "patient holder" }, s.json.token);
+    assert.equal(bred.status, 201);
+    assert.equal(bred.json.portraitStatus, "faceless");
+    const second = await call("POST", "/v1/agents", { name: "Clone", concept: "copy" }, s.json.token);
+    assert.equal(second.status, 409);
+    const after = await call("GET", "/v1/me", null, s.json.token);
+    assert.equal(after.json.agent.id, bred.json.agentId);
+    const dash = await call("GET", `/v1/agents/${bred.json.agentId}/dashboard`, null, s.json.token);
+    assert.equal(dash.json.agent.name, "Station");
+    assert.equal(dash.json.agent.concept, "patient holder");
+    assert.equal(dash.json.agent.portraitStatus, "faceless");
+  });
+
   it("compiles and publishes a valid draft", async () => {
     const r = await call("POST", `/v1/agents/${keys.agent}/policies/compile`, { prompt: "rush them down up close" }, keys.commander);
     assert.equal(r.status, 201);
