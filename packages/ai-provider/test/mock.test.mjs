@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { validatePolicy } from "@agent-wars/behavior-dna";
-import { compileMock, providerFromEnv, repairOnce } from "../src/index.ts";
+import { compileMock, explainMock, explainerFromEnv, providerFromEnv, repairOnce } from "../src/index.ts";
 
 describe("mock compile", () => {
   it("compiles the same prompt to the same valid draft", async () => {
@@ -54,5 +54,51 @@ describe("mock compile", () => {
   it("picks meta when the Spark key is set", () => {
     assert.equal(providerFromEnv({ META_SPARK_KEY: "x" }).name, "meta");
     assert.equal(providerFromEnv({ META_IMAGE_KEY: "x" }).name, "mock");
+  });
+});
+
+describe("battle explainer", () => {
+  const telemetry = {
+    matchId: "m1",
+    winner: "A",
+    ticks: 965,
+    checksum: "deadbeef",
+    seed: "s1",
+    rated: false,
+    chipsA: { "mid-strafe": 12, "close-fire": 3 },
+    chipsB: { "late-push": 7 },
+  };
+  it("grounds the mock template in telemetry", async () => {
+    const out = await explainMock(telemetry);
+    assert.equal(out.grounded, true);
+    assert.equal(out.isMock, true);
+    assert.ok(out.text.includes("A"));
+    assert.ok(out.text.includes("965"));
+    assert.ok(out.text.includes("deadbeef"));
+    assert.ok(out.text.includes("mid-strafe"));
+  });
+
+  it("defaults to the mock template with no key", async () => {
+    const out = await explainerFromEnv({}).explainBattle(telemetry);
+    assert.equal(out.isMock, true);
+    assert.equal(out.grounded, true);
+  });
+
+  it("falls back ungrounded when the model invents facts", async () => {
+    const { createMetaProvider } = await import("../src/index.ts");
+    const lying = async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "Side A crushed it gloriously" } }] }) });
+    const out = await createMetaProvider({ META_SPARK_KEY: "x" }, lying).explainBattle(telemetry);
+    assert.equal(out.provider, "meta");
+    assert.equal(out.isMock, false);
+    assert.equal(out.grounded, false);
+    assert.ok(out.text.includes("deadbeef"));
+  });
+
+  it("trusts a reply that echoes winner and receipt", async () => {
+    const { createMetaProvider } = await import("../src/index.ts");
+    const honest = async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "Winner A in 965 ticks, receipt deadbeef." } }] }) });
+    const out = await createMetaProvider({ META_SPARK_KEY: "x" }, honest).explainBattle(telemetry);
+    assert.equal(out.grounded, true);
+    assert.ok(out.text.includes("deadbeef"));
   });
 });

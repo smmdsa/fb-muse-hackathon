@@ -7,7 +7,7 @@ import { earnAc, createWallet } from "@agent-wars/economy";
 import { applyRanked, createLedger, ratingFor } from "@agent-wars/ranking";
 import { rankFor } from "@agent-wars/ranking";
 import { buildStandings } from "@agent-wars/leaderboard";
-import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
+import { explainerFromEnv, hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
 import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, DAY_MS, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
 import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket } from "@agent-wars/tournaments";
@@ -233,6 +233,82 @@ export async function createAgent(
     id, input.leaderId, input.name || null, input.concept || null, portraitUrl, portraitStatus,
   );
   return { agentId: id, portraitUrl, portraitStatus };
+}
+
+// Analysis explains one stored bout from its own telemetry. The model
+// may phrase it, but the numbers come from the row, never the model.
+export async function analyzeBattle(
+  store: Store,
+  env: FlowEnv,
+  input: { matchId: string },
+): Promise<Record<string, unknown>> {
+  const row = store.db.prepare("SELECT * FROM matches WHERE id = ?").get(input.matchId) as Record<string, unknown> | null;
+  if (!row) throw new Error("unknown match");
+  const chips = JSON.parse((row.chips_json as string) ?? '{"a":{},"b":{}}') as { a: Record<string, number>; b: Record<string, number> };
+  const telemetry = {
+    matchId: row.id as string,
+    winner: row.winner as string,
+    ticks: row.ticks as number,
+    checksum: row.checksum as string,
+    seed: row.seed as string,
+    rated: (row.rated as number) === 1,
+    chipsA: chips.a ?? {},
+    chipsB: chips.b ?? {},
+  };
+  const explanation = await explainerFromEnv(env).explainBattle(telemetry);
+  return { ...telemetry, explanation };
+}
+
+// The Evolution Lab runs an honest A/B: both drafts fight the same benchmark
+// on mirrored seeds. Small samples refuse a verdict. Drafts stay drafts.
+export async function evolutionLab(
+  store: Store,
+  env: FlowEnv,
+  input: { leaderId: string; agentId: string; promptA: string; promptB: string; bouts?: number },
+): Promise<Record<string, unknown>> {
+  const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
+  if (!agent || agent.leader_id !== input.leaderId) throw new Error("agent not found for this leader");
+  const promptA = input.promptA.trim().slice(0, 280);
+  const promptB = input.promptB.trim().slice(0, 280);
+  if (!promptA || !promptB) throw new Error("two prompts are required");
+  const bouts = Math.min(20, Math.max(4, Math.floor(input.bouts ?? 10)));
+  const runId = mintId("lab");
+  const draftA = await compileAndPublish(store, env, { agentId: input.agentId, prompt: promptA });
+  const draftB = await compileAndPublish(store, env, { agentId: input.agentId, prompt: promptB });
+  if (!draftA.versionId) throw new Error(`draft A failed: ${draftA.errors.join("; ")}`);
+  if (!draftB.versionId) throw new Error(`draft B failed: ${draftB.errors.join("; ")}`);
+  const policyA = getVersion(store, draftA.versionId);
+  const policyB = getVersion(store, draftB.versionId);
+  if (!policyA || !policyB) throw new Error("drafts vanished");
+  let winsA = 0;
+  let winsB = 0;
+  let drawsA = 0;
+  let drawsB = 0;
+  const now = Date.now();
+  for (let i = 0; i < bouts; i += 1) {
+    const outA = fightPolicies(policyA.policy, BENCH_POLICY, `${runId}-a-${i}`);
+    const idA = `${runId}-a-${i}`;
+    store.db.prepare(
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+    ).run(idA, `${runId}-a-${i}`, draftA.versionId, "benchmark-v1", outA.winner, outA.ticks, outA.checksum, now, JSON.stringify({ a: outA.chipsA, b: outA.chipsB }));
+    if (outA.winner === "A") winsA += 1;
+    else if (outA.winner === "DRAW") drawsA += 1;
+    const outB = fightPolicies(policyB.policy, BENCH_POLICY, `${runId}-b-${i}`);
+    const idB = `${runId}-b-${i}`;
+    store.db.prepare(
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+    ).run(idB, `${runId}-b-${i}`, draftB.versionId, "benchmark-v1", outB.winner, outB.ticks, outB.checksum, now, JSON.stringify({ a: outB.chipsA, b: outB.chipsB }));
+    if (outB.winner === "A") winsB += 1;
+    else if (outB.winner === "DRAW") drawsB += 1;
+  }
+  const decisive = winsA + winsB;
+  let verdict = "too close to call";
+  if (bouts < 10) {
+    verdict = "sample too small — run 10 or more bouts before trusting the gap";
+  } else if (decisive > 0 && Math.max(winsA, winsB) / decisive >= 0.7) {
+    verdict = winsA > winsB ? "A leads" : "B leads";
+  }
+  return { runId, versionA: draftA.versionId, versionB: draftB.versionId, bouts, winsA, winsB, drawsA, drawsB, verdict };
 }
 
 // A retry repaints one hero. It never breeds a second agent.

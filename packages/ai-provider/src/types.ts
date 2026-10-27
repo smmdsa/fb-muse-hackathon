@@ -24,6 +24,30 @@ export type AiProvider = {
   compileStrategy: (req: CompileRequest) => Promise<CompileResult>;
 };
 
+// Telemetry is the only truth an explanation may cite.
+export type BattleTelemetry = {
+  matchId: string;
+  winner: string;
+  ticks: number;
+  checksum: string;
+  seed: string;
+  rated: boolean;
+  chipsA: Record<string, number>;
+  chipsB: Record<string, number>;
+};
+
+export type ExplainResult = {
+  provider: ProviderName;
+  isMock: boolean;
+  grounded: boolean;
+  text: string;
+  latencyMs: number;
+};
+
+export type BattleExplainer = {
+  explainBattle: (t: BattleTelemetry) => Promise<ExplainResult>;
+};
+
 export type PortraitRequest = {
   prompt: string;
   size?: string;

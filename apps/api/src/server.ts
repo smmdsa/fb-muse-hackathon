@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, equipItem, getLeader, getTournament, getVersion, installVersion, listTournaments, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, validateRanked, withMatch } from "./flow.ts";
+import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, equipItem, evolutionLab, getLeader, getTournament, getVersion, installVersion, listTournaments, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -14,6 +14,8 @@ const authHits = new Map<string, number[]>();
 const compileHits = new Map<string, number[]>();
 const queueHits = new Map<string, number[]>();
 const trainHits = new Map<string, number[]>();
+const labHits = new Map<string, number[]>();
+const analysisHits = new Map<string, number[]>();
 
 function limited(res: ServerResponse, log: Map<string, number[]>, key: string, windowMs: number, max: number): boolean {
   if (checkLimit(log, key, Date.now(), windowMs, max)) return false;
@@ -219,6 +221,34 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           send(res, 201, runTraining(ctx.store, { versionId, seed }));
         } catch (err) {
           send(res, 404, { error: (err as Error).message });
+        }
+        return;
+      }
+      const analysisMatch = req.method === "POST" && /^\/v1\/battles\/[^/]+\/analysis$/.test(url.pathname);
+      if (analysisMatch) {
+        if (limited(res, analysisHits, me.id as string, 60_000, 10)) return;
+        try {
+          send(res, 200, await analyzeBattle(ctx.store, process.env, { matchId: decodeURIComponent(url.pathname.split("/")[3]) }));
+        } catch (err) {
+          send(res, 404, { error: (err as Error).message });
+        }
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/lab/ab") {
+        if (limited(res, labHits, me.id as string, 60_000, 6)) return;
+        const agentId = typeof body.agentId === "string" ? body.agentId : "";
+        const promptA = typeof body.promptA === "string" ? body.promptA : "";
+        const promptB = typeof body.promptB === "string" ? body.promptB : "";
+        const bouts = typeof body.bouts === "number" ? body.bouts : 10;
+        if (!agentId || !promptA || !promptB) {
+          send(res, 400, { error: "agentId, promptA, and promptB are required" });
+          return;
+        }
+        try {
+          send(res, 201, await evolutionLab(ctx.store, process.env, { leaderId: me.id as string, agentId, promptA, promptB, bouts }));
+        } catch (err) {
+          const msg = (err as Error).message;
+          send(res, /not found|required/.test(msg) ? 404 : 422, { error: msg });
         }
         return;
       }

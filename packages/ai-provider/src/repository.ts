@@ -1,11 +1,11 @@
 // Repository: one picker per task. Mock stays default until a key exists.
 // Each task resolves its own model, so compile and portraits switch alone.
 
-import { compileMock } from "./mock.ts";
+import { compileMock, explainMock } from "./mock.ts";
 import { createMetaProvider } from "./meta.ts";
 import type { MetaProvider } from "./meta.ts";
 import { hasKey } from "./models.ts";
-import type { AiProvider, CompileRequest, CompileResult } from "./types.ts";
+import type { AiProvider, BattleExplainer, CompileRequest, CompileResult } from "./types.ts";
 
 export type ProviderEnv = {
   META_SPARK_KEY?: string;
@@ -32,5 +32,12 @@ export function providerFromEnv(env: ProviderEnv): AiProvider {
 // Portraits need the image key. The game runs fine without them.
 export function portraitFromEnv(env: ProviderEnv): Pick<MetaProvider, "generatePortrait"> {
   if (!hasKey("portrait", env)) throw new Error("portraits need META_IMAGE_KEY; set the secret first");
+  return createMetaProvider(env);
+}
+
+// Explanations default to the mock template. The Spark key upgrades the prose,
+// never the facts: an ungrounded reply falls back to the template.
+export function explainerFromEnv(env: ProviderEnv): BattleExplainer {
+  if (!hasKey("compile", env)) return { explainBattle: explainMock };
   return createMetaProvider(env);
 }

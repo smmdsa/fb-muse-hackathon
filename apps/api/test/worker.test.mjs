@@ -228,6 +228,20 @@ describe("worker writes", () => {
     assert.equal(rep.json.received, true);
     const ghost = await entry.fetch(new Request("http://local/v1/leaders/ghost/public"), wenv);
     assert.equal(ghost.status, 404);
+    const bout = await call("POST", "/v1/matches/training", { versionId: va.json.versionId, seed: "wl-1" }, sa.json.token);
+    assert.equal(bout.status, 201);
+    const an = await call("POST", `/v1/battles/${bout.json.matchId}/analysis`, {}, sa.json.token);
+    assert.equal(an.status, 200);
+    assert.equal(an.json.checksum, bout.json.checksum);
+    assert.ok(an.json.explanation.text.includes(bout.json.checksum));
+    assert.equal(an.json.explanation.grounded, true);
+    const lab = await call("POST", "/v1/lab/ab", { agentId: aa.json.agentId, promptA: "rush them down up close", promptB: "hold the center patiently", bouts: 10 }, sa.json.token);
+    assert.equal(lab.status, 201);
+    assert.equal(lab.json.bouts, 10);
+    assert.equal(lab.json.winsA + lab.json.drawsA <= 10, true);
+    assert.ok(["A leads", "B leads", "too close to call"].includes(lab.json.verdict));
+    const ghostAn = await call("POST", "/v1/battles/ghost/analysis", {}, sa.json.token);
+    assert.equal(ghostAn.status, 404);
   });
 
   it("refuses a second open ticket in the same mode", async () => {

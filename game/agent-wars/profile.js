@@ -267,10 +267,60 @@ function renderHist(d) {
     a.href = `./index.html?replay=${h.matchId}`;
     a.textContent = "replay";
     p.appendChild(a);
+    const why = document.createElement("button");
+    why.className = "btn-ghost";
+    why.type = "button";
+    why.textContent = "Why";
+    why.addEventListener("click", async () => {
+      why.disabled = true;
+      const r = await call("POST", `/v1/battles/${h.matchId}/analysis`);
+      why.disabled = false;
+      const old = p.querySelector(".why-text");
+      if (old) old.remove();
+      const span = document.createElement("span");
+      span.className = "sub why-text";
+      span.textContent = r.status === 200 ? ` — ${r.data.explanation.text}` : " — no explanation yet.";
+      p.appendChild(span);
+    });
+    p.appendChild(why);
     box.appendChild(p);
   }
   show($("hist-card"), true);
 }
+
+$("lab-btn").addEventListener("click", async () => {
+  if (!agentId) return;
+  const promptA = $("prompt-a").value.trim();
+  const promptB = $("prompt-b").value.trim();
+  const bouts = Math.min(20, Math.max(4, parseInt($("lab-bouts").value, 10) || 10));
+  if (!promptA || !promptB) {
+    $("lab-msg").textContent = "Two prompts are required.";
+    return;
+  }
+  $("lab-msg").textContent = "Running bouts…";
+  $("lab-btn").disabled = true;
+  const r = await call("POST", "/v1/lab/ab", { agentId, promptA, promptB, bouts });
+  $("lab-btn").disabled = false;
+  if (r.status !== 201) {
+    $("lab-msg").textContent = `Lab failed: ${r.data.error || r.status}.`;
+    return;
+  }
+  const d = r.data;
+  $("lab-msg").textContent = `A ${d.winsA}W ${d.drawsA}D vs benchmark · B ${d.winsB}W ${d.drawsB}D · ${d.verdict}.`;
+  const box = $("lab-out");
+  box.textContent = "";
+  for (const [label, version] of [["Install A", d.versionA], ["Install B", d.versionB]]) {
+    const btn = document.createElement("button");
+    btn.className = "btn-ghost";
+    btn.type = "button";
+    btn.textContent = label;
+    btn.addEventListener("click", async () => {
+      await call("POST", `/v1/agents/${agentId}/policies/install`, { versionId: version });
+      await refresh();
+    });
+    box.appendChild(btn);
+  }
+});
 
 async function boot() {
   const handle = localStorage.getItem(HANDLE_KEY) || "";
@@ -286,6 +336,7 @@ async function boot() {
   show($("login-card"), false);
   show($("hero-card"), true);
   show($("train-card"), true);
+  show($("lab-card"), true);
   if (me.data.agent) {
     agentId = me.data.agent.id;
     show($("breed-row"), false);
