@@ -46,6 +46,7 @@ const feed = document.getElementById("feed");
 const startBtn = document.getElementById("start-btn");
 const restartBtn = document.getElementById("restart-btn");
 const pauseBtn = document.getElementById("pause-btn");
+const speedBtn = document.getElementById("speed-btn");
 const seedInput = document.getElementById("seed");
 const promptAInput = document.getElementById("prompt-a");
 const promptBInput = document.getElementById("prompt-b");
@@ -643,9 +644,26 @@ pauseBtn.addEventListener("click", () => {
   pillState.textContent = paused ? "paused" : "live";
 });
 
+if (speedBtn) {
+  speedBtn.addEventListener("click", () => {
+    replaySpeed = SPEEDS[(SPEEDS.indexOf(replaySpeed) + 1) % SPEEDS.length];
+    speedBtn.textContent = `Speed ${replaySpeed}x`;
+  });
+}
+
 // Server replay playback. Frames come from GET /v1/matches/:id/replay.
+// Frames sample one fight every 9 ticks, so each frame holds 300 ms of
+// fight time. Playback honors fight time: robots glide between frames
+// instead of teleporting, and the clock runs at true speed.
+const REPLAY_EVERY = 9;
+const FRAME_MS = REPLAY_EVERY * 1000 * TICK;
+const SPEEDS = [1, 2, 4];
 let replayFrames = null;
 let replayIdx = 0;
+let replayPrev = null;
+let replayCurr = null;
+let replayAlpha = 0;
+let replaySpeed = 1;
 let replayMeta = null;
 
 function faceDelta(c, p) {
@@ -658,7 +676,10 @@ function faceDelta(c, p) {
 function playServerReplay(replay, meta) {
   clearInterval(timer);
   replayFrames = replay.frames || [];
-  replayIdx = 0;
+  replayIdx = 1;
+  replayPrev = replayFrames[0] || null;
+  replayCurr = replayFrames[0] || null;
+  replayAlpha = 0;
   replayMeta = meta || {};
   shots = [];
   sparks = [];
@@ -670,19 +691,32 @@ function playServerReplay(replay, meta) {
   pillWinner.textContent = "winner: —";
   endcard.hidden = true;
   feed.innerHTML = "";
-  note("Server replay loads: " + replayFrames.length + " frames");
+  note("Server replay loads: " + replayFrames.length + " frames at " + replaySpeed + "x");
+  pauseBtn.disabled = false;
+  pauseBtn.textContent = "Pause";
   timer = setInterval(playStep, STEP_MS);
 }
 
 function playStep() {
-  if (!replayFrames || replayIdx >= replayFrames.length) {
+  if (paused || !replayFrames || !replayCurr) return;
+  if (replayIdx >= replayFrames.length && replayAlpha >= FRAME_MS) {
     clearInterval(timer);
     finishReplay();
     return;
   }
-  const f = replayFrames[replayIdx];
-  const p = replayIdx > 0 ? replayFrames[replayIdx - 1] : f;
-  replayIdx += 1;
+  replayAlpha += STEP_MS * replaySpeed;
+  while (replayAlpha >= FRAME_MS && replayIdx < replayFrames.length) {
+    replayAlpha -= FRAME_MS;
+    replayPrev = replayCurr;
+    replayCurr = replayFrames[replayIdx];
+    replayIdx += 1;
+    if (replayCurr.ahp < replayPrev.ahp) flash("A");
+    if (replayCurr.bhp < replayPrev.bhp) flash("B");
+  }
+  const t = replayFrames.length ? Math.min(1, replayAlpha / FRAME_MS) : 1;
+  const glide = (p, c) => p + (c - p) * t;
+  const p = replayPrev || replayCurr;
+  const f = replayCurr;
   let fxA = faceDelta(f.ax, p.ax);
   let fyA = faceDelta(f.ay, p.ay);
   if (fxA === 0 && fyA === 0) { fxA = 1; fyA = 0; }
@@ -690,11 +724,9 @@ function playStep() {
   let fyB = faceDelta(f.by, p.by);
   if (fxB === 0 && fyB === 0) { fxB = -1; fyB = 0; }
   agents = {
-    A: { side: "A", x: f.ax, y: f.ay, hp: f.ahp, en: f.aen, ax: fxA, ay: fyA, alive: f.ahp > 0 },
-    B: { side: "B", x: f.bx, y: f.by, hp: f.bhp, en: f.ben, ax: fxB, ay: fyB, alive: f.bhp > 0 },
+    A: { side: "A", x: glide(p.ax, f.ax), y: glide(p.ay, f.ay), hp: f.ahp, en: f.aen, ax: fxA, ay: fyA, alive: f.ahp > 0 },
+    B: { side: "B", x: glide(p.bx, f.bx), y: glide(p.by, f.by), hp: f.bhp, en: f.ben, ax: fxB, ay: fyB, alive: f.bhp > 0 },
   };
-  if (f.ahp < p.ahp) flash("A");
-  if (f.bhp < p.bhp) flash("B");
   tick = f.t;
   time = f.t * TICK;
   draw();
