@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { autobattleDigest, autobattleTick, board, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getVersion, installVersion, optInAutobattle, pauseAutobattle, readTicket, requestMatch, retryPortrait, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
+import { autobattleDigest, autobattleTick, board, cancelTicket, compileAndPublish, createAgent, dashboard, energyFor, energyView, getLeader, getTournament, getVersion, installVersion, listTournaments, optInAutobattle, pauseAutobattle, readTicket, registerTournament, requestMatch, retryPortrait, runRanked, runTraining, spendEnergy, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -280,6 +280,33 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const ticketId = url.pathname.split("/")[3];
         try {
           send(res, 200, cancelTicket(ctx.store, { ticketId, leaderId: me.id as string }));
+        } catch (err) {
+          send(res, 404, { error: (err as Error).message });
+        }
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/v1/tournaments") {
+        send(res, 200, { tournaments: listTournaments(ctx.store) });
+        return;
+      }
+      const tournMatch = req.method === "GET" && /^\/v1\/tournaments\/[^/]+$/.exec(url.pathname);
+      if (tournMatch) {
+        try {
+          send(res, 200, getTournament(ctx.store, url.pathname.split("/")[3]));
+        } catch (err) {
+          send(res, 404, { error: (err as Error).message });
+        }
+        return;
+      }
+      const regMatch = req.method === "POST" && /^\/v1\/tournaments\/[^/]+\/register$/.test(url.pathname);
+      if (regMatch) {
+        const versionId = typeof body.versionId === "string" ? body.versionId : "";
+        if (!versionId) {
+          send(res, 400, { error: "versionId is required" });
+          return;
+        }
+        try {
+          send(res, 201, registerTournament(ctx.store, { eventId: url.pathname.split("/")[3], leaderId: me.id as string, versionId }));
         } catch (err) {
           send(res, 404, { error: (err as Error).message });
         }

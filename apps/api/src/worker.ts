@@ -3,6 +3,8 @@
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
 import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
+import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket } from "@agent-wars/tournaments";
+import type { Championship } from "@agent-wars/tournaments";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies, pickBot } from "@agent-wars/battle-core";
 import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
 import type { History } from "@agent-wars/matchmaker";
@@ -828,6 +830,101 @@ export default {
       const ticketId = url.pathname.split("/")[3];
       try {
         return json(await readTicketD1(env, { ticketId, leaderId: me.id as string }, Date.now()));
+      } catch (err) {
+        return json({ error: (err as Error).message }, 404);
+      }
+    }
+    const CUP_ID = "s1-kickoff";
+    const cupView = (event: Championship, games: Record<string, string[]>): Record<string, unknown> => ({
+      id: event.id,
+      name: "S1 Kickoff Cup",
+      phase: event.phase,
+      maxPlayers: event.maxPlayers,
+      minAp: event.minAp,
+      registrationCloseAt: event.registrationCloseAt,
+      entries: event.entries.map((e) => ({ leaderId: e.leaderId, lockedVersionId: e.lockedVersionId, registeredAt: e.registeredAt })),
+      bracket: event.bracket,
+      games,
+    });
+    const readCup = async (): Promise<{ event: Championship; games: Record<string, string[]> }> => {
+      let row = await env.DB.prepare("SELECT * FROM tournaments WHERE id = ?").bind(CUP_ID).first<Record<string, unknown>>();
+      if (!row) {
+        const now = Date.now();
+        const fresh = createEvent({ id: CUP_ID, seed: "kickoff-s1", maxPlayers: 8, minAp: 0, registrationCloseAt: now + 30 * 24 * 60 * 60 * 1000 });
+        await env.DB.prepare("INSERT INTO tournaments (id, name, event_json, games_json, created_at) VALUES (?, ?, ?, ?, ?)").bind(
+          CUP_ID, "S1 Kickoff Cup", JSON.stringify(fresh), "{}", now,
+        ).run();
+        row = await env.DB.prepare("SELECT * FROM tournaments WHERE id = ?").bind(CUP_ID).first<Record<string, unknown>>();
+      }
+      return {
+        event: JSON.parse((row as Record<string, unknown>).event_json as string) as Championship,
+        games: JSON.parse((row as Record<string, unknown>).games_json as string) as Record<string, string[]>,
+      };
+    };
+    if (request.method === "GET" && url.pathname === "/v1/tournaments") {
+      const { event } = await readCup();
+      return json({ tournaments: [{ id: CUP_ID, name: "S1 Kickoff Cup", phase: event.phase, entries: event.entries.length, maxPlayers: event.maxPlayers }] });
+    }
+    const tournMatch = request.method === "GET" && /^\/v1\/tournaments\/[^/]+$/.exec(url.pathname);
+    if (tournMatch) {
+      if (url.pathname.split("/")[3] !== CUP_ID) return json({ error: "unknown tournament" }, 404);
+      const { event, games } = await readCup();
+      return json(cupView(event, games));
+    }
+    const regMatch = request.method === "POST" && /^\/v1\/tournaments\/[^/]+\/register$/.test(url.pathname);
+    if (regMatch) {
+      try {
+      if (url.pathname.split("/")[3] !== CUP_ID) return json({ error: "unknown tournament" }, 404);
+      const body = await readBody(request);
+      if (body === null) return json({ error: "bad json" }, 400);
+      const versionId = typeof body.versionId === "string" ? body.versionId : "";
+      if (!versionId) return json({ error: "versionId is required" }, 400);
+      let { event, games } = await readCup();
+      const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(me.id as string).first<Record<string, unknown>>();
+      if (!agent) return json({ error: "breed a hero first" }, 404);
+      if (agent.active_version_id !== versionId) return json({ error: "register your active version" }, 404);
+      const leader = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(me.id as string).first<Record<string, unknown>>();
+      const outcome = registerEntry(event, { leaderId: me.id as string, agentVersionId: versionId, ap: (leader as Record<string, unknown>).ap as number, now: Date.now() });
+      if (!outcome.ok) return json({ error: outcome.reason }, 404);
+      event = addEntry(event, outcome);
+      let started = false;
+      if (event.entries.length >= event.maxPlayers) {
+        event = seedBracket(lock(event));
+        started = true;
+        const leaderOf = (version: string): string | null => {
+          const hit = event.entries.find((e) => e.lockedVersionId === version || e.agentVersionId === version);
+          return hit ? hit.leaderId : null;
+        };
+        for (const slot of (event.bracket as { slots: { id: string }[] }).slots) {
+          let guard = 0;
+          for (;;) {
+            const cur = (event.bracket as { slots: { id: string; slotA: string; slotB: string; winnerId: string | null }[] }).slots.find((s) => s.id === slot.id) as { id: string; slotA: string; slotB: string; winnerId: string | null };
+            if (cur.winnerId) break;
+            guard += 1;
+            const seed = `tmt-${event.id}-${slot.id}-g${(games[slot.id] ?? []).length + 1}`;
+            const prior = await env.DB.prepare("SELECT * FROM matches WHERE seed = ?").bind(seed).first<Record<string, unknown>>();
+            let winnerVersion: string | null = null;
+            let matchId = prior?.id as string | undefined;
+            if (prior) {
+              winnerVersion = prior.winner === "A" ? cur.slotA : prior.winner === "B" ? cur.slotB : null;
+            } else {
+              const fight = await runCasualD1(env, { aVersionId: cur.slotA, bVersionId: cur.slotB, leaderId: leaderOf(cur.slotA) as string, useBot: false, seed });
+              matchId = fight.matchId;
+              const plan = await planPay(env, leaderOf(cur.slotB) as string, fight.matchId, "b", fight.winner === "B" ? "win" : fight.winner === "A" ? "loss" : "no-contest");
+              await env.DB.batch(plan.stmts as never[]);
+              winnerVersion = fight.winner === "A" ? cur.slotA : fight.winner === "B" ? cur.slotB : null;
+            }
+            games[slot.id] = [...(games[slot.id] ?? []), matchId as string];
+            if (!winnerVersion) {
+              if (guard >= 6) event = reportGame(event, { slotId: slot.id, winnerVersionId: cur.slotA });
+              continue;
+            }
+            event = reportGame(event, { slotId: slot.id, winnerVersionId: winnerVersion });
+          }
+        }
+      }
+      await env.DB.prepare("UPDATE tournaments SET event_json = ?, games_json = ? WHERE id = ?").bind(JSON.stringify(event), JSON.stringify(games), CUP_ID).run();
+      return json({ entered: true, started, event: cupView(event, games) }, 201);
       } catch (err) {
         return json({ error: (err as Error).message }, 404);
       }

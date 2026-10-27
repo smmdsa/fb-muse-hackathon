@@ -75,6 +75,13 @@ export function openStore(path: string): Store {
       created_at INTEGER NOT NULL,
       settle_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS tournaments (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      event_json TEXT NOT NULL,
+      games_json TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS wallet_txns (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       wallet_id TEXT NOT NULL,

@@ -16,7 +16,7 @@
     "@agent-wars/tournaments": "workspace:*"
   },
   "scripts": {
-    "test": "node --test ./test/accounts.test.mjs ./test/autobattle.test.mjs ./test/ids.test.mjs ./test/matches.test.mjs ./test/queue.test.mjs ./test/settle.test.mjs ./test/worker.test.mjs",
+    "test": "node --test ./test/accounts.test.mjs ./test/autobattle.test.mjs ./test/ids.test.mjs ./test/matches.test.mjs ./test/queue.test.mjs ./test/settle.test.mjs ./test/tournaments.test.mjs ./test/worker.test.mjs",
     "dev": "node ./src/dev.mjs"
   }
 }

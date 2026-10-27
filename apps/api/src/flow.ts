@@ -10,6 +10,8 @@ import { buildStandings } from "@agent-wars/leaderboard";
 import { hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
 import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
+import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket } from "@agent-wars/tournaments";
+import type { Championship } from "@agent-wars/tournaments";
 import { pickBot } from "@agent-wars/battle-core";
 import { MAX_PAIR_MEETINGS, pairMeetings } from "@agent-wars/matchmaker";
 import type { History } from "@agent-wars/matchmaker";
@@ -663,6 +665,139 @@ export function autobattleDigest(store: Store, leaderId: string, now = Date.now(
       };
     }),
   };
+}
+
+// One open cup. Bootstrap on first read; organizers gate creation later.
+const CUP_ID = "s1-kickoff";
+
+function readCup(store: Store): { row: Record<string, unknown> | null } {
+  const row = store.db.prepare("SELECT * FROM tournaments WHERE id = ?").get(CUP_ID) as Record<string, unknown> | null;
+  return { row };
+}
+
+function cupView(event: Championship, games: Record<string, string[]>): Record<string, unknown> {
+  return {
+    id: event.id,
+    name: "S1 Kickoff Cup",
+    phase: event.phase,
+    maxPlayers: event.maxPlayers,
+    minAp: event.minAp,
+    registrationCloseAt: event.registrationCloseAt,
+    entries: event.entries.map((e) => ({ leaderId: e.leaderId, lockedVersionId: e.lockedVersionId, registeredAt: e.registeredAt })),
+    bracket: event.bracket,
+    games,
+  };
+}
+
+export function listTournaments(store: Store): Record<string, unknown>[] {
+  const { row } = readCup(store);
+  if (!row) {
+    const now = Date.now();
+    const event = createEvent({ id: CUP_ID, seed: "kickoff-s1", maxPlayers: 8, minAp: 0, registrationCloseAt: now + 30 * 24 * 60 * 60 * 1000 });
+    store.db.prepare("INSERT INTO tournaments (id, name, event_json, games_json, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      CUP_ID, "S1 Kickoff Cup", JSON.stringify(event), "{}", now,
+    );
+    return [{ id: CUP_ID, name: "S1 Kickoff Cup", phase: event.phase, entries: 0, maxPlayers: 8 }];
+  }
+  const event = JSON.parse(row.event_json as string) as Championship;
+  return [{ id: CUP_ID, name: row.name, phase: event.phase, entries: event.entries.length, maxPlayers: event.maxPlayers }];
+}
+
+export function getTournament(store: Store, eventId: string): Record<string, unknown> {
+  if (eventId !== CUP_ID) throw new Error("unknown tournament");
+  listTournaments(store);
+  const { row } = readCup(store);
+  const event = JSON.parse((row as Record<string, unknown>).event_json as string) as Championship;
+  const games = JSON.parse((row as Record<string, unknown>).games_json as string) as Record<string, string[]>;
+  return cupView(event, games);
+}
+
+function leaderOf(event: Championship, versionId: string): string | null {
+  const hit = event.entries.find((e) => e.lockedVersionId === versionId || e.agentVersionId === versionId);
+  return hit ? hit.leaderId : null;
+}
+
+// One bracket game. Seed-keyed: a retry replays nothing twice.
+function playCupGame(
+  store: Store,
+  event: Championship,
+  games: Record<string, string[]>,
+  slotId: string,
+  gameNo: number,
+): { winnerVersionId: string | null; matchId: string } {
+  const slot = (event.bracket as { slots: { id: string; slotA: string | null; slotB: string | null }[] }).slots.find((s) => s.id === slotId) as { id: string; slotA: string; slotB: string };
+  const seed = `tmt-${event.id}-${slotId}-g${gameNo}`;
+  const prior = store.db.prepare("SELECT * FROM matches WHERE seed = ?").get(seed) as Record<string, unknown> | null;
+  if (prior) {
+    return { winnerVersionId: prior.winner === "A" ? slot.slotA : prior.winner === "B" ? slot.slotB : null, matchId: prior.id as string };
+  }
+  const leaderA = leaderOf(event, slot.slotA) as string;
+  const leaderB = leaderOf(event, slot.slotB) as string;
+  const fight = runCasual(store, { aVersionId: slot.slotA, bVersionId: slot.slotB, seed, leaderId: leaderA });
+  const winner = fight.winner;
+  creditAc(store, leaderB, fight.matchId, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
+  return { winnerVersionId: winner === "A" ? slot.slotA : winner === "B" ? slot.slotB : null, matchId: fight.matchId };
+}
+
+// The bracket runs to a champion. Draws replay; five blanks hand slot A.
+function playBracket(store: Store, event: Championship, games: Record<string, string[]>): { event: Championship; games: Record<string, string[]> } {
+  let ev = event;
+  const slots = (ev.bracket as { slots: { id: string }[] }).slots;
+  for (const slot of slots) {
+    let guard = 0;
+    for (;;) {
+      const cur = (ev.bracket as { slots: { id: string; winnerId: string | null }[] }).slots.find((s) => s.id === slot.id) as { id: string; winnerId: string | null };
+      if (cur.winnerId) break;
+      guard += 1;
+      const played = (games[slot.id] ?? []).length;
+      const game = playCupGame(store, ev, games, slot.id, played + 1);
+      games[slot.id] = [...(games[slot.id] ?? []), game.matchId];
+      if (!game.winnerVersionId) {
+        if (guard >= 6) {
+          const first = (ev.bracket as { slots: { id: string; slotA: string }[] }).slots.find((s) => s.id === slot.id) as { id: string; slotA: string };
+          ev = reportGame(ev, { slotId: slot.id, winnerVersionId: first.slotA });
+        }
+        continue;
+      }
+      ev = reportGame(ev, { slotId: slot.id, winnerVersionId: game.winnerVersionId });
+    }
+  }
+  return { event: ev, games };
+}
+
+function saveCup(store: Store, event: Championship, games: Record<string, string[]>): void {
+  store.db.prepare("UPDATE tournaments SET event_json = ?, games_json = ? WHERE id = ?").run(JSON.stringify(event), JSON.stringify(games), CUP_ID);
+}
+
+// Register the active version. The eighth seat locks, seeds, and plays.
+export function registerTournament(
+  store: Store,
+  input: { eventId: string; leaderId: string; versionId: string; now?: number },
+): { entered: boolean; started: boolean; event: Record<string, unknown> } {
+  if (input.eventId !== CUP_ID) throw new Error("unknown tournament");
+  listTournaments(store);
+  const now = input.now ?? Date.now();
+  const { row } = readCup(store);
+  let event = JSON.parse((row as Record<string, unknown>).event_json as string) as Championship;
+  const games = JSON.parse((row as Record<string, unknown>).games_json as string) as Record<string, string[]>;
+  const agent = store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(input.leaderId) as Record<string, unknown> | null;
+  if (!agent) throw new Error("breed a hero first");
+  if (agent.active_version_id !== input.versionId) throw new Error("register your active version");
+  const leader = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(input.leaderId) as Record<string, unknown>;
+  const outcome = registerEntry(event, { leaderId: input.leaderId, agentVersionId: input.versionId, ap: leader.ap as number, now });
+  if (!outcome.ok) throw new Error(outcome.reason);
+  event = addEntry(event, outcome);
+  let started = false;
+  if (event.entries.length >= event.maxPlayers) {
+    event = seedBracket(lock(event));
+    started = true;
+    const done = playBracket(store, event, games);
+    event = done.event;
+    saveCup(store, event, done.games);
+    return { entered: true, started, event: cupView(event, done.games) };
+  }
+  saveCup(store, event, games);
+  return { entered: true, started, event: cupView(event, games) };
 }
 
 // Cancel drops a queued ticket and returns its charge. Settled stays final.
