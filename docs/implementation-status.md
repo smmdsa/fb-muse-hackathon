@@ -87,6 +87,6 @@ Deferred with reasons:
 User checklist before the next session:
 
 - Move `META_SPARK_KEY` plus `META_IMAGE_KEY` to worker `fb-muse-hackathon`, then re-probe compile and breeding.
-- Apply D1 migrations 0004 to 0010 on the production database, then deploy.
+- Apply D1 migrations 0004 to 0011 on the production database, then deploy.
 - Run `pnpm e2e:path` against the local API, plus the 16 hand checks in `docs/manual-test-profile.md`.
 - Push `feat/agent-wars-s1` when ready.
