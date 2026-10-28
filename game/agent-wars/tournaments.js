@@ -92,7 +92,7 @@ function renderGames(cup) {
       p.className = "sub";
       p.textContent = `${slotId} · ${short(matchId)} `;
       const a = document.createElement("a");
-      a.href = `./index.html?replay=${matchId}`;
+      a.href = `./arena.html?replay=${matchId}`;
       a.className = "link-quiet";
       a.textContent = "replay";
       p.appendChild(a);

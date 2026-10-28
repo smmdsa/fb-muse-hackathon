@@ -409,6 +409,15 @@ details.diag { border: 1px dashed var(--line); border-radius: 3px; padding: 8px 
 details.diag summary { cursor: pointer; font-family: var(--body); font-weight: 700; color: var(--dim); }
 .admin-note { border: 1px solid var(--warn); border-radius: 3px; padding: 10px 12px; background: #ffcf5d14; }
 .next-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+/* Arena: lobby views fade between queue and battle. */
+.view { transition: opacity 0.45s ease; }
+.view.fade-out { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .view { transition: none; } }
+.mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.mode-card { border: 1px solid var(--line); border-radius: 3px; background: var(--panel-low); padding: 16px; }
+.mode-card h3 { margin: 4px 0 8px; font-family: var(--display); font-size: 30px; letter-spacing: 0.04em; }
+.mode-card.active { border-color: var(--a); }
+.mode-card .btn-primary { margin-top: 12px; width: 100%; }
 /* Single call to act per panel. Ghost links stay quiet. */
 a.btn-ghost { text-decoration: none; display: inline-block; font-family: var(--body); font-weight: 800; font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase; padding: 11px 15px; }
 a.btn-primary { text-decoration: none; display: inline-block; font-family: var(--body); font-weight: 800; font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase; padding: 11px 15px; }
@@ -456,5 +465,6 @@ a.link-quiet { color: var(--dim); font-size: 14px; }
   .forge-stats { grid-template-columns: 1fr; }
   .forge-name { font-size: 34px; }
   .forge-cta { flex-direction: column; }
+  .mode-grid { grid-template-columns: 1fr; }
   .score { grid-template-columns: 1fr; text-align: left; }
 }
