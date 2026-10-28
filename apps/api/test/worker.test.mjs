@@ -576,3 +576,43 @@ describe("worker replay", () => {
     assert.ok(body.replay.frames.length > 10);
   });
 });
+
+describe("worker ftue", () => {
+  it("pays each guided stage once", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0010_reports", "0011_version_labels"]) {
+      db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
+    }
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
+    const wcall = (method, path, body, token) => entry.fetch(
+      new Request(`http://local${path}`, {
+        method,
+        headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+      wenv,
+    ).then(async (r) => ({ status: r.status, json: await r.json() }));
+    const s = await wcall("POST", "/v1/auth/session", { handle: "wf" });
+    const token = s.json.token;
+    const fresh = await wcall("GET", "/v1/ftue", null, token);
+    assert.equal(fresh.status, 200);
+    assert.ok(fresh.json.stages.every((x) => x.done === false));
+    const early = await wcall("POST", "/v1/ftue/claim", { stage: 1 }, token);
+    assert.equal(early.status, 422);
+    const bred = await wcall("POST", "/v1/agents", { name: "Wf-1", concept: "worker rookie" }, token);
+    assert.equal(bred.status, 201);
+    const one = await wcall("POST", "/v1/ftue/claim", { stage: 1 }, token);
+    assert.equal(one.json.rewarded, true);
+    assert.equal(one.json.ac, 200);
+    const replay = await wcall("POST", "/v1/ftue/claim", { stage: 1 }, token);
+    assert.equal(replay.json.rewarded, false);
+    assert.equal(replay.json.ac, 200);
+    const draft = await wcall("POST", `/v1/agents/${bred.json.agentId}/policies/compile`, { prompt: "hold the center patiently" }, token);
+    await wcall("POST", `/v1/agents/${bred.json.agentId}/policies/install`, { versionId: draft.json.versionId }, token);
+    const two = await wcall("POST", "/v1/ftue/claim", { stage: 2 }, token);
+    assert.equal(two.json.rewarded, true);
+    assert.equal(two.json.ac, 400);
+    const dash = await wcall("GET", `/v1/agents/${bred.json.agentId}/dashboard`, null, token);
+    assert.equal(dash.json.ftue.filter((x) => x.done).length, 2);
+  });
+});

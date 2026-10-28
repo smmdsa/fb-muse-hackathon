@@ -6,7 +6,7 @@ import { timingSafeEqual } from "node:crypto";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, createAgent, createTournament, dashboard, deleteVersion, energyFor, energyView, equipItem, evolutionLab, forceDeleteVersion, getLeader, getTournament, getVersion, installVersion, listTournaments, MAX_PROMPT, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, renameVersion, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
+import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, claimFtue, createAgent, createTournament, dashboard, deleteVersion, energyFor, energyView, equipItem, evolutionLab, forceDeleteVersion, ftueStatus, getLeader, getTournament, getVersion, installVersion, listTournaments, MAX_PROMPT, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, renameVersion, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -475,6 +475,24 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         } catch (err) {
           const message = (err as Error).message;
           send(res, message.startsWith("unknown item") ? 404 : 422, { error: message });
+        }
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/v1/ftue") {
+        send(res, 200, ftueStatus(ctx.store, me.id as string));
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/ftue/claim") {
+        const stage = typeof body.stage === "number" ? body.stage : NaN;
+        if (!Number.isInteger(stage)) {
+          send(res, 400, { error: "stage is required" });
+          return;
+        }
+        try {
+          send(res, 200, claimFtue(ctx.store, me.id as string, stage));
+        } catch (err) {
+          const message = (err as Error).message;
+          send(res, message.startsWith("unknown ftue stage") ? 400 : 422, { error: message });
         }
         return;
       }

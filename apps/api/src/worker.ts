@@ -309,6 +309,38 @@ async function autoDigestD1(env: WorkerEnv, leaderId: string, now: number): Prom
   };
 }
 
+// Guided first session. Three acts, one AC reward each. Same contract as flow.ts.
+const FTUE_REWARD_AC = 200;
+const FTUE_STAGES = [
+  { stage: 1, id: "create", title: "Create agent", hint: "Identity and portrait." },
+  { stage: 2, id: "program", title: "Program chip", hint: "Words become behavior." },
+  { stage: 3, id: "arena", title: "Enter arena", hint: "Queue and climb." },
+];
+
+async function ftueDone(env: WorkerEnv, leaderId: string, stage: number): Promise<boolean> {
+  const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(leaderId).first<Record<string, unknown>>();
+  if (!agent) return false;
+  if (stage === 1) return true;
+  if (stage === 2) return agent.active_version_id != null;
+  if (stage === 3) {
+    const bout = await env.DB.prepare(
+      "SELECT 1 FROM matches m JOIN versions v ON v.id IN (m.a_version, m.b_version) WHERE v.agent_id = ? LIMIT 1",
+    ).bind(agent.id as string).first<Record<string, unknown>>();
+    return bout != null;
+  }
+  return false;
+}
+
+async function ftueStages(env: WorkerEnv, leaderId: string): Promise<Record<string, unknown>[]> {
+  const { results: keys } = await env.DB.prepare("SELECT key FROM wallet_keys WHERE wallet_id = ?").bind(leaderId).all<{ key: string }>();
+  const claimed = new Set(keys.map((k) => k.key));
+  const out: Record<string, unknown>[] = [];
+  for (const s of FTUE_STAGES) {
+    out.push({ ...s, done: await ftueDone(env, leaderId, s.stage), claimed: claimed.has(`ftue:${s.stage}`) });
+  }
+  return out;
+}
+
 // The dashboard serves one hero with chip stats per version.
 async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string): Promise<Record<string, unknown>> {
   const agent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
@@ -406,6 +438,7 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
     energy: energyView(await energyFor(env, leaderId)),
     versions,
     history,
+    ftue: await ftueStages(env, leaderId),
   };
 }
 
@@ -1343,6 +1376,31 @@ export default {
       } catch (err) {
         return json({ error: (err as Error).message }, 422);
       }
+    }
+    if (request.method === "GET" && url.pathname === "/v1/ftue") {
+      return json({ reward: FTUE_REWARD_AC, stages: await ftueStages(env, me.id as string) }, 200);
+    }
+    if (request.method === "POST" && url.pathname === "/v1/ftue/claim") {
+      const body = await readBody(request);
+      if (body === null) return json({ error: "bad json" }, 400);
+      const stage = typeof body.stage === "number" ? body.stage : NaN;
+      if (!Number.isInteger(stage)) return json({ error: "stage is required" }, 400);
+      const def = FTUE_STAGES.find((s) => s.stage === stage);
+      if (!def) return json({ error: `unknown ftue stage ${stage}` }, 400);
+      if (!(await ftueDone(env, me.id as string, stage))) return json({ error: `ftue stage ${stage} is not complete yet` }, 422);
+      const key = `ftue:${stage}`;
+      const first = await env.DB.prepare("INSERT OR IGNORE INTO wallet_keys (wallet_id, key) VALUES (?, ?)").bind(me.id as string, key).run() as unknown as { changes?: number; meta?: { changes?: number } };
+      const inserted = ((first.changes ?? first.meta?.changes ?? 0) > 0);
+      let rewarded = false;
+      if (inserted) {
+        await env.DB.prepare("UPDATE leaders SET ac = ac + ? WHERE id = ?").bind(FTUE_REWARD_AC, me.id as string).run();
+        await env.DB.prepare("INSERT OR IGNORE INTO wallet_txns (wallet_id, idem_key, currency, delta, reason, at) VALUES (?, ?, ?, ?, ?, ?)").bind(
+          me.id as string, key, "AC", FTUE_REWARD_AC, `ftue stage ${stage}`, Date.now(),
+        ).run();
+        rewarded = true;
+      }
+      const leader = await env.DB.prepare("SELECT ac FROM leaders WHERE id = ?").bind(me.id as string).first<Record<string, unknown>>();
+      return json({ stage, id: def.id, reward: FTUE_REWARD_AC, rewarded, ac: leader?.ac, stages: await ftueStages(env, me.id as string) }, 200);
     }
     if (request.method === "POST" && url.pathname === "/v1/armory/equip") {
       try {
