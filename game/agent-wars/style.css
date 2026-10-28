@@ -1,18 +1,19 @@
 :root {
-  --bg: #0a0e1a;
-  --panel: #10162c;
-  --panel-low: #0c1226;
-  --panel-high: #162044;
-  --line: #2a3560;
-  --ink: #e8ecff;
-  --dim: #9aa6d0;
-  --a: #37e0ff;
+  --bg: #090e14;
+  --panel: #131f28;
+  --panel-low: #0c151b;
+  --panel-high: #19262e;
+  --line: #2b424c;
+  --ink: #eaf4f2;
+  --dim: #9aafb2;
+  --a: #80f6e7;
+  --a-hover: #37e0ff;
   --a-ink: #04121a;
-  --b: #ff5d7a;
+  --b: #fa9587;
   --b-ink: #22060d;
-  --gold: #ffcf5d;
+  --gold: #edc17e;
   --good: #52e0a0;
-  --warn: #ffcf5d;
+  --warn: #edc17e;
   --outline: #05070f;
   --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
   --body: "Segoe UI", system-ui, sans-serif;
@@ -63,7 +64,7 @@ h2 {
 .sub { margin: 8px 0 0; color: var(--dim); }
 
 .panel {
-  background: var(--panel);
+  background: linear-gradient(140deg, #19262e, #101920);
   border: 1px solid var(--line);
   border-radius: 3px;
   padding: 16px;
@@ -256,8 +257,6 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
-.pill.link { color: var(--a); text-decoration: none; }
-.pill.link:hover { background: #37e0ff22; }
 .pill.live { border-color: var(--good); color: var(--good); }
 
 .hero { display: flex; gap: 16px; align-items: start; margin-top: 12px; }
@@ -350,6 +349,9 @@ details.diag summary { cursor: pointer; font-family: var(--display); color: var(
 .next-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 /* Single call to act per panel. Ghost links stay quiet. */
 a.btn-ghost { text-decoration: none; display: inline-block; }
+a.btn-primary { text-decoration: none; display: inline-block; }
+.hero-banner { display: flex; justify-content: space-between; align-items: start; gap: 15px; }
+.hero-banner h2 { font-size: 38px; line-height: 1; letter-spacing: 0.01em; margin: 8px 0; }
 a.link-quiet { color: var(--dim); font-size: 14px; }
 @media (max-width: 640px) {
   .command-grid { grid-template-columns: 1fr; }

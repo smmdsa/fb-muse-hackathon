@@ -8,9 +8,22 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="./style.css" />
+<link rel="stylesheet" href="./shell.css" />
 </head>
 <body>
-<main class="shell">
+<div class="app">
+<aside class="side">
+<p class="logo">AGENT<span>///</span>WARS</p>
+<p class="micro">The robot combat league</p>
+<nav class="nav" aria-label="Navegación">
+<a href="./index.html"><b>⌂</b> MANDO</a>
+<a href="./tournaments.html"><b>⚑</b> CAMPEONATOS</a>
+</nav>
+<div class="season"><span class="micro">Temporada 01</span><strong>La forja</strong><small>Tu estrategia empieza aquí.</small></div>
+</aside>
+<div>
+<div class="crumb"><span>AGENT WARS / <strong>ORGANIZER</strong></span><span>COMMANDER</span></div>
+<main class="shell content">
 <header class="top">
 <div>
 <p class="sub">Restricted area</p>
@@ -18,8 +31,7 @@
 <p class="sub">Drafts, locks, and live events.</p>
 </div>
 <div class="pills">
-<a class="pill link" href="./index.html">command</a>
-<a class="pill link" href="./tournaments.html">cup</a>
+<span class="pill">organizer</span>
 </div>
 </header>
 <section class="panel" id="admin-card">
@@ -44,6 +56,8 @@
 <div id="events"></div>
 </section>
 </main>
+</div>
+</div>
 <script src="./admin.js"></script>
 </body>
 </html>
