@@ -15,8 +15,8 @@
   --good: #52e0a0;
   --warn: #edc17e;
   --outline: #05070f;
-  --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
-  --body: "Segoe UI", system-ui, sans-serif;
+  --display: Impact, "Arial Narrow", sans-serif;
+  --body: system-ui, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -26,7 +26,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--body);
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -47,9 +47,9 @@ body {
 h1 {
   margin: 0;
   font-family: var(--display);
-  font-size: 44px;
+  font-size: 38px;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: 1px;
   line-height: 1;
 }
 
@@ -80,12 +80,14 @@ h2 {
 }
 
 button {
-  font-family: var(--display);
-  font-weight: 600;
-  font-size: 15px;
-  letter-spacing: 0.02em;
+  font-family: var(--body);
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
   border-radius: 2px;
-  padding: 10px 18px;
+  padding: 11px 15px;
+  min-height: 43px;
   cursor: pointer;
 }
 
@@ -112,26 +114,28 @@ input:focus-visible {
   border: 1px solid var(--a);
 }
 
-.btn-ghost:hover { background: #37e0ff22; }
+.btn-ghost:hover { background: #80f6e722; border-color: var(--a); }
 
 .btn-ghost:disabled { opacity: 0.35; cursor: default; }
 
 input {
-  background: var(--panel-low);
+  background: #0a141b;
   color: var(--ink);
-  border: 1px solid var(--line);
+  border: 1px solid #435c65;
   border-radius: 2px;
-  padding: 10px;
-  font-size: 15px;
+  padding: 12px;
+  min-height: 44px;
+  font-size: 14px;
 }
 
 textarea {
-  background: var(--panel-low);
+  background: #0a141b;
   color: var(--ink);
-  border: 1px solid var(--line);
+  border: 1px solid #435c65;
   border-radius: 2px;
-  padding: 10px;
-  font-size: 15px;
+  padding: 12px;
+  min-height: 44px;
+  font-size: 14px;
   font-family: inherit;
   width: 100%;
   box-sizing: border-box;
@@ -309,6 +313,10 @@ table.chips th { font-family: var(--display); color: var(--dim); font-weight: 60
 
 @media (max-width: 640px) {
   h1 { font-size: 32px; }
+  .hero { height: 300px; }
+  .hero-copy { padding: 20px; }
+  .hero-copy h2 { font-size: 43px; }
+  .bot { width: 58%; right: -8%; }
   .shell { padding: 12px 16px 24px; }
   .row { flex-direction: column; align-items: stretch; }
   .hero { flex-direction: column; }
@@ -348,10 +356,16 @@ details.diag summary { cursor: pointer; font-family: var(--display); color: var(
 .admin-note { border: 1px solid var(--warn); border-radius: 3px; padding: 10px 12px; background: #ffcf5d14; }
 .next-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 /* Single call to act per panel. Ghost links stay quiet. */
-a.btn-ghost { text-decoration: none; display: inline-block; }
-a.btn-primary { text-decoration: none; display: inline-block; }
-.hero-banner { display: flex; justify-content: space-between; align-items: start; gap: 15px; }
-.hero-banner h2 { font-size: 38px; line-height: 1; letter-spacing: 0.01em; margin: 8px 0; }
+a.btn-ghost { text-decoration: none; display: inline-block; font-family: var(--body); font-weight: 800; font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase; padding: 11px 15px; }
+a.btn-primary { text-decoration: none; display: inline-block; font-family: var(--body); font-weight: 800; font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase; padding: 11px 15px; }
+.eyebrow { color: var(--a); font-size: 10px; letter-spacing: 2px; font-weight: 900; text-transform: uppercase; margin: 0; }
+.hero { height: 345px; overflow: hidden; padding: 0; position: relative; background: radial-gradient(ellipse at 73% 45%, #31575b, #162d35 40%, #101c24 75%); }
+.hero:before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, #111d25ef, transparent 85%), repeating-linear-gradient(90deg, transparent 0 59px, #ffffff0a 60px), repeating-linear-gradient(0deg, transparent 0 59px, #ffffff08 60px); }
+.hero-copy { position: relative; z-index: 2; padding: 28px; display: flex; flex-direction: column; align-items: flex-start; width: 60%; height: 100%; }
+.hero-copy h2 { font-family: var(--display); font-size: 56px; line-height: 1; letter-spacing: 1px; margin: 28px 0 7px; }
+.hero-copy p { max-width: 250px; }
+.hero-copy .next-actions { margin-top: auto; }
+.bot { position: absolute; right: 3%; bottom: -7%; height: 110%; width: 50%; filter: drop-shadow(0 12px 25px #0009); }
 a.link-quiet { color: var(--dim); font-size: 14px; }
 @media (max-width: 640px) {
   .command-grid { grid-template-columns: 1fr; }
