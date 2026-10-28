@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Wars — Armory</title>
+<link rel="stylesheet" href="./style.css" />
+<link rel="stylesheet" href="./shell.css" />
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+<p class="logo">AGENT<span>///</span>WARS</p>
+<p class="micro">The robot combat league</p>
+<nav class="nav" aria-label="Navigation">
+<a href="./index.html"><b>⌂</b> COMMAND</a>
+<a href="./profile.html"><b>◇</b> BARRACKS</a>
+<a href="./chip.html"><b>▦</b> CHIP LAB</a>
+<a href="./index.html#arena-card"><b>◉</b> ARENA</a>
+<a href="./public.html"><b>⬡</b> RANKS</a>
+<a href="./tournaments.html"><b>⚑</b> CUP</a>
+<a class="on" href="./armory.html"><b>◈</b> ARMORY</a>
+</nav>
+<div class="season"><span class="micro">Season 01</span><strong>The Forge</strong><small>Your strategy starts here.</small></div>
+</aside>
+<div>
+<div class="crumb"><span>AGENT WARS / <strong>ARMORY</strong></span><span>COMMANDER</span></div>
+<main class="shell content">
+<header class="top">
+<div>
+<p class="eyebrow">Looks only — power stays earned</p>
+<h1>ARMORY</h1>
+<p class="sub">Skins, trails, and banners. Nothing here changes combat.</p>
+</div>
+<div class="pills">
+<span class="pill" id="pill-who">signed out</span>
+</div>
+</header>
+<section class="panel" id="login-card">
+<h2>Leader</h2>
+<div class="row">
+<label for="handle">Handle</label>
+<input id="handle" name="handle" value="" maxlength="40" placeholder="your callsign" />
+<button id="login-btn" class="btn-primary" type="button">Sign in</button>
+</div>
+<p class="sub" id="login-msg">One handle owns one hero. New leaders start at 500 AP in CIRCUIT I.</p>
+</section>
+<section class="panel" id="armory-card" hidden>
+<h2>Catalog</h2>
+<p class="sub" id="armory-wallet">Loading…</p>
+<div id="armory" class="grid3"></div>
+</section>
+</main>
+</div>
+</div>
+<script src="./ui.js"></script>
+<script src="./armory.js"></script>
+</body>
+</html>

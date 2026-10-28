@@ -15,11 +15,11 @@
 <nav class="nav" aria-label="Navigation">
 <a href="./index.html"><b>⌂</b> COMMAND</a>
 <a class="on" href="./profile.html"><b>◇</b> BARRACKS</a>
-<a href="./profile.html#train-card"><b>▦</b> CHIP LAB</a>
+<a href="./chip.html"><b>▦</b> CHIP LAB</a>
 <a href="./index.html#arena-card"><b>◉</b> ARENA</a>
 <a href="./public.html"><b>⬡</b> RANKS</a>
 <a href="./tournaments.html"><b>⚑</b> CUP</a>
-<a href="./profile.html#armory-card"><b>◈</b> ARMORY</a>
+<a href="./armory.html"><b>◈</b> ARMORY</a>
 </nav>
 <div class="season"><span class="micro">Season 01</span><strong>The Forge</strong><small>Your strategy starts here.</small></div>
 </aside>
@@ -43,8 +43,8 @@
 <span class="pill">ILLUSTRATED PORTRAIT</span>
 <p class="sub">One agent. Your strategy. The arena waits.</p>
 <div class="next-actions">
-<a class="btn-primary" href="#login-card">Sign in to breed</a>
-<a class="btn-ghost" href="./index.html#arena-card">Watch a fight</a>
+<a class="btn-primary" id="hero-primary" href="#login-card">Sign in to breed</a>
+<a class="btn-ghost" id="hero-secondary" href="./index.html#arena-card">Watch a fight</a>
 </div>
 </div>
 <div class="bot"><svg viewBox="0 0 400 470" width="100%" height="100%" role="img" aria-label="Conceptual robot illustration"><defs><linearGradient id="metal2" x2="1" y2="1"><stop stop-color="#91a9aa"/><stop offset=".4" stop-color="#405a60"/><stop offset=".75" stop-color="#1a2d34"/><stop offset="1" stop-color="#779190"/></linearGradient><filter id="shine2"><feGaussianBlur stdDeviation="5" result="a"/><feMerge><feMergeNode in="a"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><ellipse cx="200" cy="428" rx="150" ry="20" fill="#000" opacity=".5"/><path d="M120 244 75 257 37 337 53 378 94 372 130 302M280 244 325 257 363 337 347 378 306 372 270 302" fill="url(#metal2)" stroke="#8ea9a7" stroke-width="3"/><path d="M143 300 130 418 166 445 195 428 200 339 205 428 234 445 270 418 257 300" fill="url(#metal2)" stroke="#91aaa7" stroke-width="3"/><path d="M125 227 148 203 252 203 275 227 266 329 235 357 165 357 134 329Z" fill="url(#metal2)" stroke="#b1c9c5" stroke-width="3"/><path d="M151 236 180 220 220 220 249 236 236 293 200 308 164 293Z" fill="#263d42" stroke="#87a6a2" stroke-width="3"/><path d="M200 245 219 265 200 284 181 265Z" fill="#8cfff0" filter="url(#shine2)"/><path d="M147 105 163 69 237 69 253 105 262 154 245 204 225 218 175 218 155 204 138 154Z" fill="url(#metal2)" stroke="#bed2cd" stroke-width="3"/><path d="M146 128 171 117 229 117 254 128 245 159 220 172 180 172 155 159Z" fill="#10272b" stroke="#769694" stroke-width="3"/><path d="M157 132 181 126 219 126 243 132 236 149 216 157 184 157 164 149Z" fill="#8affec" filter="url(#shine2)"/><path d="M171 184 200 195 229 184 222 202 178 202Z" fill="#102329"/><path d="M164 86 175 73 225 73 236 86" fill="none" stroke="#cce1db" stroke-width="4"/><text x="184" y="341" fill="#b8dad5" font-size="11" font-family="monospace">AW-01</text></svg></div>
@@ -85,6 +85,9 @@
 </div>
 </div>
 </div>
+<div class="row">
+<button id="chip-slot" class="chip-slot" type="button">▦ CHIP: —</button>
+</div>
 <div class="row" id="breed-row" hidden>
 <label for="hero-name-in">Name</label>
 <input id="hero-name-in" name="hero-name-in" value="" maxlength="60" placeholder="Wasp" />
@@ -92,56 +95,17 @@
 <input id="hero-concept-in" name="hero-concept-in" value="" maxlength="280" placeholder="fast striker, kites at range" />
 <button id="breed-btn" class="btn-primary" type="button">Breed hero</button>
 </div>
-<p class="sub">Try: “scarred veteran, rust-red plates” or “sleek scout, azure visor”.</p>
+<p class="sub" id="breed-hint">Try: “scarred veteran, rust-red plates” or “sleek scout, azure visor”.</p>
 <p class="sub" id="breed-msg" hidden>Breeding paints the portrait in the house style. No image key on the server means a faceless hero.</p>
 <p class="sub" id="hero-art-status" hidden></p>
 <button id="retry-btn" class="btn-ghost" type="button" hidden>Retry portrait</button>
 <div class="next-actions" id="hero-next" hidden>
-<a class="btn-primary" href="#train-card">Program first chip</a>
+<a class="btn-primary" id="hero-next-link" href="./chip.html">Program first chip</a>
 </div>
 <div class="row">
 <button id="share-btn" class="btn-ghost" type="button">Copy public card link</button>
 </div>
 <p class="sub" id="share-msg" hidden>Link copied. The card shows rank and record only.</p>
-</section>
-<section class="panel" id="train-card" hidden>
-<h2>Chip workbench</h2>
-<p class="sub">Words become behavior. Write a line or paragraphs — detail wins fights. Compile mints a draft. Install sends one draft to the arena.</p>
-<label for="prompt">Battle plan</label>
-<textarea id="prompt" name="prompt" rows="5" maxlength="2000" placeholder="My robot is a patient ambusher. It holds the center early and saves energy. When the foe closes under 6 meters it dashes sideways and fires. Below a quarter of health it retreats behind cover and only peeks to shoot."></textarea>
-<p class="sub"><span id="prompt-count">0</span>/2000</p>
-<div class="row">
-<button id="compile-btn" class="btn-primary" type="button">Compile</button>
-<button id="fight-btn" class="btn-ghost" type="button" disabled>Training fight</button>
-</div>
-<p class="sub" id="train-msg">Compile turns words into chips. Fight runs the version against the benchmark.</p>
-</section>
-<section class="panel" id="lab-card" hidden>
-<h2>Evolution Lab</h2>
-<p class="sub">Two drafts fight the benchmark on mirrored seeds. Small samples refuse a verdict. Drafts stay drafts — install the winner below.</p>
-<div class="row">
-<label for="lab-bouts">Bouts</label>
-<input id="lab-bouts" name="lab-bouts" value="10" maxlength="2" inputmode="numeric" />
-<button id="lab-btn" class="btn-primary" type="button">Run A/B</button>
-</div>
-<label for="prompt-a">Plan A</label>
-<textarea id="prompt-a" name="prompt-a" rows="4" maxlength="2000" placeholder="Rush them down up close, never stop moving."></textarea>
-<p class="sub"><span id="prompt-a-count">0</span>/2000</p>
-<label for="prompt-b">Plan B</label>
-<textarea id="prompt-b" name="prompt-b" rows="4" maxlength="2000" placeholder="Hold the center patiently, save energy, punish mistakes."></textarea>
-<p class="sub"><span id="prompt-b-count">0</span>/2000</p>
-<p class="sub" id="lab-msg"></p>
-<div id="lab-out"></div>
-</section>
-<section class="panel" id="dash-card" hidden>
-<h2>Chips dashboard</h2>
-<div id="dash"></div>
-</section>
-<section class="panel" id="armory-card" hidden>
-<h2>Armory</h2>
-<p class="sub" id="armory-wallet">Loading…</p>
-<div id="armory"></div>
-<p class="sub">Looks only. Nothing here changes combat.</p>
 </section>
 <section class="panel" id="season-card" hidden>
 <h2>Past seasons</h2>
