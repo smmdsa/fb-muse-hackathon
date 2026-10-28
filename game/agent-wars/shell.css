@@ -7,7 +7,7 @@
   min-height: 100vh;
 }
 
-.side {
+.sidebar {
   background: #0c151b;
   border-right: 1px solid var(--line);
   padding: 24px 14px;
@@ -19,9 +19,9 @@
 }
 
 .logo {
-  font-family: var(--display);
+  font-family: var(--body);
   font-size: 23px;
-  font-weight: 700;
+  font-weight: 900;
   letter-spacing: -1px;
   font-style: italic;
   padding: 0 9px;
@@ -47,8 +47,8 @@
   border: 0;
   background: transparent;
   color: var(--dim);
-  font-family: var(--display);
-  font-weight: 600;
+  font-family: var(--body);
+  font-weight: 700;
   font-size: 12px;
   padding: 13px;
   border-radius: 4px;
@@ -110,7 +110,7 @@
 
 @media (max-width: 700px) {
   .app { display: block; }
-  .side { height: auto; position: static; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .sidebar { height: auto; position: static; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
   .micro, .season { display: none; }
   .nav { display: flex; overflow: auto; }
   .nav a { white-space: nowrap; }
