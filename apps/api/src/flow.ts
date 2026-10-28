@@ -597,6 +597,7 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
     energy: energyView(energyFor(store, leaderId)),
     versions,
     history: fightHistory(store, versionRows.map((v) => v.id as string)),
+    ftue: ftueStatus(store, leaderId).stages,
   };
 }
 
@@ -1124,6 +1125,66 @@ export function equipItem(store: Store, leaderId: string, slot: string, itemId: 
   const next = { ...equipped, [slot]: itemId };
   store.db.prepare("UPDATE leaders SET equipped_json = ? WHERE id = ?").run(JSON.stringify(next), leaderId);
   return armoryView(store, leaderId);
+}
+
+// Guided first session. Three acts, one AC reward each. The client shows
+// progress; the server owns the truth and pays each stage once.
+export const FTUE_REWARD_AC = 200;
+export const FTUE_STAGES = [
+  { stage: 1, id: "create", title: "Create agent", hint: "Identity and portrait." },
+  { stage: 2, id: "program", title: "Program chip", hint: "Words become behavior." },
+  { stage: 3, id: "arena", title: "Enter arena", hint: "Queue and climb." },
+];
+
+function ftueAgent(store: Store, leaderId: string): Record<string, unknown> | null {
+  return store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(leaderId) as Record<string, unknown> | null;
+}
+
+function ftueDone(store: Store, leaderId: string, stage: number): boolean {
+  const agent = ftueAgent(store, leaderId);
+  if (!agent) return false;
+  if (stage === 1) return true;
+  if (stage === 2) return agent.active_version_id != null;
+  if (stage === 3) {
+    const bout = store.db.prepare(
+      "SELECT 1 FROM matches m JOIN versions v ON v.id IN (m.a_version, m.b_version) WHERE v.agent_id = ? LIMIT 1",
+    ).get(agent.id as string);
+    return bout != null;
+  }
+  return false;
+}
+
+export function ftueStatus(store: Store, leaderId: string): Record<string, unknown> {
+  const keys = new Set(
+    (store.db.prepare("SELECT key FROM wallet_keys WHERE wallet_id = ?").all(leaderId) as { key: string }[]).map((k) => k.key),
+  );
+  return {
+    reward: FTUE_REWARD_AC,
+    stages: FTUE_STAGES.map((s) => ({
+      ...s,
+      done: ftueDone(store, leaderId, s.stage),
+      claimed: keys.has(`ftue:${s.stage}`),
+    })),
+  };
+}
+
+// One payout per stage, ever. A replayed claim reports without paying.
+export function claimFtue(store: Store, leaderId: string, stage: number, now = Date.now()): Record<string, unknown> {
+  const def = FTUE_STAGES.find((s) => s.stage === stage);
+  if (!def) throw new Error(`unknown ftue stage ${stage}`);
+  if (!ftueDone(store, leaderId, stage)) throw new Error(`ftue stage ${stage} is not complete yet`);
+  const key = `ftue:${stage}`;
+  const res = store.db.prepare("INSERT OR IGNORE INTO wallet_keys (wallet_id, key) VALUES (?, ?)").run(leaderId, key) as { changes: number };
+  let rewarded = false;
+  if (res.changes > 0) {
+    store.db.prepare("UPDATE leaders SET ac = ac + ? WHERE id = ?").run(FTUE_REWARD_AC, leaderId);
+    store.db.prepare("INSERT INTO wallet_txns (wallet_id, idem_key, currency, delta, reason, at) VALUES (?, ?, ?, ?, ?, ?)").run(
+      leaderId, key, "AC", FTUE_REWARD_AC, `ftue stage ${stage}`, now,
+    );
+    rewarded = true;
+  }
+  const leader = store.db.prepare("SELECT ac FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown>;
+  return { stage, id: def.id, reward: FTUE_REWARD_AC, rewarded, ac: leader.ac, stages: (ftueStatus(store, leaderId).stages as unknown[]) };
 }
 
 // Past seasons, newest first. Rollover writes; this only reads.

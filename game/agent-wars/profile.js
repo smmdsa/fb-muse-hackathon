@@ -5,6 +5,8 @@
 const $ = (id) => document.getElementById(id);
 const TOKEN_KEY = "aw_token";
 const HANDLE_KEY = "aw_handle";
+const TOUR_KEY = "aw_tour_seen";
+const STEP_IDS = { 1: "w-agent", 2: "w-chip", 3: "w-arena" };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
 let agentId = "";
@@ -97,14 +99,15 @@ async function refresh() {
   $("hero-shield").src = shieldFor(d.leader.tier);
   show($("hero-shield"), true);
   $("hero-ap").textContent = `${d.leader.ap} AP — ${d.leader.tier}${d.leader.division ? " " + d.leader.division : ""}`;
-  $("hero-ac").textContent = `${d.leader.ac} AC in the wallet`;
+  $("hero-ac").textContent = `${d.leader.ac} AC`;
   const mins = Math.ceil(d.energy.nextRegenMs / 60000);
-  $("hero-energy").textContent = d.energy.energy >= d.energy.energyMax
-    ? `energy ${d.energy.energy}/${d.energy.energyMax} — full`
-    : `energy ${d.energy.energy}/${d.energy.energyMax} — +1 in ${mins || 1} min`;
+  const full = d.energy.energy >= d.energy.energyMax;
+  $("hero-energy").textContent = `${d.energy.energy}/${d.energy.energyMax}`;
+  $("hero-energy-sub").textContent = full ? "energy — full" : `energy — +1 in ${mins || 1} min`;
+  renderPips($("hero-energy-pips"), d.energy.energy, d.energy.energyMax);
   const versions = d.versions || [];
   const hasActive = Boolean(d.agent && d.agent.activeVersionId);
-  markWelcome(Boolean(d.agent), versions.length > 0, hasActive);
+  markWelcome(d);
   latestDash = d;
   paintBreedState(true);
   paintHeroActions(versions.length > 0, hasActive);
@@ -114,14 +117,27 @@ async function refresh() {
   await renderSeasons();
 }
 
-function markWelcome(hasAgent, hasDraft, hasActive) {
-  const set = (id, cls) => {
-    const el = $(id);
-    if (el) el.className = `step ${cls}`;
-  };
-  set("w-agent", hasAgent ? "done" : "next");
-  set("w-chip", !hasAgent ? "" : hasActive || hasDraft ? "done" : "next");
-  set("w-arena", hasAgent && hasActive ? "done" : "");
+// The path card mirrors server truth: done / next / claimable / claimed.
+function markWelcome(d) {
+  const hasAgent = Boolean(d && d.agent);
+  const hasDraft = Boolean(d && d.versions && d.versions.length > 0);
+  const stages = (d && d.ftue) || [
+    { stage: 1, done: hasAgent, claimed: false },
+    { stage: 2, done: false, claimed: false },
+    { stage: 3, done: false, claimed: false },
+  ];
+  const firstOpen = stages.find((s) => !s.done);
+  for (const s of stages) {
+    const box = $(STEP_IDS[s.stage]);
+    if (!box) continue;
+    box.classList.toggle("done", Boolean(s.done));
+    box.classList.toggle("next", Boolean(firstOpen && firstOpen.stage === s.stage && token));
+    box.classList.toggle("claimed", Boolean(s.claimed));
+    const prize = box.querySelector(".prize");
+    if (prize) prize.textContent = s.claimed ? "✓ +200 AC" : s.done ? "Ready to claim" : "200 AC";
+    const btn = $(`claim-${s.stage}`);
+    if (btn) show(btn, Boolean(token && s.done && !s.claimed));
+  }
   const next = $("hero-next");
   const link = $("hero-next-link");
   if (next && link) {
@@ -129,12 +145,135 @@ function markWelcome(hasAgent, hasDraft, hasActive) {
       show(next, false);
     } else if (!hasDraft) {
       link.textContent = "Program first chip";
+      link.href = "./chip.html";
       show(next, true);
     } else {
       link.textContent = "Go to Chip Lab";
+      link.href = "./chip.html";
       show(next, true);
     }
   }
+}
+
+async function claimStage(stage) {
+  const btn = $(`claim-${stage}`);
+  if (btn) btn.disabled = true;
+  const r = await call("POST", "/v1/ftue/claim", { stage });
+  if (btn) btn.disabled = false;
+  if (r.status !== 200) {
+    toastSay(`Claim failed: ${r.data.error || r.status}.`);
+    return;
+  }
+  if (r.data.rewarded) {
+    toastSay(`Act ${stage} complete — +${r.data.reward} AC in the wallet.`);
+    const box = $(STEP_IDS[stage]);
+    if (box) {
+      box.classList.add("paid");
+      window.setTimeout(() => box.classList.remove("paid"), 1600);
+    }
+  } else {
+    toastSay("Already claimed.");
+  }
+  if (agentId) await refresh();
+  else {
+    const s = await call("GET", "/v1/ftue");
+    if (s.status === 200) markWelcome({ agent: null, versions: [], ftue: s.data.stages });
+  }
+}
+
+function tourSteps() {
+  const d = latestDash;
+  const hasAgent = Boolean(d && d.agent);
+  const hasActive = Boolean(d && d.agent && d.agent.activeVersionId);
+  const steps = [
+    {
+      target: null,
+      eyebrow: "Guided tour",
+      title: "YOUR PATH TO THE ARENA",
+      body: "Three acts take you from rookie to ranked. Each act pays 200 AC. This tour shows where each act lives.",
+    },
+  ];
+  if (!token) {
+    steps.push(
+      {
+        target: "#login-card",
+        eyebrow: "Act 1 of 3",
+        title: "SIGN IN FIRST",
+        body: "One handle owns one hero. Sign in here, then breed your fighter in the forge below.",
+      },
+      {
+        target: "#welcome-card",
+        eyebrow: "Rewards",
+        title: "200 AC PER ACT",
+        body: "Finish each act, then claim its reward on this card. Sign in and the full tour unlocks.",
+      },
+    );
+    return steps;
+  }
+  steps.push(
+    hasAgent
+      ? {
+        target: "#hero-card",
+        eyebrow: "Act 1 of 3 · done",
+        title: "AGENT READY",
+        body: "Your fighter lives here: portrait, rank, wallet, energy. Act 1 is done — claim its 200 AC on the path card.",
+      }
+      : {
+        target: "#breed-row",
+        eyebrow: "Act 1 of 3",
+        title: "CREATE AGENT",
+        body: "Name your fighter and describe its look. Breeding paints the portrait, unlocks Act 2, and earns 200 AC.",
+      },
+    {
+      target: "#chip-slot",
+      eyebrow: "Act 2 of 3",
+      title: hasActive ? "CHIP INSTALLED" : "PROGRAM CHIP",
+      body: hasActive
+        ? "A chip already drives this hero. Press the slot to swap minds, or open the lab to tune further."
+        : "The slot is empty. Open the Chip Lab, compile a battle plan, install it — then claim 200 AC.",
+      cta: { label: "Open Chip Lab", href: "./chip.html" },
+    },
+    {
+      target: hasAgent ? "#hero-next" : "#welcome-card",
+      eyebrow: "Act 3 of 3",
+      title: "ENTER ARENA",
+      body: "Queue from the arena for your first fight — training counts. Your first bout pays the last 200 AC.",
+      cta: { label: "Enter arena", href: "./index.html#arena-card" },
+    },
+    {
+      target: "#welcome-card",
+      eyebrow: "Rewards",
+      title: "CLAIM EACH ACT",
+      body: "Done acts light up here. Press Claim on each — 600 AC total buys a full new look in the Armory.",
+    },
+  );
+  return steps;
+}
+
+function rememberTour() {
+  try {
+    localStorage.setItem(TOUR_KEY, "1");
+  } catch {
+    /* private mode keeps the tour on demand */
+  }
+}
+
+function startTour(auto) {
+  if (typeof window.GuidedTour !== "object") return;
+  if (document.querySelector(".tour-root")) return;
+  window.GuidedTour.start(tourSteps(), { onDone: rememberTour, onSkip: rememberTour });
+  if (auto) rememberTour();
+}
+
+function maybeAutoTour() {
+  let seen = null;
+  try {
+    seen = localStorage.getItem(TOUR_KEY);
+  } catch {
+    return;
+  }
+  if (seen) return;
+  window.setTimeout(() => startTour(true), 700);
 }
 
 // One leader owns one hero. The breed form only exists before the first breed.
@@ -166,11 +305,24 @@ function paintHeroActions(hasDraft, hasActive) {
   }
 }
 
+function renderPips(box, have, max) {
+  if (!box) return;
+  box.textContent = "";
+  const n = Math.max(1, Math.min(12, max));
+  const lit = Math.max(0, Math.min(n, have));
+  for (let i = 0; i < n; i += 1) {
+    const p = document.createElement("span");
+    p.className = i < lit ? "pip on" : "pip";
+    box.appendChild(p);
+  }
+}
+
 function renderChipSlot(d) {
   const slot = $("chip-slot");
+  const label = $("chip-slot-label");
   const versions = d.versions || [];
   const active = versions.find((v) => v.versionId === d.agent.activeVersionId);
-  slot.textContent = active ? `▦ CHIP: ${versionTitle(active)}` : "▦ CHIP: EMPTY";
+  if (label) label.textContent = active ? `CHIP: ${versionTitle(active)}` : "CHIP: EMPTY";
   slot.classList.toggle("filled", Boolean(active));
 }
 
@@ -332,7 +484,10 @@ async function boot() {
     show($("breed-msg"), true);
     $("hero-primary").textContent = "Breed your hero";
     $("hero-primary").href = "#breed-row";
+    const ftue = await call("GET", "/v1/ftue");
+    if (ftue.status === 200) markWelcome({ agent: null, versions: [], ftue: ftue.data.stages });
   }
+  maybeAutoTour();
 }
 
 $("login-btn").addEventListener("click", async () => {
@@ -356,6 +511,13 @@ $("login-btn").addEventListener("click", async () => {
 $("chip-slot").addEventListener("click", () => {
   if (typeof window.showModal === "function") openChipPicker();
 });
+
+for (const stage of [1, 2, 3]) {
+  const btn = $(`claim-${stage}`);
+  if (btn) btn.addEventListener("click", () => claimStage(stage));
+}
+
+$("tour-btn").addEventListener("click", () => startTour(false));
 
 $("breed-btn").addEventListener("click", async () => {
   $("breed-msg").textContent = "Breeding… the image model paints the portrait now.";

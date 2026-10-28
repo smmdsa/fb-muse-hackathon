@@ -50,12 +50,17 @@
 <div class="bot"><svg viewBox="0 0 400 470" width="100%" height="100%" role="img" aria-label="Conceptual robot illustration"><defs><linearGradient id="metal2" x2="1" y2="1"><stop stop-color="#91a9aa"/><stop offset=".4" stop-color="#405a60"/><stop offset=".75" stop-color="#1a2d34"/><stop offset="1" stop-color="#779190"/></linearGradient><filter id="shine2"><feGaussianBlur stdDeviation="5" result="a"/><feMerge><feMergeNode in="a"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><ellipse cx="200" cy="428" rx="150" ry="20" fill="#000" opacity=".5"/><path d="M120 244 75 257 37 337 53 378 94 372 130 302M280 244 325 257 363 337 347 378 306 372 270 302" fill="url(#metal2)" stroke="#8ea9a7" stroke-width="3"/><path d="M143 300 130 418 166 445 195 428 200 339 205 428 234 445 270 418 257 300" fill="url(#metal2)" stroke="#91aaa7" stroke-width="3"/><path d="M125 227 148 203 252 203 275 227 266 329 235 357 165 357 134 329Z" fill="url(#metal2)" stroke="#b1c9c5" stroke-width="3"/><path d="M151 236 180 220 220 220 249 236 236 293 200 308 164 293Z" fill="#263d42" stroke="#87a6a2" stroke-width="3"/><path d="M200 245 219 265 200 284 181 265Z" fill="#8cfff0" filter="url(#shine2)"/><path d="M147 105 163 69 237 69 253 105 262 154 245 204 225 218 175 218 155 204 138 154Z" fill="url(#metal2)" stroke="#bed2cd" stroke-width="3"/><path d="M146 128 171 117 229 117 254 128 245 159 220 172 180 172 155 159Z" fill="#10272b" stroke="#769694" stroke-width="3"/><path d="M157 132 181 126 219 126 243 132 236 149 216 157 184 157 164 149Z" fill="#8affec" filter="url(#shine2)"/><path d="M171 184 200 195 229 184 222 202 178 202Z" fill="#102329"/><path d="M164 86 175 73 225 73 236 86" fill="none" stroke="#cce1db" stroke-width="4"/><text x="184" y="341" fill="#b8dad5" font-size="11" font-family="monospace">AW-01</text></svg></div>
 </section>
 <section class="panel command" id="welcome-card">
+<div class="path-head">
+<div>
 <h2>Your path to the arena</h2>
-<p class="sub">Three acts. Each act unlocks the next.</p>
+<p class="sub">Three acts. Each act unlocks the next. Each act pays 200 AC.</p>
+</div>
+<button id="tour-btn" class="btn-ghost" type="button">Start guided tour</button>
+</div>
 <div class="steps">
-<div class="step" id="w-agent"><b>1. Create agent</b><span>Identity and portrait.</span></div>
-<div class="step" id="w-chip"><b>2. Program chip</b><span>Words become behavior.</span></div>
-<div class="step" id="w-arena"><b>3. Enter arena</b><span>Queue and climb.</span></div>
+<div class="step" id="w-agent"><b>1. Create agent</b><span>Identity and portrait.</span><span class="prize" id="w-agent-r">200 AC</span><button id="claim-1" class="btn-primary claim-btn" type="button" hidden>Claim</button></div>
+<div class="step" id="w-chip"><b>2. Program chip</b><span>Words become behavior.</span><span class="prize" id="w-chip-r">200 AC</span><button id="claim-2" class="btn-primary claim-btn" type="button" hidden>Claim</button></div>
+<div class="step" id="w-arena"><b>3. Enter arena</b><span>Queue and climb.</span><span class="prize" id="w-arena-r">200 AC</span><button id="claim-3" class="btn-primary claim-btn" type="button" hidden>Claim</button></div>
 </div>
 </section>
 <section class="panel" id="login-card">
@@ -68,26 +73,36 @@
 <p class="sub" id="login-msg">One handle owns one hero. New leaders start at 500 AP in CIRCUIT I.</p>
 </section>
 <section class="panel" id="hero-card" hidden>
-<h2>Creation station</h2>
+<p class="eyebrow">Forge / unit 001</p>
+<h2>AGENT FORGE</h2>
 <p class="sub">The birth prompt paints the look. The chip prompt drives the mind. They stay separate.</p>
-<div class="hero">
-<div class="breed-frame"><img id="hero-img" class="agent-face" alt="Agent portrait" src="" hidden /></div>
-<div class="hero-info">
-<p class="hero-name" id="hero-name">—</p>
-<p class="sub" id="hero-concept">—</p>
-<div class="row">
+<div class="forge">
+<div class="forge-frame"><img id="hero-img" class="agent-face" alt="Agent portrait" src="" hidden /></div>
+<div class="forge-info">
+<p class="forge-name" id="hero-name">—</p>
+<p class="sub forge-concept" id="hero-concept">—</p>
+<div class="forge-stats">
+<div class="stat-tile stat-rank">
 <img id="hero-shield" alt="Rank shield" src="" hidden />
-<div>
-<p class="hero-ap" id="hero-ap">—</p>
-<p class="sub" id="hero-ac">—</p>
-<p class="sub" id="hero-energy">energy —</p>
+<span class="stat-value" id="hero-ap">—</span>
+</div>
+<div class="stat-tile">
+<svg class="stat-ic" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="#edc17e" stroke-width="2"/><circle cx="12" cy="12" r="5.5" fill="none" stroke="#edc17e" stroke-width="1.5"/></svg>
+<div class="stat-text"><span class="stat-value" id="hero-ac">—</span><span class="stat-sub">in the wallet</span></div>
+</div>
+<div class="stat-tile">
+<svg class="stat-ic" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z" fill="none" stroke="#80f6e7" stroke-width="2" stroke-linejoin="round"/></svg>
+<div class="stat-text"><span class="stat-value" id="hero-energy">—</span><span class="stat-sub" id="hero-energy-sub">energy</span></div>
+<div class="pips" id="hero-energy-pips" aria-hidden="true"></div>
 </div>
 </div>
 </div>
 </div>
-<div class="row">
-<button id="chip-slot" class="chip-slot" type="button">▦ CHIP: —</button>
-</div>
+<button id="chip-slot" class="chip-slot forge-chip" type="button">
+<svg class="stat-ic" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><rect x="7" y="7" width="10" height="10" fill="none" stroke="#80f6e7" stroke-width="2"/><path d="M10 7V3M14 7V3M10 21v-4M14 21v-4M7 10H3M7 14H3M21 10h-4M21 14h-4" stroke="#80f6e7" stroke-width="2"/></svg>
+<span id="chip-slot-label">CHIP: —</span>
+</button>
+<p class="sub forge-status" id="hero-art-status" hidden></p>
 <div class="row" id="breed-row" hidden>
 <label for="hero-name-in">Name</label>
 <input id="hero-name-in" name="hero-name-in" value="" maxlength="60" placeholder="Wasp" />
@@ -97,12 +112,11 @@
 </div>
 <p class="sub" id="breed-hint">Try: “scarred veteran, rust-red plates” or “sleek scout, azure visor”.</p>
 <p class="sub" id="breed-msg" hidden>Breeding paints the portrait in the house style. No image key on the server means a faceless hero.</p>
-<p class="sub" id="hero-art-status" hidden></p>
 <button id="retry-btn" class="btn-ghost" type="button" hidden>Retry portrait</button>
+<div class="forge-cta">
 <div class="next-actions" id="hero-next" hidden>
 <a class="btn-primary" id="hero-next-link" href="./chip.html">Program first chip</a>
 </div>
-<div class="row">
 <button id="share-btn" class="btn-ghost" type="button">Copy public card link</button>
 </div>
 <p class="sub" id="share-msg" hidden>Link copied. The card shows rank and record only.</p>
@@ -129,6 +143,7 @@
 </div>
 </div>
 <script src="./ui.js"></script>
+<script src="./tour.js"></script>
 <script src="./profile.js"></script>
 </body>
 </html>
