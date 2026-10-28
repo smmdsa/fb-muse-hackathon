@@ -54,6 +54,32 @@
       p.textContent = opts.body;
       d.appendChild(p);
     }
+    for (const row of opts.listRows || []) {
+      const line = document.createElement("div");
+      line.className = "rule";
+      const text = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = row.title;
+      text.appendChild(title);
+      if (row.sub) {
+        const small = document.createElement("small");
+        small.textContent = row.sub;
+        text.appendChild(small);
+      }
+      line.appendChild(text);
+      if (row.buttonLabel) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "btn-ghost";
+        b.textContent = row.buttonLabel;
+        b.addEventListener("click", () => {
+          closeModal();
+          if (typeof row.onClick === "function") row.onClick();
+        });
+        line.appendChild(b);
+      }
+      d.appendChild(line);
+    }
     const row = document.createElement("div");
     row.className = "next-actions";
     for (const a of opts.actions || [{ label: "Close" }]) {

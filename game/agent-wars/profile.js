@@ -1,4 +1,6 @@
 // Profile page. Same-origin API. Token lives in localStorage only.
+// Barracks owns the agent and its career. Chips live in Chip Lab,
+// cosmetics live in the Armory.
 
 const $ = (id) => document.getElementById(id);
 const TOKEN_KEY = "aw_token";
@@ -6,7 +8,8 @@ const HANDLE_KEY = "aw_handle";
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
 let agentId = "";
-let latestVersion = "";
+let latestDash = null;
+let justBred = false;
 
 function headers() {
   return { "content-type": "application/json", authorization: `Bearer ${token}` };
@@ -28,6 +31,14 @@ function shieldFor(tier) {
 
 function show(el, on) {
   el.hidden = !on;
+}
+
+function toastSay(msg) {
+  if (typeof window.toast === "function") window.toast(msg);
+}
+
+function versionTitle(v) {
+  return v.label ? `${v.label} (${v.versionId.slice(0, 8)}…)` : `${v.versionId.slice(0, 14)}…`;
 }
 
 // Deterministic fallback glyph. Same navy field, same robot shape, always.
@@ -62,8 +73,7 @@ async function refresh() {
   if (!token || !agentId) return;
   const r = await call("GET", `/v1/agents/${agentId}/dashboard`);
   if (r.status !== 200) {
-    $("dash").textContent = `Dashboard unavailable: ${r.data.error || r.status}. Retry in a bit.`;
-    show($("dash-card"), true);
+    toastSay(`Dashboard unavailable: ${r.data.error || r.status}.`);
     return;
   }
   const d = r.data;
@@ -92,22 +102,16 @@ async function refresh() {
   $("hero-energy").textContent = d.energy.energy >= d.energy.energyMax
     ? `energy ${d.energy.energy}/${d.energy.energyMax} — full`
     : `energy ${d.energy.energy}/${d.energy.energyMax} — +1 in ${mins || 1} min`;
-  markWelcome(Boolean(d.agent), (d.versions || []).length > 0, Boolean(d.agent && d.agent.activeVersionId));
-  await renderDash(d);
+  const versions = d.versions || [];
+  const hasActive = Boolean(d.agent && d.agent.activeVersionId);
+  markWelcome(Boolean(d.agent), versions.length > 0, hasActive);
+  latestDash = d;
+  paintBreedState(true);
+  paintHeroActions(versions.length > 0, hasActive);
+  renderChipSlot(d);
+  renderHist(d);
+  await renderAuto();
   await renderSeasons();
-}
-
-function shortWhen(when) {
-  const flat = (p) => {
-    if (!p || typeof p !== "object") return "?";
-    if (p.operand) return `${p.operand} ${p.op} ${p.value}`;
-    if (Array.isArray(p.all)) return `all(${p.all.map(flat).join("; ")})`;
-    if (Array.isArray(p.any)) return `any(${p.any.map(flat).join("; ")})`;
-    if (p.not) return `not ${flat(p.not)}`;
-    return "?";
-  };
-  const s = flat(when);
-  return s.length > 48 ? `${s.slice(0, 47)}…` : s;
 }
 
 function markWelcome(hasAgent, hasDraft, hasActive) {
@@ -119,7 +123,89 @@ function markWelcome(hasAgent, hasDraft, hasActive) {
   set("w-chip", !hasAgent ? "" : hasActive || hasDraft ? "done" : "next");
   set("w-arena", hasAgent && hasActive ? "done" : "");
   const next = $("hero-next");
-  if (next) show(next, hasAgent && !hasActive);
+  const link = $("hero-next-link");
+  if (next && link) {
+    if (!hasAgent) {
+      show(next, false);
+    } else if (!hasDraft) {
+      link.textContent = "Program first chip";
+      show(next, true);
+    } else {
+      link.textContent = "Go to Chip Lab";
+      show(next, true);
+    }
+  }
+}
+
+// One leader owns one hero. The breed form only exists before the first breed.
+function paintBreedState(hasAgent) {
+  show($("breed-row"), !hasAgent);
+  show($("breed-hint"), !hasAgent);
+  if (hasAgent && !justBred) show($("breed-msg"), false);
+  justBred = false;
+}
+
+function paintHeroActions(hasDraft, hasActive) {
+  const p = $("hero-primary");
+  const s = $("hero-secondary");
+  if (!hasDraft) {
+    p.textContent = "Program first chip";
+    p.href = "./chip.html";
+    s.textContent = "Enter arena";
+    s.href = "./index.html#arena-card";
+  } else if (!hasActive) {
+    p.textContent = "Install a chip";
+    p.href = "./chip.html";
+    s.textContent = "Enter arena";
+    s.href = "./index.html#arena-card";
+  } else {
+    p.textContent = "Enter arena";
+    p.href = "./index.html#arena-card";
+    s.textContent = "Open Chip Lab";
+    s.href = "./chip.html";
+  }
+}
+
+function renderChipSlot(d) {
+  const slot = $("chip-slot");
+  const versions = d.versions || [];
+  const active = versions.find((v) => v.versionId === d.agent.activeVersionId);
+  slot.textContent = active ? `▦ CHIP: ${versionTitle(active)}` : "▦ CHIP: EMPTY";
+  slot.classList.toggle("filled", Boolean(active));
+}
+
+function openChipPicker() {
+  const d = latestDash;
+  if (!d) return;
+  const versions = (d.versions || []).slice().reverse();
+  if (!versions.length) {
+    window.showModal({
+      eyebrow: "Agent chip",
+      title: "NO CHIPS YET",
+      body: "Compile your first battle plan in the Chip Lab.",
+      actions: [
+        { label: "Open Chip Lab", primary: true, onClick: () => { location.href = "./chip.html"; } },
+        { label: "Close" },
+      ],
+    });
+    return;
+  }
+  window.showModal({
+    eyebrow: "Agent chip",
+    title: "INSTALL CHIP",
+    body: "One chip drives the arena. Pick the mind.",
+    listRows: versions.map((v) => ({
+      title: versionTitle(v) + (v.versionId === d.agent.activeVersionId ? " · ACTIVE" : ""),
+      sub: v.corrupt ? "Unreadable draft." : `${v.fights} fights · ${v.wins} wins · ${(v.winRate * 100).toFixed(0)}%`,
+      buttonLabel: v.versionId === d.agent.activeVersionId || v.corrupt ? null : "Install",
+      onClick: async () => {
+        const r = await call("POST", `/v1/agents/${d.agent.id}/policies/install`, { versionId: v.versionId });
+        toastSay(r.status === 200 ? "Chip installed." : `Install failed: ${r.data.error || r.status}.`);
+        await refresh();
+      },
+    })),
+    actions: [{ label: "Close" }],
+  });
 }
 
 async function renderSeasons() {
@@ -138,217 +224,6 @@ async function renderSeasons() {
     box.appendChild(p);
   }
   show($("season-card"), true);
-}
-
-async function renderDash(d) {
-  const box = $("dash");
-  box.textContent = "";
-  const versions = Array.isArray(d.versions) ? d.versions : null;
-  const count = document.createElement("p");
-  count.className = "sub";
-  if (!versions) {
-    count.textContent = `Dashboard arrived without versions (keys: ${Object.keys(d || {}).join(", ")}). Reload the page.`;
-    box.appendChild(count);
-    show($("dash-card"), true);
-    return;
-  }
-  count.textContent = `Dashboard: ${versions.length} version(s) on file.`;
-  box.appendChild(count);
-  if (!versions.length) {
-    const empty = document.createElement("p");
-    empty.className = "sub";
-    empty.textContent = "No versions yet. Compile a prompt to mint chips.";
-    box.appendChild(empty);
-    show($("dash-card"), true);
-    return;
-  }
-  for (const v of versions.slice().reverse()) {
-    try {
-      box.appendChild(paintVersion(d, v));
-    } catch (err) {
-      const bad = document.createElement("p");
-      bad.className = "sub";
-      bad.textContent = `Card ${v && v.versionId ? v.versionId : "?"} failed to paint: ${err instanceof Error ? err.message : String(err)}`;
-      box.appendChild(bad);
-    }
-  }
-  show($("dash-card"), true);
-  renderHist(d);
-  await renderAuto();
-  await renderArmory();
-}
-
-// One card paints alone. A sick card never kills its siblings.
-function paintVersion(d, v) {
-    const card = document.createElement("div");
-    card.className = "ver";
-    const head = document.createElement("p");
-    head.className = "ver-head";
-    const prov = document.createElement("span");
-    prov.className = "pill" + (v.isMock ? "" : " live");
-    prov.textContent = v.isMock ? "mock" : v.provider;
-    const title = v.label ? `${v.label} (${v.versionId.slice(0, 8)}…)` : `${v.versionId.slice(0, 14)}…`;
-    head.textContent = `${title} — ${v.fights} fights, ${v.wins} wins, ${(v.winRate * 100).toFixed(0)}%, ${v.avgTicks} avg ticks `;
-    head.appendChild(prov);
-    card.appendChild(head);
-    if (v.corrupt) {
-      const bad = document.createElement("p");
-      bad.className = "sub";
-      bad.textContent = "Unreadable draft — its rules never saved right. Delete it below and compile again.";
-      card.appendChild(bad);
-    }
-    if (!v.corrupt) {
-      const dna = document.createElement("p");
-      dna.className = "sub";
-      const traits = v.dna || {};
-      dna.textContent = ["aggression", "evasion", "preferredDistance", "energyConservation"]
-        .map((k) => `${k} ${traits[k] ?? "—"}`)
-        .join(" · ");
-      card.appendChild(dna);
-    }
-    if (v.versionId !== d.agent.activeVersionId && !v.corrupt) {
-      const fit = document.createElement("button");
-      fit.className = "btn-ghost";
-      fit.type = "button";
-      fit.textContent = "Install this version";
-      fit.addEventListener("click", async () => {
-        const r = await call("POST", `/v1/agents/${d.agent.id}/policies/install`, { versionId: v.versionId });
-        $("train-msg").textContent = r.status === 200
-          ? "Version installed. The queue takes the active version."
-          : `Install failed: ${r.data.error || r.status}.`;
-        await refresh();
-      });
-      card.appendChild(fit);
-    }
-    if (v.versionId !== d.agent.activeVersionId) {
-      const drop = document.createElement("button");
-      drop.className = "btn-ghost";
-      drop.type = "button";
-      drop.textContent = "Delete draft";
-      drop.addEventListener("click", async () => {
-        const r = await call("DELETE", `/v1/agents/${d.agent.id}/policies/${v.versionId}`);
-        $("train-msg").textContent = r.status === 200
-          ? "Draft deleted."
-          : `Delete failed: ${r.data.error || r.status}.`;
-        await refresh();
-      });
-      card.appendChild(drop);
-    }
-    const ren = document.createElement("button");
-    ren.className = "btn-ghost";
-    ren.type = "button";
-    ren.textContent = v.label ? "Rename" : "Name it";
-    ren.addEventListener("click", () => {
-      const wrap = document.createElement("span");
-      const inp = document.createElement("input");
-      inp.value = v.label || "";
-      inp.maxLength = 60;
-      inp.setAttribute("aria-label", "Version name");
-      const save = document.createElement("button");
-      save.className = "btn-ghost";
-      save.type = "button";
-      save.textContent = "Save";
-      save.addEventListener("click", async () => {
-        const r = await call("POST", `/v1/agents/${d.agent.id}/policies/${v.versionId}/rename`, { label: inp.value });
-        if (r.status !== 200) {
-          $("train-msg").textContent = `Rename failed: ${r.data.error || r.status}.`;
-          return;
-        }
-        await refresh();
-      });
-      wrap.appendChild(inp);
-      wrap.appendChild(save);
-      card.appendChild(wrap);
-    });
-    card.appendChild(ren);
-    const force = document.createElement("button");
-    force.className = "btn-ghost";
-    force.type = "button";
-    force.textContent = "Force delete";
-    let armed = false;
-    force.addEventListener("click", async () => {
-      if (!armed) {
-        armed = true;
-        force.textContent = "Sure? Force delete";
-        setTimeout(() => {
-          armed = false;
-          force.textContent = "Force delete";
-        }, 5000);
-        return;
-      }
-      const r = await call("POST", `/v1/agents/${d.agent.id}/policies/${v.versionId}/force-delete`);
-      $("train-msg").textContent = r.status === 200
-        ? (r.data.clearedActive ? "Version force-deleted. Install a version to fight again." : "Version force-deleted.")
-        : `Force delete failed: ${r.data.error || r.status}.`;
-      await refresh();
-    });
-    card.appendChild(force);
-    const table = document.createElement("table");
-    table.className = "chips";
-    const top = document.createElement("tr");
-    for (const h of ["chip", "when", "move", "fire", "triggers"]) {
-      const th = document.createElement("th");
-      th.textContent = h;
-      top.appendChild(th);
-    }
-    table.appendChild(top);
-    for (const c of v.chips) {
-      const tr = document.createElement("tr");
-      for (const cell of [c.id, shortWhen(c.when), c.move, c.fire ? "yes" : "no", String(c.triggers)]) {
-        const td = document.createElement("td");
-        td.textContent = cell;
-        tr.appendChild(td);
-      }
-      table.appendChild(tr);
-    }
-    if (!v.corrupt) card.appendChild(table);
-    return card;
-}
-
-async function renderArmory() {
-  const r = await call("GET", "/v1/armory");
-  if (r.status !== 200) {
-    $("armory-wallet").textContent = "Armory unavailable.";
-    show($("armory-card"), true);
-    return;
-  }
-  $("armory-wallet").textContent = `${r.data.ac} AC · ${r.data.rp} mock RP in the wallet.`;
-  const box = $("armory");
-  box.textContent = "";
-  const equipped = r.data.equipped || {};
-  for (const c of r.data.catalog || []) {
-    const p = document.createElement("p");
-    p.className = "sub";
-    const slot = c.id.split("-")[0];
-    p.textContent = `${c.name} — ${c.price} ${c.currency}${c.owned ? " · owned" : ""}${Object.values(equipped).includes(c.id) ? " · equipped" : ""} `;
-    if (!c.owned) {
-      const buy = document.createElement("button");
-      buy.className = "btn-ghost";
-      buy.type = "button";
-      buy.textContent = "Buy";
-      buy.addEventListener("click", async () => {
-        const out = await call("POST", "/v1/armory/buy", { itemId: c.id });
-        if (out.status !== 200) {
-          $("armory-wallet").textContent = `Buy failed: ${out.data.error || out.status}.`;
-          return;
-        }
-        await renderArmory();
-      });
-      p.appendChild(buy);
-    } else {
-      const fit = document.createElement("button");
-      fit.className = "btn-ghost";
-      fit.type = "button";
-      fit.textContent = "Equip";
-      fit.addEventListener("click", async () => {
-        await call("POST", "/v1/armory/equip", { slot, itemId: c.id });
-        await renderArmory();
-      });
-      p.appendChild(fit);
-    }
-    box.appendChild(p);
-  }
-  show($("armory-card"), true);
 }
 
 async function renderAuto() {
@@ -371,6 +246,7 @@ async function renderAuto() {
     p.textContent = `${h.winner} wins in ${h.ticks} ticks — AP ${h.myDelta >= 0 ? "+" : ""}${h.myDelta} · ${h.myPaid} AC `;
     const a = document.createElement("a");
     a.href = `./index.html?replay=${h.matchId}`;
+    a.className = "link-quiet";
     a.textContent = "replay";
     p.appendChild(a);
     box.appendChild(p);
@@ -395,6 +271,7 @@ function renderHist(d) {
     p.textContent = `${h.winner} wins in ${h.ticks} ticks ${foe} — ${econ} `;
     const a = document.createElement("a");
     a.href = `./index.html?replay=${h.matchId}`;
+    a.className = "link-quiet";
     a.textContent = "replay";
     p.appendChild(a);
     const why = document.createElement("button");
@@ -418,48 +295,7 @@ function renderHist(d) {
   show($("hist-card"), true);
 }
 
-// Counters keep long briefs honest. The cap is 2000, the habit is detail.
-for (const [box, count] of [["prompt", "prompt-count"], ["prompt-a", "prompt-a-count"], ["prompt-b", "prompt-b-count"]]) {
-  $(box).addEventListener("input", () => {
-    $(count).textContent = String($(box).value.length);
-  });
-}
-
-$("lab-btn").addEventListener("click", async () => {
-  if (!agentId) return;
-  const promptA = $("prompt-a").value.trim();
-  const promptB = $("prompt-b").value.trim();
-  const bouts = Math.min(20, Math.max(4, parseInt($("lab-bouts").value, 10) || 10));
-  if (!promptA || !promptB) {
-    $("lab-msg").textContent = "Two prompts are required.";
-    return;
-  }
-  $("lab-msg").textContent = "Running bouts…";
-  $("lab-btn").disabled = true;
-  const r = await call("POST", "/v1/lab/ab", { agentId, promptA, promptB, bouts });
-  $("lab-btn").disabled = false;
-  if (r.status !== 201) {
-    $("lab-msg").textContent = `Lab failed: ${r.data.error || r.status}.`;
-    return;
-  }
-  const d = r.data;
-  $("lab-msg").textContent = `A ${d.winsA}W ${d.drawsA}D vs benchmark · B ${d.winsB}W ${d.drawsB}D · ${d.verdict}.`;
-  const box = $("lab-out");
-  box.textContent = "";
-  for (const [label, version] of [["Install A", d.versionA], ["Install B", d.versionB]]) {
-    const btn = document.createElement("button");
-    btn.className = "btn-ghost";
-    btn.type = "button";
-    btn.textContent = label;
-    btn.addEventListener("click", async () => {
-      await call("POST", `/v1/agents/${agentId}/policies/install`, { versionId: version });
-      await refresh();
-    });
-    box.appendChild(btn);
-  }
-});
-
-const GATED = { "#train-card": "Chip Lab", "#lab-card": "Evolution Lab", "#armory-card": "Armory", "#hist-card": "Fight history", "#dash-card": "Chips dashboard" };
+const GATED = { "#hist-card": "Fight history" };
 
 // Sidebar anchors land on locked sections while signed out. Say so once,
 // then point at the login card instead of a blank scroll.
@@ -487,15 +323,15 @@ async function boot() {
   }
   show($("login-card"), false);
   show($("hero-card"), true);
-  show($("train-card"), true);
-  show($("lab-card"), true);
   if (me.data.agent) {
     agentId = me.data.agent.id;
-    show($("breed-row"), false);
+    paintBreedState(true);
     await refresh();
   } else {
-    show($("breed-row"), true);
+    paintBreedState(false);
     show($("breed-msg"), true);
+    $("hero-primary").textContent = "Breed your hero";
+    $("hero-primary").href = "#breed-row";
   }
 }
 
@@ -517,6 +353,10 @@ $("login-btn").addEventListener("click", async () => {
   await boot();
 });
 
+$("chip-slot").addEventListener("click", () => {
+  if (typeof window.showModal === "function") openChipPicker();
+});
+
 $("breed-btn").addEventListener("click", async () => {
   $("breed-msg").textContent = "Breeding… the image model paints the portrait now.";
   const r = await call("POST", "/v1/agents", {
@@ -528,10 +368,12 @@ $("breed-btn").addEventListener("click", async () => {
     return;
   }
   agentId = r.data.agentId;
-  show($("breed-row"), false);
+  justBred = true;
+  paintBreedState(true);
   $("breed-msg").textContent = r.data.portraitUrl
     ? "Hero bred with a portrait."
     : `Hero bred ${r.data.portraitStatus} — art can retry later, fights start now.`;
+  toastSay("Hero bred. Program its first chip.");
   await refresh();
 });
 
@@ -572,42 +414,11 @@ $("share-btn").addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(link);
     show($("share-msg"), true);
+    toastSay("Link copied.");
   } catch {
     $("share-msg").textContent = `Copy failed — the link is ${link}`;
     show($("share-msg"), true);
   }
-});
-
-$("compile-btn").addEventListener("click", async () => {
-  const prompt = $("prompt").value.trim();
-  if (!prompt) {
-    $("train-msg").textContent = "Type a prompt first.";
-    return;
-  }
-  $("train-msg").textContent = "Compiling…";
-  $("fight-btn").disabled = true;
-  const r = await call("POST", `/v1/agents/${agentId}/policies/compile`, { prompt });
-  if (r.status !== 201) {
-    $("train-msg").textContent = `Compile failed: ${(r.data.errors || [r.data.error]).join("; ")}`;
-    return;
-  }
-  latestVersion = r.data.versionId;
-  $("train-msg").textContent = `Draft minted by ${r.data.isMock ? "mock" : r.data.provider}. Install it below, then queue.`;
-  $("fight-btn").disabled = false;
-  await refresh();
-});
-
-$("fight-btn").addEventListener("click", async () => {
-  if (!latestVersion) return;
-  $("train-msg").textContent = "Fighting…";
-  $("fight-btn").disabled = true;
-  const r = await call("POST", "/v1/matches/training", { versionId: latestVersion, seed: `p-${Date.now().toString(36)}` });
-  if (r.status !== 201) {
-    $("train-msg").textContent = `Fight failed: ${r.data.error || r.status}.`;
-    return;
-  }
-  $("train-msg").textContent = `${r.data.winner} wins in ${r.data.ticks} ticks. Dashboard updated.`;
-  await refresh();
 });
 
 boot();

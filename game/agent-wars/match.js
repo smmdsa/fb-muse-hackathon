@@ -66,7 +66,7 @@ function primaryCta(hasAgent, hasChip) {
     cta.href = "./profile.html";
   } else if (!hasChip) {
     cta.textContent = "Program my chip";
-    cta.href = "./profile.html#train-card";
+    cta.href = "./chip.html";
   } else {
     cta.textContent = "Play";
     cta.href = "#quick-card";

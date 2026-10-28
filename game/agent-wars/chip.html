@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Wars — Chip Lab</title>
+<link rel="stylesheet" href="./style.css" />
+<link rel="stylesheet" href="./shell.css" />
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+<p class="logo">AGENT<span>///</span>WARS</p>
+<p class="micro">The robot combat league</p>
+<nav class="nav" aria-label="Navigation">
+<a href="./index.html"><b>⌂</b> COMMAND</a>
+<a href="./profile.html"><b>◇</b> BARRACKS</a>
+<a class="on" href="./chip.html"><b>▦</b> CHIP LAB</a>
+<a href="./index.html#arena-card"><b>◉</b> ARENA</a>
+<a href="./public.html"><b>⬡</b> RANKS</a>
+<a href="./tournaments.html"><b>⚑</b> CUP</a>
+<a href="./armory.html"><b>◈</b> ARMORY</a>
+</nav>
+<div class="season"><span class="micro">Season 01</span><strong>The Forge</strong><small>Your strategy starts here.</small></div>
+</aside>
+<div>
+<div class="crumb"><span>AGENT WARS / <strong>CHIP LAB</strong></span><span>COMMANDER</span></div>
+<main class="shell content">
+<header class="top">
+<div>
+<p class="eyebrow">Words become behavior</p>
+<h1>CHIP LAB</h1>
+<p class="sub">Compile drafts, install one, test against the benchmark.</p>
+</div>
+<div class="pills">
+<span class="pill" id="pill-who">signed out</span>
+</div>
+</header>
+<section class="panel" id="login-card">
+<h2>Leader</h2>
+<div class="row">
+<label for="handle">Handle</label>
+<input id="handle" name="handle" value="" maxlength="40" placeholder="your callsign" />
+<button id="login-btn" class="btn-primary" type="button">Sign in</button>
+</div>
+<p class="sub" id="login-msg">One handle owns one hero. New leaders start at 500 AP in CIRCUIT I.</p>
+</section>
+<section class="panel" id="train-card" hidden>
+<h2>01 / Battle plan</h2>
+<p class="sub">Write a line or paragraphs — detail wins fights. Compile mints a draft. Install sends one draft to the arena.</p>
+<label for="prompt">Battle plan</label>
+<textarea id="prompt" name="prompt" rows="5" maxlength="2000" placeholder="My robot is a patient ambusher. It holds the center early and saves energy. When the foe closes under 6 meters it dashes sideways and fires. Below a quarter of health it retreats behind cover and only peeks to shoot."></textarea>
+<p class="sub"><span id="prompt-count">0</span>/2000</p>
+<div class="row">
+<button id="compile-btn" class="btn-primary" type="button">Compile</button>
+<button id="fight-btn" class="btn-ghost" type="button" disabled>Training fight</button>
+</div>
+<p class="sub" id="train-msg">Compile turns words into chips. Fight runs the version against the benchmark.</p>
+</section>
+<section class="panel" id="core-card" hidden>
+<h2>02 / Active core</h2>
+<div id="core"><p class="sub">Loading…</p></div>
+</section>
+<section class="panel" id="dash-card" hidden>
+<h2>03 / Chip library</h2>
+<div id="dash"></div>
+</section>
+<section class="panel" id="lab-card" hidden>
+<h2>Evolution Lab</h2>
+<p class="sub">Two drafts fight the benchmark on mirrored seeds. Small samples refuse a verdict. Drafts stay drafts — install the winner below.</p>
+<div class="row">
+<label for="lab-bouts">Bouts</label>
+<input id="lab-bouts" name="lab-bouts" value="10" maxlength="2" inputmode="numeric" />
+<button id="lab-btn" class="btn-primary" type="button">Run A/B</button>
+</div>
+<label for="prompt-a">Plan A</label>
+<textarea id="prompt-a" name="prompt-a" rows="4" maxlength="2000" placeholder="Rush them down up close, never stop moving."></textarea>
+<p class="sub"><span id="prompt-a-count">0</span>/2000</p>
+<label for="prompt-b">Plan B</label>
+<textarea id="prompt-b" name="prompt-b" rows="4" maxlength="2000" placeholder="Hold the center patiently, save energy, punish mistakes."></textarea>
+<p class="sub"><span id="prompt-b-count">0</span>/2000</p>
+<p class="sub" id="lab-msg"></p>
+<div id="lab-out"></div>
+</section>
+</main>
+</div>
+</div>
+<script src="./ui.js"></script>
+<script src="./chip.js"></script>
+</body>
+</html>
