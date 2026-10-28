@@ -108,6 +108,7 @@ describe("worker writes", () => {
     db.exec(readFileSync(new URL("../../../migrations/0008_armory.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0010_reports.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0011_version_labels.sql", import.meta.url), "utf8"));
     // Reuse the shared shim: it carries batch, like the real D1 binding.
     const wenv = { DB: shim(db), ASSETS: assetsStub, ADMIN_KEY: "test-admin" };
     const call = (method, path, body, token, extraHeaders) => {
@@ -288,6 +289,14 @@ describe("worker writes", () => {
     const flagged = (await dashW.json()).versions.find((v) => v.versionId === "v-wpoison");
     assert.equal(flagged.corrupt, true);
     assert.deepEqual(flagged.chips, []);
+    const rn = await call("POST", `/v1/agents/${aa.json.agentId}/policies/${va.json.versionId}/rename`, { label: "Alpha prime" }, sa.json.token);
+    assert.equal(rn.status, 200);
+    assert.equal(rn.json.label, "Alpha prime");
+    const dashW2 = await entry.fetch(new Request(`http://local/v1/agents/${aa.json.agentId}/dashboard`, { headers: { authorization: `Bearer ${sa.json.token}` } }), wenv);
+    assert.equal((await dashW2.json()).versions.find((v) => v.versionId === va.json.versionId).label, "Alpha prime");
+    const fdel = await call("POST", `/v1/agents/${aa.json.agentId}/policies/${va.json.versionId}/force-delete`, {}, sa.json.token);
+    assert.equal(fdel.status, 200);
+    assert.equal(fdel.json.clearedActive, true);
   });
 
   it("stays dark with no admin key", async () => {

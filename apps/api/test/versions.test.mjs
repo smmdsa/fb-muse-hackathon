@@ -73,6 +73,55 @@ describe("version management", () => {
     assert.ok(!after.json.versions.some((v) => v.versionId === "v-poison"));
   });
 
+  it("renames drafts and clears on empty", async () => {
+    const set = await call("POST", `/v1/agents/${me.agentId}/policies/${me.v1}/rename`, { label: "Ambusher prime" }, me.token);
+    assert.equal(set.status, 200);
+    assert.equal(set.json.label, "Ambusher prime");
+    const dash = await call("GET", `/v1/agents/${me.agentId}/dashboard`, null, me.token);
+    assert.equal(dash.json.versions.find((v) => v.versionId === me.v1).label, "Ambusher prime");
+    const clear = await call("POST", `/v1/agents/${me.agentId}/policies/${me.v1}/rename`, { label: "   " }, me.token);
+    assert.equal(clear.status, 200);
+    assert.equal(clear.json.label, null);
+    const ghost = await call("POST", `/v1/agents/${me.agentId}/policies/v-ghost/rename`, { label: "x" }, me.token);
+    assert.equal(ghost.status, 404);
+  });
+
+  it("force-deletes fought versions but keeps their receipts", async () => {
+    const boutBefore = store.db.prepare("SELECT * FROM matches WHERE seed = ?").get("keep-1");
+    assert.ok(boutBefore);
+    const gone = await call("POST", `/v1/agents/${me.agentId}/policies/${me.v1}/force-delete`, {}, me.token);
+    assert.equal(gone.status, 200);
+    assert.equal(gone.json.deleted, true);
+    assert.equal(gone.json.clearedActive, false);
+    const dash = await call("GET", `/v1/agents/${me.agentId}/dashboard`, null, me.token);
+    assert.ok(!dash.json.versions.some((v) => v.versionId === me.v1));
+    const boutAfter = store.db.prepare("SELECT * FROM matches WHERE seed = ?").get("keep-1");
+    assert.equal(boutAfter.checksum, boutBefore.checksum);
+    const rep = await call("GET", `/v1/matches/${boutAfter.id}/replay`, null, me.token);
+    assert.equal(rep.status, 410);
+    assert.match(rep.json.error, /gone/);
+  });
+
+  it("force on the active version clears the slot", async () => {
+    const v4 = await call("POST", `/v1/agents/${me.agentId}/policies/compile`, { prompt: "hold the center patiently" }, me.token);
+    await call("POST", `/v1/agents/${me.agentId}/policies/install`, { versionId: v4.json.versionId }, me.token);
+    const gone = await call("POST", `/v1/agents/${me.agentId}/policies/${v4.json.versionId}/force-delete`, {}, me.token);
+    assert.equal(gone.status, 200);
+    assert.equal(gone.json.clearedActive, true);
+    const meNow = await call("GET", "/v1/me", null, me.token);
+    assert.equal(meNow.json.agent.active_version_id, null);
+  });
+
+  it("refuses force on live event seats", async () => {
+    const v5 = await call("POST", `/v1/agents/${me.agentId}/policies/compile`, { prompt: "rush them down up close" }, me.token);
+    store.db.prepare("INSERT INTO tournaments (id, name, event_json, games_json, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "locked-cup", "Locked", JSON.stringify({ id: "locked-cup", phase: "LOCKED", entries: [{ leaderId: "x", agentVersionId: v5.json.versionId }] }), "{}", Date.now(),
+    );
+    const denied = await call("POST", `/v1/agents/${me.agentId}/policies/${v5.json.versionId}/force-delete`, {}, me.token);
+    assert.equal(denied.status, 422);
+    assert.match(denied.json.error, /live event seat/);
+  });
+
   it("404s foreign heroes and ghost versions", async () => {
     const s = await call("POST", "/v1/auth/session", { handle: "stranger" });
     const foreign = await call("DELETE", `/v1/agents/${me.agentId}/policies/${me.v1}`, null, s.json.token);

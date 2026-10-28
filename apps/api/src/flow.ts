@@ -404,6 +404,51 @@ export function deleteVersion(
   return { deleted: true };
 }
 
+// Labels name drafts whatever the owner wants. Empty clears back to the id.
+export function renameVersion(
+  store: Store,
+  input: { leaderId: string; agentId: string; versionId: string; label: string },
+): { versionId: string; label: string | null } {
+  const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
+  if (!agent || agent.leader_id !== input.leaderId) throw new Error("agent not found for this leader");
+  const version = store.db.prepare("SELECT * FROM versions WHERE id = ?").get(input.versionId) as Record<string, unknown> | null;
+  if (!version || version.agent_id !== input.agentId) throw new Error("unknown version for this agent");
+  const label = input.label.trim().slice(0, 60);
+  store.db.prepare("UPDATE versions SET label = ? WHERE id = ?").run(label || null, input.versionId);
+  return { versionId: input.versionId, label: label || null };
+}
+
+// Force removes a version with fights. Match rows stay in the ledger,
+// but their replays report unavailable once the policy is gone. Seats in
+// live brackets stay sacred: force never breaks another player's cup.
+const LIVE_PHASES = ["REGISTRATION_OPEN", "LOCKED", "SEEDED", "LIVE"];
+
+export function forceDeleteVersion(
+  store: Store,
+  input: { leaderId: string; agentId: string; versionId: string },
+): { deleted: boolean; clearedActive: boolean } {
+  const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
+  if (!agent || agent.leader_id !== input.leaderId) throw new Error("agent not found for this leader");
+  const version = store.db.prepare("SELECT * FROM versions WHERE id = ?").get(input.versionId) as Record<string, unknown> | null;
+  if (!version || version.agent_id !== input.agentId) throw new Error("unknown version for this agent");
+  const seats = store.db.prepare("SELECT event_json FROM tournaments WHERE event_json LIKE ?").all(`%${input.versionId}%`) as Record<string, unknown>[];
+  for (const s of seats) {
+    try {
+      const phase = (JSON.parse(s.event_json as string) as { phase: string }).phase;
+      if (LIVE_PHASES.includes(phase)) throw new Error("this version holds a live event seat: it stays registered");
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("this version holds")) throw err;
+    }
+  }
+  store.db.prepare("DELETE FROM versions WHERE id = ?").run(input.versionId);
+  let clearedActive = false;
+  if (agent.active_version_id === input.versionId) {
+    store.db.prepare("UPDATE agents SET active_version_id = NULL WHERE id = ?").run(input.agentId);
+    clearedActive = true;
+  }
+  return { deleted: true, clearedActive };
+}
+
 // Install names the fighting version. Drafts stay inert until this runs.
 export function installVersion(
   store: Store,
@@ -503,6 +548,7 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
         isMock: (v.is_mock ?? 1) === 1,
         createdAt: v.created_at,
         corrupt: true,
+        label: (v.label as string) ?? null,
         chips: [],
         dna: null,
         fights: fights.length,
@@ -533,6 +579,7 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
       isMock: (v.is_mock ?? 1) === 1,
       createdAt: v.created_at,
       corrupt: false,
+      label: (v.label as string) ?? null,
       chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, when: r.when ?? null, triggers: triggers[r.id] ?? 0 })),
       dna: policy.dna,
       fights: fights.length,
