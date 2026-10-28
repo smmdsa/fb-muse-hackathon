@@ -331,6 +331,7 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
         isMock: ((v.is_mock as number) ?? 1) === 1,
         createdAt: v.created_at,
         corrupt: true,
+        label: (v.label as string) ?? null,
         chips: [],
         dna: null,
         fights: fights.length,
@@ -362,6 +363,7 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
       isMock: ((v.is_mock as number) ?? 1) === 1,
       createdAt: v.created_at,
       corrupt: false,
+      label: (v.label as string) ?? null,
       chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, when: r.when ?? null, triggers: triggers[r.id] ?? 0 })),
       dna: policy.dna,
       fights: fights.length,
@@ -928,6 +930,55 @@ export default {
         if (seated) return json({ error: "this version holds an event seat: it stays registered" }, 422);
         await env.DB.prepare("DELETE FROM versions WHERE id = ?").bind(versionId).run();
         return json({ deleted: true }, 200);
+      } catch (err) {
+        return json({ error: `server error: ${(err as Error).message}` }, 500);
+      }
+    }
+    const renameMatch = request.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/[^/]+\/rename$/.exec(url.pathname);
+    if (renameMatch) {
+      try {
+        const agentId = url.pathname.split("/")[3];
+        const versionId = decodeURIComponent(renameMatch[0].split("/")[5]);
+        const target = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
+        if (!target || target.leader_id !== me.id) return json({ error: "agent not found for this leader" }, 404);
+        const version = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(versionId).first<Record<string, unknown>>();
+        if (!version || version.agent_id !== agentId) return json({ error: "unknown version for this agent" }, 404);
+        const body = await readBody(request);
+        if (body === null) return json({ error: "bad json" }, 400);
+        const label = typeof body.label === "string" ? body.label.trim().slice(0, 60) : "";
+        await env.DB.prepare("UPDATE versions SET label = ? WHERE id = ?").bind(label || null, versionId).run();
+        return json({ versionId, label: label || null }, 200);
+      } catch (err) {
+        return json({ error: `server error: ${(err as Error).message}` }, 500);
+      }
+    }
+    const forceMatch = request.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/[^/]+\/force-delete$/.exec(url.pathname);
+    if (forceMatch) {
+      try {
+        const agentId = url.pathname.split("/")[3];
+        const versionId = decodeURIComponent(forceMatch[0].split("/")[5]);
+        const target = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
+        if (!target || target.leader_id !== me.id) return json({ error: "agent not found for this leader" }, 404);
+        const version = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(versionId).first<Record<string, unknown>>();
+        if (!version || version.agent_id !== agentId) return json({ error: "unknown version for this agent" }, 404);
+        const { results: seats } = await env.DB.prepare("SELECT event_json FROM tournaments WHERE event_json LIKE ?").bind(`%${versionId}%`).all<Record<string, unknown>>();
+        for (const s of seats) {
+          try {
+            const phase = (JSON.parse(s.event_json as string) as { phase: string }).phase;
+            if (["REGISTRATION_OPEN", "LOCKED", "SEEDED", "LIVE"].includes(phase)) {
+              return json({ error: "this version holds a live event seat: it stays registered" }, 422);
+            }
+          } catch (err) {
+            if (err instanceof Error && err.message.startsWith("this version holds")) throw err;
+          }
+        }
+        await env.DB.prepare("DELETE FROM versions WHERE id = ?").bind(versionId).run();
+        let clearedActive = false;
+        if (target.active_version_id === versionId) {
+          await env.DB.prepare("UPDATE agents SET active_version_id = NULL WHERE id = ?").bind(agentId).run();
+          clearedActive = true;
+        }
+        return json({ deleted: true, clearedActive }, 200);
       } catch (err) {
         return json({ error: `server error: ${(err as Error).message}` }, 500);
       }

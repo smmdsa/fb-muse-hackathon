@@ -187,7 +187,8 @@ function paintVersion(d, v) {
     const prov = document.createElement("span");
     prov.className = "pill" + (v.isMock ? "" : " live");
     prov.textContent = v.isMock ? "mock" : v.provider;
-    head.textContent = `${v.versionId.slice(0, 14)}… — ${v.fights} fights, ${v.wins} wins, ${(v.winRate * 100).toFixed(0)}%, ${v.avgTicks} avg ticks `;
+    const title = v.label ? `${v.label} (${v.versionId.slice(0, 8)}…)` : `${v.versionId.slice(0, 14)}…`;
+    head.textContent = `${title} — ${v.fights} fights, ${v.wins} wins, ${(v.winRate * 100).toFixed(0)}%, ${v.avgTicks} avg ticks `;
     head.appendChild(prov);
     card.appendChild(head);
     if (v.corrupt) {
@@ -233,6 +234,55 @@ function paintVersion(d, v) {
       });
       card.appendChild(drop);
     }
+    const ren = document.createElement("button");
+    ren.className = "btn-ghost";
+    ren.type = "button";
+    ren.textContent = v.label ? "Rename" : "Name it";
+    ren.addEventListener("click", () => {
+      const wrap = document.createElement("span");
+      const inp = document.createElement("input");
+      inp.value = v.label || "";
+      inp.maxLength = 60;
+      inp.setAttribute("aria-label", "Version name");
+      const save = document.createElement("button");
+      save.className = "btn-ghost";
+      save.type = "button";
+      save.textContent = "Save";
+      save.addEventListener("click", async () => {
+        const r = await call("POST", `/v1/agents/${d.agent.id}/policies/${v.versionId}/rename`, { label: inp.value });
+        if (r.status !== 200) {
+          $("train-msg").textContent = `Rename failed: ${r.data.error || r.status}.`;
+          return;
+        }
+        await refresh();
+      });
+      wrap.appendChild(inp);
+      wrap.appendChild(save);
+      card.appendChild(wrap);
+    });
+    card.appendChild(ren);
+    const force = document.createElement("button");
+    force.className = "btn-ghost";
+    force.type = "button";
+    force.textContent = "Force delete";
+    let armed = false;
+    force.addEventListener("click", async () => {
+      if (!armed) {
+        armed = true;
+        force.textContent = "Sure? Force delete";
+        setTimeout(() => {
+          armed = false;
+          force.textContent = "Force delete";
+        }, 5000);
+        return;
+      }
+      const r = await call("POST", `/v1/agents/${d.agent.id}/policies/${v.versionId}/force-delete`);
+      $("train-msg").textContent = r.status === 200
+        ? (r.data.clearedActive ? "Version force-deleted. Install a version to fight again." : "Version force-deleted.")
+        : `Force delete failed: ${r.data.error || r.status}.`;
+      await refresh();
+    });
+    card.appendChild(force);
     const table = document.createElement("table");
     table.className = "chips";
     const top = document.createElement("tr");

@@ -43,7 +43,8 @@ export function openStore(path: string): Store {
       provider TEXT NOT NULL DEFAULT 'mock',
       is_mock INTEGER NOT NULL DEFAULT 1,
       tokens INTEGER NOT NULL DEFAULT 0,
-      latency_ms INTEGER NOT NULL DEFAULT 0
+      latency_ms INTEGER NOT NULL DEFAULT 0,
+      label TEXT
     );
     CREATE TABLE IF NOT EXISTS matches (
       id TEXT PRIMARY KEY,
@@ -105,6 +106,11 @@ export function openStore(path: string): Store {
       at INTEGER NOT NULL
     );
   `);
+  // Labels arrived late. Old files gain the column once, then never again.
+  const cols = db.prepare("PRAGMA table_info(versions)").all() as Record<string, unknown>[];
+  if (!cols.some((c) => c.name === "label")) {
+    db.exec("ALTER TABLE versions ADD COLUMN label TEXT");
+  }
   return { db, close: () => db.close() };
 }
 
