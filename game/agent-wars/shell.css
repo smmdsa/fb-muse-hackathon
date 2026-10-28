@@ -1,0 +1,123 @@
+/* Shared shell aligned with agent-wars.html reference.
+   Arena contract: canvas#arena, scoreboard IDs, window.playServerReplay
+   stay untouched. This file only adds layout around .shell. */
+.app {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.side {
+  background: #0c151b;
+  border-right: 1px solid var(--line);
+  padding: 24px 14px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.logo {
+  font-family: var(--display);
+  font-size: 23px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  font-style: italic;
+  padding: 0 9px;
+  margin: 0;
+}
+
+.logo span { color: var(--a); }
+
+.micro {
+  padding: 0 10px;
+  margin: 0 0 32px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--dim);
+}
+
+.nav { display: grid; gap: 4px; }
+
+.nav a {
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 12px;
+  padding: 13px;
+  border-radius: 4px;
+  text-decoration: none;
+  display: block;
+}
+
+.nav a:hover,
+.nav a.on {
+  background: #1c3438;
+  color: var(--a);
+}
+
+.nav a.on { box-shadow: inset 3px 0 var(--a); }
+
+.nav b {
+  display: inline-block;
+  width: 26px;
+  font-size: 16px;
+}
+
+.season {
+  margin-top: auto;
+  border: 1px solid var(--line);
+  padding: 14px;
+  background: #14242a;
+}
+
+.season strong { display: block; color: var(--gold); margin: 5px 0; }
+.season small { color: var(--dim); }
+
+.crumb {
+  height: 67px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  background: var(--panel-low);
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.crumb strong { color: var(--gold); }
+
+.content { max-width: 1500px; margin: 0 auto; padding: 30px 32px 70px; }
+
+.shell { max-width: 1500px; }
+
+#arena {
+  aspect-ratio: 16 / 10.67;
+}
+
+@media (max-width: 950px) {
+  .app { grid-template-columns: 175px 1fr; }
+  .content { padding: 24px; }
+}
+
+@media (max-width: 700px) {
+  .app { display: block; }
+  .side { height: auto; position: static; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .micro, .season { display: none; }
+  .nav { display: flex; overflow: auto; }
+  .nav a { white-space: nowrap; }
+  .crumb { height: 52px; padding: 0 16px; }
+  .content { padding: 20px 15px 50px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; }
+}

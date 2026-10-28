@@ -8,9 +8,24 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="./style.css" />
+<link rel="stylesheet" href="./shell.css" />
 </head>
 <body>
-<main class="shell">
+<div class="app">
+<aside class="side">
+<p class="logo">AGENT<span>///</span>WARS</p>
+<p class="micro">The robot combat league</p>
+<nav class="nav" aria-label="Navegación">
+<a href="./index.html"><b>⌂</b> MANDO</a>
+<a href="./profile.html"><b>◇</b> BARRACA</a>
+<a class="on" href="./tournaments.html"><b>⚑</b> CAMPEONATOS</a>
+<a href="./public.html"><b>⬡</b> RANKING</a>
+</nav>
+<div class="season"><span class="micro">Temporada 01</span><strong>La forja</strong><small>Tu estrategia empieza aquí.</small></div>
+</aside>
+<div>
+<div class="crumb"><span>AGENT WARS / <strong>CAMPEONATOS</strong></span><span>COMMANDER</span></div>
+<main class="shell content">
 <header class="top">
 <div>
 <p class="sub">Championship — frozen policies</p>
@@ -18,10 +33,6 @@
 <p class="sub">S1 Kickoff Cup. Eight seats. One champion.</p>
 </div>
 <div class="pills">
-<a class="pill link" href="./index.html">command</a>
-<a class="pill link" href="./profile.html">barracks</a>
-<a class="pill link" href="./tournaments.html">cup</a>
-<a class="pill link" href="./public.html">ranks</a>
 <span class="pill" id="pill-who">signed out</span>
 </div>
 </header>
@@ -33,6 +44,11 @@
 <a class="link-quiet" href="./profile.html">Prepare in the barracks</a>
 </div>
 <p class="sub" id="cup-empty" hidden>No entries yet — be the first to register. Registration locks your installed chip.</p>
+<div class="steps">
+<div class="step"><b>01 · Register</b><span>Enter your agent with its installed chip.</span></div>
+<div class="step"><b>02 · Bracket</b><span>Eight seats, single elimination.</span></div>
+<div class="step"><b>03 · Final</b><span>One champion takes the cup.</span></div>
+</div>
 </section>
 <section class="panel" id="bracket-card" hidden>
 <h2>Bracket</h2>
@@ -44,6 +60,8 @@
 </section>
 <p class="sub">Run an event? Organizers work in the <a href="./admin.html">admin console</a>.</p>
 </main>
+</div>
+</div>
 <script src="./tournaments.js"></script>
 </body>
 </html>

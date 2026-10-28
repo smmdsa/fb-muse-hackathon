@@ -8,19 +8,31 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="./style.css" />
+<link rel="stylesheet" href="./shell.css" />
 </head>
 <body>
-<main class="shell">
+<div class="app">
+<aside class="side">
+<p class="logo">AGENT<span>///</span>WARS</p>
+<p class="micro">The robot combat league</p>
+<nav class="nav" aria-label="Navegación">
+<a href="./index.html"><b>⌂</b> MANDO</a>
+<a href="./profile.html"><b>◇</b> BARRACA</a>
+<a href="./tournaments.html"><b>⚑</b> CAMPEONATOS</a>
+<a class="on" href="./public.html"><b>⬡</b> RANKING</a>
+</nav>
+<div class="season"><span class="micro">Temporada 01</span><strong>La forja</strong><small>Tu estrategia empieza aquí.</small></div>
+</aside>
+<div>
+<div class="crumb"><span>AGENT WARS / <strong>RANKING</strong></span><span>COMMANDER</span></div>
+<main class="shell content">
 <header class="top">
 <div>
 <h1>Agent Wars</h1>
 <p class="sub">Fighter card — a public career, no secrets inside.</p>
 </div>
 <div class="pills">
-<a class="pill link" href="./index.html">command</a>
-<a class="pill link" href="./profile.html">barracks</a>
-<a class="pill link" href="./tournaments.html">cup</a>
-<a class="pill link" href="./public.html">ranks</a>
+<span class="pill">public card</span>
 </div>
 </header>
 <section class="panel" id="card" hidden>
@@ -54,6 +66,8 @@
 <p class="sub" id="report-login" hidden><a href="./profile.html">Sign in</a> to send a report.</p>
 </section>
 </main>
+</div>
+</div>
 <script src="./public.js"></script>
 </body>
 </html>
