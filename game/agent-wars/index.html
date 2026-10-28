@@ -16,7 +16,7 @@
 <a class="on" href="./index.html"><b>⌂</b> COMMAND</a>
 <a href="./profile.html"><b>◇</b> BARRACKS</a>
 <a href="./chip.html"><b>▦</b> CHIP LAB</a>
-<a href="./index.html#arena-card"><b>◉</b> ARENA</a>
+<a href="./arena.html"><b>◉</b> ARENA</a>
 <a href="./public.html"><b>⬡</b> RANKS</a>
 <a href="./tournaments.html"><b>⚑</b> CUP</a>
 <a href="./armory.html"><b>◈</b> ARMORY</a>
@@ -34,7 +34,6 @@
 </div>
 <div class="pills">
 <span class="pill" id="pill-who">signed out</span>
-<span class="pill" id="pill-state">ready</span>
 </div>
 </header>
 <section class="panel" id="home-hero">
@@ -44,7 +43,7 @@
 <span class="pill">● SYSTEMS READY</span>
 <p class="sub">Your agent fights. Your strategy guides it.</p>
 <div class="next-actions">
-<a class="btn-primary" href="#arena-card">Enter the arena →</a>
+<a class="btn-primary" href="./arena.html">Enter the arena →</a>
 <a class="btn-ghost" href="./profile.html">View agent</a>
 </div>
 </div>
@@ -86,7 +85,7 @@
 </div>
 <div class="next-actions">
 <a id="cta-primary" class="btn-primary" href="./profile.html">Create my agent</a>
-<a class="btn-ghost" href="#arena-card" id="cta-sandbox">Watch a fight</a>
+<a class="btn-ghost" href="./arena.html" id="cta-sandbox">Watch a fight</a>
 <a class="link-quiet" href="./tournaments.html">View cup</a>
 </div>
 <p class="sub" id="lobby-auto">Sign in to link your agent.</p>
@@ -96,70 +95,10 @@
 <div class="panel"><h2>Energy</h2><p class="result"><span id="lower-energy">—</span></p><div class="rank-bar"><i id="lower-energybar" style="width:0%"></i></div><p class="sub">1 energy per fight.</p></div>
 <div class="panel"><h2>Next event</h2><p class="result">S1 KICKOFF CUP</p><p class="sub">8 seats · free entry.</p><div class="row"><a class="btn-ghost" href="./tournaments.html">View cup</a></div></div>
 </div>
-<section class="panel" id="quick-card">
-<h2>Fight selection</h2>
-<p class="sub" id="qm-pick">Check your agent and chip. Then queue.</p>
-<div class="row">
-<button id="qm-casual" class="btn-primary" type="button">Casual</button>
-<button id="qm-ranked" class="btn-ghost" type="button">Ranked</button>
-<button id="qm-find" class="btn-primary" type="button">Find fight</button>
-<button id="qm-cancel" class="btn-ghost" type="button" hidden>Cancel ticket</button>
-<span class="pill" id="qm-energy">energy —</span>
-<span class="pill" id="qm-clock" hidden>0s</span>
-</div>
-<p class="sub" id="qm-status">Same-ELO humans first. Casual falls back to a sparring bot after 30 seconds. Ranked waits for humans. One energy per fight.</p>
-<p class="sub" id="qm-result" hidden></p>
-</section>
-<section class="panel" id="arena-card">
+<section class="panel" id="arena-teaser">
 <h2>Arena</h2>
-<div class="score" aria-live="polite">
-<div class="side"><img id="score-a-img" alt="Cyan agent" src="" hidden /><div><span class="name tag-a" id="score-a-name">CYAN</span><div class="bar"><div class="fill hp-a" id="hp-a"></div></div><div class="bar thin"><div class="fill en-a" id="en-a"></div></div></div></div>
-<div class="clock"><span id="arena-clock">90</span>s<br /><span class="pill" id="pill-winner">no winner yet</span></div>
-<div class="side right"><div><span class="name tag-b" id="score-b-name">CRIMSON</span><div class="bar"><div class="fill hp-b" id="hp-b"></div></div><div class="bar thin"><div class="fill en-b" id="en-b"></div></div></div><img id="score-b-img" alt="Crimson agent" src="" hidden /></div>
-</div>
-<div class="stage">
-<canvas id="arena" width="960" height="640" role="img" aria-label="Top-down robot arena. Two robots duel with cover blocks."></canvas>
-<div class="overlay" id="arena-overlay"><div><p class="eyebrow">The Forge · agent duel</p><strong>THE ARENA AWAITS</strong><p class="sub">Queue a fight above — the replay plays here.</p></div></div>
-<div class="endcard" id="endcard" hidden>
-<h2 id="end-title">Winner</h2>
-<p id="end-stats"></p>
-<p class="sub" id="end-econ"></p>
-<div class="next-actions">
-<button id="again-btn" class="btn-primary" type="button">Fight again</button>
-<a class="btn-ghost" href="./profile.html">Open barracks</a>
-</div>
-</div>
-</div>
-<div class="row">
-<button id="pause-btn" class="btn-ghost" type="button" disabled>Pause</button>
-<button id="speed-btn" class="btn-ghost" type="button">Speed 1x</button>
-<a class="link-quiet" href="./chip.html" id="arena-profile-link">Review chips in Chip Lab</a>
-</div>
-<details class="diag">
-<summary>Diagnostics (optional)</summary>
-<p class="sub" id="diag-line">Tick, seed, and compile detail live here. The fight does not need them.</p>
-<p class="sub"><span class="pill" id="pill-tick">tick 0</span> <span class="pill" id="pill-seed">seed forge-001</span> <span class="pill" id="diag-compact">local sim</span></p>
-</details>
-</section>
-<section class="panel" id="title-card" hidden>
-<h2>Sandbox sparring</h2>
-<p>Try two prompts in THE_FORGE. This sandbox never touches rank, and its chips are not saved. Ranked fights start from Fight selection above.</p>
-<p class="sub">To keep a chip, compile it in the barracks — that is the one the arena uses.</p>
-<div class="row">
-<label for="prompt-a">Cyan prompt</label>
-<input id="prompt-a" name="prompt-a" value="evade and snipe from far away" maxlength="120" />
-</div>
-<div class="row">
-<label for="prompt-b">Crimson prompt</label>
-<input id="prompt-b" name="prompt-b" value="rush them down up close" maxlength="120" />
-</div>
-<p class="sub" id="dna-line">No compile yet.</p>
-<div class="row">
-<label for="seed">Seed</label>
-<input id="seed" name="seed" value="forge-001" maxlength="40" />
-<button id="start-btn" class="btn-primary" type="button">Start battle</button>
-<button id="restart-btn" class="btn-ghost" type="button" disabled>Restart</button>
-</div>
+<p class="sub">Queue normal or ranked. Matches auto-accept into the battle view.</p>
+<div class="row"><a class="btn-primary" href="./arena.html">Enter the arena</a></div>
 </section>
 <section class="panel" id="rank-card-panel">
 <h2>Your division</h2>
@@ -177,15 +116,10 @@
 <figure><img alt="Singularity shield" src="./assets/shields/singularity.png" /><figcaption>SINGULARITY<small>1200+ AP</small></figcaption></figure>
 </div>
 </section>
-<section class="panel">
-<h2>Events</h2>
-<ol id="feed"></ol>
-</section>
 </main>
 </div>
 </div>
 <script src="./ui.js"></script>
-<script src="./game.js"></script>
-<script src="./match.js"></script>
+<script src="./command.js"></script>
 </body>
 </html>

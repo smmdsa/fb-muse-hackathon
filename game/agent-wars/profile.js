@@ -238,7 +238,7 @@ function tourSteps() {
       eyebrow: "Act 3 of 3",
       title: "ENTER ARENA",
       body: "Queue from the arena for your first fight — training counts. Your first bout pays the last 200 AC.",
-      cta: { label: "Enter arena", href: "./index.html#arena-card" },
+      cta: { label: "Enter arena", href: "./arena.html" },
     },
     {
       target: "#welcome-card",
@@ -291,15 +291,15 @@ function paintHeroActions(hasDraft, hasActive) {
     p.textContent = "Program first chip";
     p.href = "./chip.html";
     s.textContent = "Enter arena";
-    s.href = "./index.html#arena-card";
+    s.href = "./arena.html";
   } else if (!hasActive) {
     p.textContent = "Install a chip";
     p.href = "./chip.html";
     s.textContent = "Enter arena";
-    s.href = "./index.html#arena-card";
+    s.href = "./arena.html";
   } else {
     p.textContent = "Enter arena";
-    p.href = "./index.html#arena-card";
+    p.href = "./arena.html";
     s.textContent = "Open Chip Lab";
     s.href = "./chip.html";
   }
@@ -397,7 +397,7 @@ async function renderAuto() {
     p.className = "sub";
     p.textContent = `${h.winner} wins in ${h.ticks} ticks — AP ${h.myDelta >= 0 ? "+" : ""}${h.myDelta} · ${h.myPaid} AC `;
     const a = document.createElement("a");
-    a.href = `./index.html?replay=${h.matchId}`;
+    a.href = `./arena.html?replay=${h.matchId}`;
     a.className = "link-quiet";
     a.textContent = "replay";
     p.appendChild(a);
@@ -422,7 +422,7 @@ function renderHist(d) {
     const foe = String(h.foe || "").startsWith("bot:") ? `sparring ${h.foe}` : `vs ${h.foe}`;
     p.textContent = `${h.winner} wins in ${h.ticks} ticks ${foe} — ${econ} `;
     const a = document.createElement("a");
-    a.href = `./index.html?replay=${h.matchId}`;
+    a.href = `./arena.html?replay=${h.matchId}`;
     a.className = "link-quiet";
     a.textContent = "replay";
     p.appendChild(a);
