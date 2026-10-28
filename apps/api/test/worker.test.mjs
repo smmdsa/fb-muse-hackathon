@@ -46,6 +46,9 @@ before(() => {
   db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     "l1", "commander", "t1", 1020000, 520, 5, 1,
   );
+  db.prepare("INSERT INTO agents (id, leader_id, active_version_id, name) VALUES (?, ?, ?, ?)").run(
+    "a1", "l1", null, "NOVA-7",
+  );
   env = { DB: shim(db), ASSETS: assetsStub };
 });
 
@@ -61,6 +64,8 @@ describe("worker reads", () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.deepEqual(body.rows.map((r) => r.leaderId), ["l1"]);
+    assert.equal(body.rows[0].handle, "commander");
+    assert.equal(body.rows[0].agentName, "NOVA-7");
   });
 
   it("denies unknown routes without a token", async () => {

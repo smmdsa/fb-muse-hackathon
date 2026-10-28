@@ -56,6 +56,9 @@ describe("matches", () => {
     assert.equal(board.status, 200);
     assert.ok(Array.isArray(board.json.rows));
     assert.equal(board.json.rows.length, 0);
+    const pub = await call("GET", "/v1/leaderboard");
+    assert.equal(pub.status, 200);
+    assert.ok(Array.isArray(pub.json.rows));
   });
 
   it("dedupes a repeated ranked key", async () => {

@@ -20,12 +20,63 @@ function silhouetteFor(id, skin) {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
+async function renderStandings() {
+  const empty = $("standings-empty");
+  const table = $("standings-table");
+  const body = $("standings-body");
+  let res;
+  try {
+    res = await fetch("/v1/leaderboard");
+  } catch {
+    res = null;
+  }
+  if (!res || res.status !== 200) {
+    empty.textContent = "Standings unavailable — run the API and retry.";
+    return;
+  }
+  const data = await res.json().catch(() => ({}));
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  if (data.seasonId) $("standings-sub").textContent = `Season ${data.seasonId} · best first.`;
+  if (!rows.length) {
+    empty.textContent = "No placed leaders yet — be the first to climb.";
+    return;
+  }
+  const mine = token ? (localStorage.getItem("aw_handle") || "") : "";
+  body.textContent = "";
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    if (mine && r.handle === mine) tr.className = "me";
+    const pos = document.createElement("td");
+    pos.textContent = String(r.rank ?? "—");
+    const op = document.createElement("td");
+    if (r.handle) {
+      const a = document.createElement("a");
+      a.href = `./public.html?handle=${encodeURIComponent(r.handle)}`;
+      a.textContent = r.handle;
+      op.appendChild(a);
+    } else {
+      op.textContent = "—";
+    }
+    const ag = document.createElement("td");
+    ag.textContent = r.agentName || "—";
+    const tier = document.createElement("td");
+    tier.textContent = `${r.tier || "—"}${r.division ? " " + r.division : ""}`;
+    const ap = document.createElement("td");
+    ap.textContent = String(r.ap ?? "—");
+    tr.append(pos, op, ag, tier, ap);
+    body.appendChild(tr);
+  }
+  show(empty, false);
+  show(table, true);
+}
+
 async function main() {
   const handle = new URLSearchParams(location.search).get("handle") || "";
   if (!handle) {
-    show($("missing"), true);
+    await renderStandings();
     return;
   }
+  show($("standings-card"), false);
   const res = await fetch(`/v1/leaders/${encodeURIComponent(handle)}/public`);
   if (res.status !== 200) {
     show($("missing"), true);
@@ -50,6 +101,7 @@ async function main() {
     try {
       await navigator.clipboard.writeText(location.href);
       show($("copy-msg"), true);
+      if (typeof window.toast === "function") window.toast("Link copied.");
     } catch {
       $("copy-msg").textContent = "Copy failed — grab the address bar URL instead.";
       show($("copy-msg"), true);
@@ -66,6 +118,7 @@ async function main() {
       const msg = $("report-msg");
       msg.textContent = r.status === 200 ? "Report received. Thanks." : "Report failed — say why in a few words.";
       show(msg, true);
+      if (typeof window.toast === "function" && r.status === 200) window.toast("Report received. Thanks.");
     });
   }
 }
