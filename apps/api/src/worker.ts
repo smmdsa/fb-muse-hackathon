@@ -101,6 +101,9 @@ async function bearer(request: Request, env: WorkerEnv): Promise<Record<string, 
 // The leaderboard reads placed leaders for one season, best first.
 async function leaderboard(env: WorkerEnv, seasonId: string): Promise<Response> {
   const { results } = await env.DB.prepare("SELECT * FROM leaders").bind().all<Record<string, unknown>>();
+  const { results: agents } = await env.DB.prepare("SELECT leader_id, name FROM agents").bind().all<Record<string, unknown>>();
+  const names = new Map(agents.map((a) => [a.leader_id as string, a.name as string | null]));
+  const handles = new Map(results.map((r) => [r.id as string, r.handle as string]));
   const rows = buildStandings(
     seasonId,
     results.map((r) => ({
@@ -113,7 +116,7 @@ async function leaderboard(env: WorkerEnv, seasonId: string): Promise<Response> 
       rankTier: rankFor(r.ap as number).tier,
       division: rankFor(r.ap as number).division,
     })),
-  );
+  ).map((s) => ({ ...s, handle: handles.get(s.leaderId) ?? null, agentName: names.get(s.leaderId) ?? null }));
   return json({ seasonId, rows });
 }
 

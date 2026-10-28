@@ -93,6 +93,7 @@ function renderGames(cup) {
       p.textContent = `${slotId} · ${short(matchId)} `;
       const a = document.createElement("a");
       a.href = `./index.html?replay=${matchId}`;
+      a.className = "link-quiet";
       a.textContent = "replay";
       p.appendChild(a);
       box.appendChild(p);
@@ -122,6 +123,19 @@ $("cup-register").addEventListener("click", async () => {
     ? "Eighth seat filled — the bracket played to a champion."
     : "Registered — frozen at lock.";
   await refresh();
+  if (typeof window.showModal === "function") {
+    window.showModal({
+      eyebrow: "S1 Kickoff Cup",
+      title: r.data.started ? "BRACKET COMPLETE" : "REGISTERED",
+      body: r.data.started
+        ? "Eighth seat filled — the bracket played to a champion."
+        : `Version ${short(version)} locked in. Win to advance.`,
+      actions: [
+        { label: "View bracket", primary: true, onClick: () => $("bracket-card").scrollIntoView() },
+        { label: "Close" },
+      ],
+    });
+  }
 });
 
 $("pill-who").textContent = token ? (localStorage.getItem(HANDLE_KEY) || "signed in") : "signed out";

@@ -28,14 +28,23 @@
 <main class="shell content">
 <header class="top">
 <div>
-<p class="eyebrow">Public career — no secrets inside</p>
-<h1>FIGHTER CARD</h1>
-<p class="sub">A public career, no secrets inside.</p>
+<p class="eyebrow">Season standings — no secrets inside</p>
+<h1>RANKS</h1>
+<p class="sub">Season standings and public fighter cards.</p>
 </div>
 <div class="pills">
 <span class="pill">public card</span>
 </div>
 </header>
+<section class="panel" id="standings-card">
+<h2>Standings</h2>
+<p class="sub" id="standings-sub">Season local-s1 · best first.</p>
+<table class="table" id="standings-table" hidden>
+<thead><tr><th>POS</th><th>OPERATOR</th><th>AGENT</th><th>TIER</th><th>AP</th></tr></thead>
+<tbody id="standings-body"></tbody>
+</table>
+<p class="sub" id="standings-empty">Loading standings…</p>
+</section>
 <section class="panel" id="card" hidden>
 <h2 id="card-name">—</h2>
 <div class="hero">
@@ -64,11 +73,12 @@
 <button id="report-btn" class="btn-ghost" type="button">Send report</button>
 </div>
 <p class="sub" id="report-msg" hidden></p>
-<p class="sub" id="report-login" hidden><a href="./profile.html">Sign in</a> to send a report.</p>
+<p class="sub" id="report-login" hidden><a class="link-quiet" href="./profile.html">Sign in</a> to send a report.</p>
 </section>
 </main>
 </div>
 </div>
+<script src="./ui.js"></script>
 <script src="./public.js"></script>
 </body>
 </html>

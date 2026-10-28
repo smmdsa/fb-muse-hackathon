@@ -99,6 +99,9 @@ async function qmBoot() {
   const hasAgent = Boolean(me.data.agent);
   const hasChip = Boolean(qmVersion);
   qmEnergy.textContent = `energy ${me.data.energy.energy}/${me.data.energy.energyMax}`;
+  setText("lower-energy", `${me.data.energy.energy}/${me.data.energy.energyMax}`);
+  const lowerBar = document.getElementById("lower-energybar");
+  if (lowerBar) lowerBar.style.width = `${(me.data.energy.energy / Math.max(1, me.data.energy.energyMax)) * 100}%`;
   const autoLine = me.data.auto && me.data.auto.optIn
     ? `AutoBattle on — ${me.data.auto.state}.`
     : "AutoBattle off — start it in the barracks.";
@@ -187,6 +190,8 @@ async function qmPoll(ticketId, left) {
     qmResult.hidden = false;
     qmResult.textContent = `${m.winner} wins in ${m.ticks} ticks vs ${foe}. ${m.rated ? "Rated." : "Unrated."} Details on the dashboard.`;
     qmSay("Fight settled — loading the server replay.");
+    setText("lower-last", `${m.winner} · ${m.ticks} TICKS`);
+    toastSay(`${m.winner} wins in ${m.ticks} ticks.`);
     qmFind.disabled = false;
     if (qmCancel) qmCancel.hidden = true;
     qmTicket = "";
@@ -242,6 +247,8 @@ qmFind.addEventListener("click", async () => {
     const m = r.data.match;
     qmResult.hidden = false;
     qmResult.textContent = `${m.winner} wins in ${m.ticks} ticks. ${m.rated ? "Rated." : "Unrated sparring."}`;
+    setText("lower-last", `${m.winner} · ${m.ticks} TICKS`);
+    toastSay(`${m.winner} wins in ${m.ticks} ticks.`);
     qmSay("Matched at once — loading the server replay.");
     qmFind.disabled = false;
     qmClockStop();
@@ -300,6 +307,30 @@ if (qmCancel) {
       qmSay(`Cancel failed: ${r.data.error || r.status}.`);
     }
   });
+}
+
+function hideArenaOverlay() {
+  const o = document.getElementById("arena-overlay");
+  if (o) o.hidden = true;
+}
+
+// Every server replay path runs through this bridge. Same signature,
+// same contract — the overlay just steps aside first.
+if (typeof window.playServerReplay === "function") {
+  const bridge = window.playServerReplay;
+  window.playServerReplay = (replay, meta) => {
+    hideArenaOverlay();
+    bridge(replay, meta);
+  };
+}
+
+for (const id of ["start-btn", "again-btn"]) {
+  const b = document.getElementById(id);
+  if (b) b.addEventListener("click", hideArenaOverlay);
+}
+
+function toastSay(msg) {
+  if (typeof window.toast === "function") window.toast(msg);
 }
 
 qmPick("casual");

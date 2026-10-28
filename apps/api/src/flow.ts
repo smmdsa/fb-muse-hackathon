@@ -190,6 +190,9 @@ export function creditAc(
 // The board lists placed leaders for the local season.
 export function board(store: Store, limit = 100): unknown[] {
   const rows = store.db.prepare("SELECT * FROM leaders").all() as Record<string, unknown>[];
+  const agents = store.db.prepare("SELECT leader_id, name FROM agents").all() as Record<string, unknown>[];
+  const names = new Map(agents.map((a) => [a.leader_id as string, a.name as string | null]));
+  const handles = new Map(rows.map((r) => [r.id as string, r.handle as string]));
   return buildStandings(
     "local-s1",
     rows.map((r) => ({
@@ -203,7 +206,7 @@ export function board(store: Store, limit = 100): unknown[] {
       division: rankFor(r.ap as number).division,
     })),
     limit,
-  );
+  ).map((s) => ({ ...s, handle: handles.get(s.leaderId) ?? null, agentName: names.get(s.leaderId) ?? null }));
 }
 
 // Breeding creates the hero row. With an image key it also paints the portrait

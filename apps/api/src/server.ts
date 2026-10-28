@@ -122,6 +122,10 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         }
         return;
       }
+      if (req.method === "GET" && url.pathname === "/v1/leaderboard") {
+        send(res, 200, { seasonId: "local-s1", rows: board(ctx.store) });
+        return;
+      }
       if (req.method === "POST" && url.pathname === "/v1/admin/events") {
         if (adminDenied(req, res)) return;
         const id = typeof body.id === "string" ? body.id : "";
@@ -487,10 +491,6 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           const message = (err as Error).message;
           send(res, message.startsWith("not owned") ? 404 : 422, { error: message });
         }
-        return;
-      }
-      if (req.method === "GET" && url.pathname === "/v1/leaderboard") {
-        send(res, 200, { seasonId: "local-s1", rows: board(ctx.store) });
         return;
       }
       const replayMatch = req.method === "GET" && /^\/v1\/matches\/[^/]+\/replay$/.test(url.pathname);

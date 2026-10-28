@@ -91,6 +91,11 @@
 </div>
 <p class="sub" id="lobby-auto">Sign in to link your agent.</p>
 </section>
+<div class="lower">
+<div class="panel"><h2>Last fight</h2><p class="result" id="lower-last">NO FIGHTS YET</p><p class="sub">Results land here after each bout.</p><div class="row"><a class="btn-ghost" href="./profile.html">Open barracks</a></div></div>
+<div class="panel"><h2>Energy</h2><p class="result"><span id="lower-energy">—</span></p><div class="rank-bar"><i id="lower-energybar" style="width:0%"></i></div><p class="sub">1 energy per fight.</p></div>
+<div class="panel"><h2>Next event</h2><p class="result">S1 KICKOFF CUP</p><p class="sub">8 seats · free entry.</p><div class="row"><a class="btn-ghost" href="./tournaments.html">View cup</a></div></div>
+</div>
 <section class="panel" id="quick-card">
 <h2>Fight selection</h2>
 <p class="sub" id="qm-pick">Check your agent and chip. Then queue.</p>
@@ -114,6 +119,7 @@
 </div>
 <div class="stage">
 <canvas id="arena" width="960" height="640" role="img" aria-label="Top-down robot arena. Two robots duel with cover blocks."></canvas>
+<div class="overlay" id="arena-overlay"><div><p class="eyebrow">The Forge · agent duel</p><strong>THE ARENA AWAITS</strong><p class="sub">Queue a fight above — the replay plays here.</p></div></div>
 <div class="endcard" id="endcard" hidden>
 <h2 id="end-title">Winner</h2>
 <p id="end-stats"></p>
@@ -178,6 +184,7 @@
 </main>
 </div>
 </div>
+<script src="./ui.js"></script>
 <script src="./game.js"></script>
 <script src="./match.js"></script>
 </body>

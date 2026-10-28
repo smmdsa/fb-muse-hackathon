@@ -459,10 +459,25 @@ $("lab-btn").addEventListener("click", async () => {
   }
 });
 
+const GATED = { "#train-card": "Chip Lab", "#lab-card": "Evolution Lab", "#armory-card": "Armory", "#hist-card": "Fight history", "#dash-card": "Chips dashboard" };
+
+// Sidebar anchors land on locked sections while signed out. Say so once,
+// then point at the login card instead of a blank scroll.
+function gatedHashNote() {
+  const hit = GATED[location.hash];
+  if (!hit || token) return;
+  if (typeof window.toast === "function") window.toast(`Sign in to unlock the ${hit}.`);
+  const login = $("login-card");
+  if (login) login.scrollIntoView();
+}
+
 async function boot() {
   const handle = localStorage.getItem(HANDLE_KEY) || "";
   if (handle) $("handle").value = handle;
-  if (!token) return;
+  if (!token) {
+    gatedHashNote();
+    return;
+  }
   $("pill-who").textContent = localStorage.getItem(HANDLE_KEY) || "signed in";
   const me = await call("GET", "/v1/me");
   if (me.status !== 200) {
