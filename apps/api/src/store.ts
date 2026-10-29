@@ -11,6 +11,7 @@ export type Store = {
 export function openStore(path: string): Store {
   const db = new DatabaseSync(path);
   db.exec(`
+    CREATE TABLE IF NOT EXISTS ai_cooldowns (leader_id TEXT PRIMARY KEY, next_allowed_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS leaders (
       id TEXT PRIMARY KEY,
       handle TEXT UNIQUE NOT NULL,

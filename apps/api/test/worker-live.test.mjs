@@ -28,7 +28,7 @@ const assetsStub = {
   }),
 };
 
-const MIGRATIONS = ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0012_match_mode"];
+const MIGRATIONS = ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0012_match_mode", "0013_ai_cooldowns"];
 
 function freshDb() {
   const db = new DatabaseSync(":memory:");

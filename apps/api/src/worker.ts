@@ -17,7 +17,6 @@ import { checkLimit } from "./ids.ts";
 
 // Per-route sliding windows. Memory-only per isolate.
 const authHits = new Map<string, number[]>();
-const compileHits = new Map<string, number[]>();
 const queueHits = new Map<string, number[]>();
 const trainHits = new Map<string, number[]>();
 const labHits = new Map<string, number[]>();
@@ -63,6 +62,19 @@ function json(body: unknown, code = 200): Response {
       "access-control-allow-headers": "authorization, content-type",
     },
   });
+}
+
+const AI_COOLDOWN_MS = 300_000;
+async function cooldownStatus(env: WorkerEnv, leader: string, now = Date.now()) {
+  const row = await env.DB.prepare("SELECT next_allowed_at FROM ai_cooldowns WHERE leader_id = ?").bind(leader).first<{ next_allowed_at: number }>();
+  const nextAllowedAt = row?.next_allowed_at ?? 0;
+  return { nextAllowedAt, retryAfterSeconds: Math.max(0, Math.ceil((nextAllowedAt - now) / 1000)) };
+}
+async function reserveAi(env: WorkerEnv, leader: string): Promise<Response | null> {
+  const now = Date.now();
+  const row = await env.DB.prepare("INSERT INTO ai_cooldowns (leader_id, next_allowed_at) VALUES (?, ?) ON CONFLICT(leader_id) DO UPDATE SET next_allowed_at = excluded.next_allowed_at WHERE ai_cooldowns.next_allowed_at <= ? RETURNING next_allowed_at").bind(leader, now + AI_COOLDOWN_MS, now).first<{ next_allowed_at: number }>();
+  if (row) return null;
+  return json({ error: "The AI factory is recharging. Your next build will be ready soon.", ...await cooldownStatus(env, leader, now) }, 429);
 }
 
 let counter = 0;
@@ -922,6 +934,7 @@ export default {
     }
     const me = await bearer(request, env);
     if (!me) return json({ error: "bearer token is required: call POST /v1/auth/session first" }, 401);
+    if (request.method === "GET" && url.pathname === "/v1/ai/cooldown") return json(await cooldownStatus(env, me.id as string));
     if (request.method === "GET" && url.pathname === "/v1/me") {
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(me.id as string).first<Record<string, unknown>>();
       const auto = await autoTickD1(env, me.id as string, Date.now());
@@ -956,6 +969,8 @@ export default {
       let portraitStatus = "faceless";
       let breedError: string | null = "portraits need META_IMAGE_KEY; set the secret first";
       if (hasKey("portrait", env)) {
+         const cooling = await reserveAi(env, me.id as string);
+         if (cooling) return cooling;
         try {
           const art = await portraitFromEnv(env).generatePortrait({
             prompt: portraitPromptFor(`${name || "arena robot"}: ${concept || "arena fighter"}`),
@@ -991,6 +1006,8 @@ export default {
       let portraitStatus = "faceless";
       let retryError: string | null = "portraits need META_IMAGE_KEY; set the secret first";
       if (hasKey("portrait", env)) {
+         const cooling = await reserveAi(env, me.id as string);
+         if (cooling) return cooling;
         try {
           const art = await portraitFromEnv(env).generatePortrait({
             prompt: portraitPromptFor(`${(target.name as string) || "arena robot"}: ${(target.concept as string) || "arena fighter"}`),
@@ -1021,7 +1038,6 @@ export default {
     }
     const compileMatch = request.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/compile$/.test(url.pathname);
     if (compileMatch) {
-      if (limited(compileHits, me.id as string, 60_000, 6)) return json({ error: "rate limited, retry later" }, 429);
       try {
       const agentId = url.pathname.split("/")[3];
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
@@ -1029,8 +1045,10 @@ export default {
       const body = await readBody(request);
       if (body === null) return json({ error: "bad json" }, 400);
       const prompt = typeof body.prompt === "string" ? body.prompt : "";
-      if (!prompt) return json({ error: "prompt is required" }, 400);
+       if (!prompt.trim()) return json({ error: "prompt is required" }, 400);
       if (prompt.trim().length > MAX_PROMPT) return json({ error: `prompt must stay under ${MAX_PROMPT} characters` }, 400);
+       const cooling = await reserveAi(env, me.id as string);
+       if (cooling) return cooling;
       const versionId = mintId("v");
       const compiled = await providerFromEnv(env).compileStrategy({ prompt: prompt.trim(), agentVersionId: versionId });
       const spent = { tokens: compiled.promptTokens, latencyMs: compiled.latencyMs };
@@ -1159,6 +1177,10 @@ export default {
       if (limited(analysisHits, me.id as string, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);
       const row = await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(decodeURIComponent(analysisMatch[0].split("/")[3])).first<Record<string, unknown>>();
       if (!row) return json({ error: "unknown match" }, 404);
+      if (hasKey("compile", env)) {
+        const cooling = await reserveAi(env, me.id as string);
+        if (cooling) return cooling;
+      }
       const chips = JSON.parse((row.chips_json as string) ?? '{"a":{},"b":{}}') as { a: Record<string, number>; b: Record<string, number> };
       const telemetry = {
         matchId: row.id as string,
@@ -1174,6 +1196,7 @@ export default {
       return json({ ...telemetry, explanation }, 200);
     }
     if (request.method === "POST" && url.pathname === "/v1/lab/ab") {
+      if (hasKey("compile", env)) return json({ error: "Evolution Lab is paused while the factory cooldown is active. Compare saved chips in a future update." }, 503);
       if (limited(labHits, me.id as string, 60_000, 6)) return json({ error: "rate limited, retry later" }, 429);
       const body = await readBody(request);
       if (body === null) return json({ error: "bad json" }, 400);
