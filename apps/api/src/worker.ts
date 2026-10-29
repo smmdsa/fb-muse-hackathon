@@ -500,7 +500,7 @@ async function findHumanOpponent(env: WorkerEnv, leaderId: string, now: number):
 
 async function runCasualD1(
   env: WorkerEnv,
-  input: { aVersionId: string; bVersionId?: string; leaderId: string; useBot: boolean; seed: string },
+  input: { aVersionId: string; bVersionId?: string; leaderId: string; useBot: boolean; seed: string; key?: string; otherLeaderId?: string },
 ): Promise<{ matchId: string; winner: string; ticks: number; checksum: string; foe: string; bot: boolean; paid: number }> {
   const v = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(input.aVersionId).first<Record<string, unknown>>();
   if (!v) throw new Error("unknown version");
@@ -517,14 +517,18 @@ async function runCasualD1(
     foePolicy = bot.policy;
   }
   const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, foePolicy, input.seed, DEFAULT_MOBA);
-  const id = mintId("m");
+  const id = input.key ?? mintId("m");
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   const plan = await planPay(env, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
+  const planB = input.otherLeaderId
+    ? await planPay(env, input.otherLeaderId, id, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest")
+    : null;
   const writes: unknown[] = [
     env.DB.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, 'moba')",
-    ).bind(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, plan.credited, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'moba')",
+    ).bind(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, plan.credited, planB?.credited ?? 0, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
     ...plan.stmts,
+    ...(planB ? planB.stmts : []),
   ];
   await env.DB.batch(writes as never[]);
   return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !input.bVersionId, paid: plan.credited, mode: "moba" };
@@ -555,6 +559,68 @@ async function settleTicketD1(env: WorkerEnv, ticket: Record<string, unknown>, f
     foeVersion ?? `bot:${ticket.leader_id}`, matchId, ticket.id,
   ).run();
   return (await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(ticket.id).first<Record<string, unknown>>()) as Record<string, unknown>;
+}
+
+// The live queue pairs waiting humans before the defense pool answers.
+// Earliest open ticket wins: same mode, another leader, still queued,
+// deadline ahead. Expired-but-unread tickets never pair.
+async function findLiveTicketD1(
+  env: WorkerEnv,
+  input: { mode: string; leaderId: string },
+  now: number,
+): Promise<Record<string, unknown> | null> {
+  return (await env.DB.prepare(
+    "SELECT * FROM tickets WHERE mode = ? AND status = 'queued' AND leader_id != ? AND settle_at > ? ORDER BY created_at ASC, id ASC LIMIT 1",
+  ).bind(input.mode, input.leaderId, now).first<Record<string, unknown>>()) ?? null;
+}
+
+// A live pair settles one fight for two queued tickets. The earlier ticket
+// names the match key, so a racing poll dedupes onto the same row instead
+// of starting a second fight. Both tickets stamp only while still queued,
+// so a foe that cancels mid-sim keeps the cancel and the fight still stands
+// for the waiter. A race loser re-reads what the winner left behind.
+async function settlePairD1(
+  env: WorkerEnv,
+  self: Record<string, unknown>,
+  live: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const liveFirst = (live.created_at as number) < (self.created_at as number)
+    || ((live.created_at as number) === (self.created_at as number) && (live.id as string) < (self.id as string));
+  const first = liveFirst ? live : self;
+  const second = liveFirst ? self : live;
+  for (const t of [first, second]) {
+    const fresh = await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(t.id).first<Record<string, unknown>>();
+    if (!fresh || fresh.status !== "queued") {
+      return (await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(self.id).first<Record<string, unknown>>()) as Record<string, unknown>;
+    }
+  }
+  const key = first.id as string;
+  const seed = `q-${first.id}`;
+  if ((self.mode as string) === "ranked") {
+    await settleRankedD1(env, { aVersionId: first.version_id as string, bVersionId: second.version_id as string, seed, key });
+  } else {
+    try {
+      await runCasualD1(env, {
+        aVersionId: first.version_id as string,
+        bVersionId: second.version_id as string,
+        leaderId: first.leader_id as string,
+        useBot: false,
+        seed,
+        key,
+        otherLeaderId: second.leader_id as string,
+      });
+    } catch {
+      const dupe = await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(key).first<Record<string, unknown>>();
+      if (!dupe) throw new Error("settle failed");
+    }
+  }
+  await env.DB.prepare("UPDATE tickets SET status = 'settled', foe_version = ?, match_id = ? WHERE id = ? AND status = 'queued'").bind(
+    second.version_id as string, key, first.id,
+  ).run();
+  await env.DB.prepare("UPDATE tickets SET status = 'settled', foe_version = ?, match_id = ? WHERE id = ? AND status = 'queued'").bind(
+    first.version_id as string, key, second.id,
+  ).run();
+  return (await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(self.id).first<Record<string, unknown>>()) as Record<string, unknown>;
 }
 
 async function settleRankedD1(
@@ -638,8 +704,10 @@ async function requestMatchD1(
   await env.DB.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)").bind(
     id, input.leaderId, input.versionId, input.mode, now, now + wait,
   ).run();
-  const foe = await findHumanOpponent(env, input.leaderId, now);
   const row = (await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(id).first<Record<string, unknown>>()) as Record<string, unknown>;
+  const live = await findLiveTicketD1(env, { mode: input.mode, leaderId: input.leaderId }, now);
+  if (live) return settlePairD1(env, row, live);
+  const foe = await findHumanOpponent(env, input.leaderId, now);
   if (foe) return settleTicketD1(env, row, foe.versionId);
   return row;
 }
@@ -653,6 +721,8 @@ async function readTicketD1(
   if (!ticket || ticket.leader_id !== input.leaderId) throw new Error("unknown ticket");
   if (ticket.status !== "queued") return withMatchD1(env, ticket);
   if (now < (ticket.settle_at as number)) {
+    const live = await findLiveTicketD1(env, { mode: ticket.mode as string, leaderId: input.leaderId as string }, now);
+    if (live) return withMatchD1(env, await settlePairD1(env, ticket, live));
     if (ticket.mode === "ranked") {
       const foe = await findHumanOpponent(env, input.leaderId, now);
       if (foe) return withMatchD1(env, await settleTicketD1(env, ticket, foe.versionId));
@@ -1185,6 +1255,8 @@ export default {
         return json({ error: "versionId and mode casual|ranked are required" }, 400);
       }
       if (limited(queueHits, me.id as string, 60_000, 6)) return json({ error: "rate limited, retry later" }, 429);
+      const resume = await env.DB.prepare("SELECT * FROM tickets WHERE leader_id = ? AND mode = ? AND status = 'queued'").bind(me.id as string, mode).first<Record<string, unknown>>();
+      if (resume) return json(await withMatchD1(env, resume), 200);
       try {
         const ticket = await requestMatchD1(env, { leaderId: me.id as string, versionId, mode }, Date.now());
         return json(await withMatchD1(env, ticket), 201);

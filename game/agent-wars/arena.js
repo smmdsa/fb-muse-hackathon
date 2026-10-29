@@ -175,7 +175,7 @@ function onSettled(m, instant) {
   arenaBoot();
 }
 
-async function pollTicket(ticketId, left) {
+async function pollTicket(ticketId, left, fails = 0) {
   if (left <= 0) {
     arenaSay("Still waiting. The ticket stays open — check back soon.");
     arenaTicket = "";
@@ -185,6 +185,13 @@ async function pollTicket(ticketId, left) {
   }
   const r = await arenaCall("GET", `/v1/matchmaking/${ticketId}`);
   if (r.status !== 200) {
+    // The settle runs the whole battle inside one request. A busy server
+    // answers 503 while it works, so the poll retries instead of dying.
+    if (fails < 8) {
+      arenaSay("Server is settling the battle — retrying…");
+      arenaTimer = setTimeout(() => pollTicket(ticketId, left, fails + 1), 5000);
+      return;
+    }
     arenaSay("Ticket lost. Queue again.");
     arenaTicket = "";
     queueBusy(false);
@@ -203,13 +210,21 @@ async function pollTicket(ticketId, left) {
     arenaBoot();
     return;
   }
+  if (r.data.status === "canceled") {
+    arenaSay("Ticket canceled — the charge is refunded. Queue again when ready.");
+    arenaTicket = "";
+    queueBusy(false);
+    clockStop();
+    arenaBoot();
+    return;
+  }
   if (arenaMode === "casual" && r.data.settle_at) {
     const secs = Math.max(0, Math.ceil((r.data.settle_at - Date.now()) / 1000));
     arenaSay(`Waiting for a same-ELO foe… sparring bot in ${secs}s. Cancel keeps your energy.`);
   } else {
     arenaSay("Waiting for a same-ELO human… Cancel keeps your energy.");
   }
-  arenaTimer = setTimeout(() => pollTicket(ticketId, left - 1), 5000);
+  arenaTimer = setTimeout(() => pollTicket(ticketId, left - 1, 0), 5000);
 }
 
 async function queue(mode) {
@@ -230,14 +245,15 @@ async function queue(mode) {
   arenaSay("Queueing… one energy.");
   clockStart();
   const r = await arenaCall("POST", "/v1/matchmaking/request", { versionId: arenaVersion, mode: arenaMode });
-  if (r.status !== 201) {
+  if (r.status !== 201 && r.status !== 200) {
     arenaSay(`Queue refused: ${r.data.error || r.status}.`);
     queueBusy(false);
     clockStop();
     return;
   }
+  if (r.status === 200) arenaSay("Ticket still open — resuming the wait.");
   if (r.data.status === "settled" && r.data.match) {
-    onSettled(r.data.match, true);
+    onSettled(r.data.match, r.status === 201);
     return;
   }
   arenaTicket = r.data.id || "";
