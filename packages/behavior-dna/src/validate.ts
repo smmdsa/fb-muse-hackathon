@@ -122,6 +122,10 @@ function checkRules(policy: AgentPolicy, errors: string[]): void {
 }
 
 function checkRule(rule: BehaviorRule, errors: string[], seen: Set<string>): void {
+  if (typeof rule !== "object" || rule === null || Array.isArray(rule)) {
+    errors.push("rule must be an object");
+    return;
+  }
   const tag = typeof rule.id === "string" ? rule.id : "?";
   if (!rule.id || typeof rule.id !== "string") {
     errors.push("rule id must be a stable non-empty id");
@@ -144,7 +148,10 @@ function checkRule(rule: BehaviorRule, errors: string[], seen: Set<string>): voi
       errors.push(`rule ${tag} buy names unknown item ${String(rule.buy)}`);
     }
   }
-  const known = new Set(["id", "when", "move", "fire", "dash", "shield", "buy"]);
+  if (rule.target !== undefined && !["AUTO", "FOE", "MINION", "STRUCTURE", "NONE"].includes(rule.target)) {
+    errors.push(`rule ${tag} names an unknown target`);
+  }
+  const known = new Set(["id", "when", "move", "fire", "dash", "shield", "buy", "target"]);
   for (const key of Object.keys(rule)) {
     if (!known.has(key)) {
       errors.push(`rule ${tag} holds unknown field ${key}`);

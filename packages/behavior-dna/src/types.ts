@@ -12,6 +12,7 @@ export type MoveIntent =
   | "DEFEND";
 
 export type AbilityIntent = "AIM" | "FIRE" | "DASH" | "SHIELD";
+export type TargetIntent = "AUTO" | "FOE" | "MINION" | "STRUCTURE" | "NONE";
 
 export type Operand =
   | "ownHpPct"
@@ -60,6 +61,7 @@ export type BehaviorRule = {
   dash?: boolean;
   shield?: boolean;
   buy?: string;
+  target?: TargetIntent;
 };
 
 export type DnaTraits = {
@@ -111,4 +113,5 @@ export type Intents = {
   shield: boolean;
   buy: string | null;
   ruleId: string;
+  target?: TargetIntent;
 };
