@@ -359,8 +359,9 @@ describe("worker writes", () => {
     assert.equal(first.status, 201);
     assert.equal(first.json.status, "queued");
     const dup = await post("/v1/matchmaking/request", { versionId: "v7", mode: "ranked" });
-    assert.equal(dup.status, 409);
-    assert.match(dup.json.error, /ticket already open/);
+    assert.equal(dup.status, 200);
+    assert.equal(dup.json.id, first.json.id);
+    assert.equal(dup.json.status, "queued");
     const other = await post("/v1/matchmaking/request", { versionId: "v7", mode: "casual" });
     assert.equal(other.status, 201);
     const cancel = await post(`/v1/matchmaking/${first.json.id}/cancel`, {});

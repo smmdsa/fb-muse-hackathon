@@ -675,9 +675,11 @@ export function findHumanOpponent(
 }
 
 // Casual unrated fight: no AP moves, AC still pays the human side.
+// A live pair passes its key and the other leader: both sides get paid,
+// and a racing poll dedupes onto the same row instead of double-paying.
 export function runCasual(
   store: Store,
-  input: { aVersionId: string; bVersionId?: string; bBot?: string; seed: string; leaderId: string },
+  input: { aVersionId: string; bVersionId?: string; bBot?: string; seed: string; leaderId: string; key?: string; otherLeaderId?: string },
 ): { matchId: string; winner: string; ticks: number; checksum: string; foe: string; bot: boolean; paid: number; mode: MatchMode } {
   const found = getVersion(store, input.aVersionId);
   if (!found) throw new Error("unknown version");
@@ -689,15 +691,19 @@ export function runCasual(
     : (bot?.policy ?? null);
   if (!foePolicy) throw new Error("unknown foe version");
   const out = fightPolicies(found.policy, foePolicy, input.seed, DEFAULT_MOBA);
-  const id = mintId("m");
+  const id = input.key ?? mintId("m");
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
-  // One write block: the match row and the wallet credit land together.
+  // One write block: the match row and the wallet credits land together.
   let paid = 0;
+  let paidB = 0;
   transact(store, () => {
     paid = creditAc(store, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
+    if (input.otherLeaderId) {
+      paidB = creditAc(store, input.otherLeaderId, id, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
+    }
     store.db.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, 'moba')"
-    ).run(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, paid, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'moba')"
+    ).run(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, paid, paidB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
   });
   return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !!bot, paid, mode: "moba" };
 }
@@ -706,6 +712,75 @@ function pickBotFor(store: Store, leaderId: string): { id: string; policy: impor
   const row = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown> | null;
   const bot = pickBot((row?.ap as number) ?? 500);
   return { id: bot.id, policy: bot.policy };
+}
+
+// The live queue pairs waiting humans before the defense pool answers.
+// Earliest open ticket wins: same mode, another leader, still queued,
+// deadline ahead. Expired-but-unread tickets never pair.
+export function findLiveTicket(
+  store: Store,
+  input: { mode: TicketMode; leaderId: string },
+  now = Date.now(),
+): Record<string, unknown> | null {
+  return (store.db.prepare(
+    "SELECT * FROM tickets WHERE mode = ? AND status = 'queued' AND leader_id != ? AND settle_at > ? ORDER BY created_at ASC, id ASC LIMIT 1",
+  ).get(input.mode, input.leaderId, now) as Record<string, unknown> | undefined) ?? null;
+}
+
+// The resume lookup returns the leader's open ticket for one mode, if any.
+// The queue route answers it with 200 so a retry resumes instead of 409.
+export function openTicket(
+  store: Store,
+  input: { leaderId: string; mode: TicketMode },
+): Record<string, unknown> | null {
+  return (store.db.prepare(
+    "SELECT * FROM tickets WHERE leader_id = ? AND mode = ? AND status = 'queued'",
+  ).get(input.leaderId, input.mode) as Record<string, unknown> | undefined) ?? null;
+}
+
+// A live pair settles one fight for two queued tickets. The earlier ticket
+// names the match key, so a racing poll dedupes onto the same row instead
+// of starting a second fight. Both tickets stamp only while still queued,
+// so a foe that cancels mid-sim keeps the cancel and the fight still stands
+// for the waiter. A race loser re-reads what the winner left behind.
+function settlePair(
+  store: Store,
+  self: Record<string, unknown>,
+  live: Record<string, unknown>,
+): Record<string, unknown> {
+  const liveFirst = (live.created_at as number) < (self.created_at as number)
+    || ((live.created_at as number) === (self.created_at as number) && (live.id as string) < (self.id as string));
+  const first = liveFirst ? live : self;
+  const second = liveFirst ? self : live;
+  for (const t of [first, second]) {
+    const fresh = store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(t.id) as Record<string, unknown> | null;
+    if (!fresh || fresh.status !== "queued") {
+      return store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(self.id) as Record<string, unknown>;
+    }
+  }
+  const key = first.id as string;
+  const seed = `q-${first.id}`;
+  if ((self.mode as TicketMode) === "ranked") {
+    runRanked(store, { aVersionId: first.version_id as string, bVersionId: second.version_id as string, seed, key });
+  } else {
+    try {
+      runCasual(store, {
+        aVersionId: first.version_id as string,
+        bVersionId: second.version_id as string,
+        seed,
+        leaderId: first.leader_id as string,
+        key,
+        otherLeaderId: second.leader_id as string,
+      });
+    } catch (err) {
+      const dupe = store.db.prepare("SELECT * FROM matches WHERE id = ?").get(key) as Record<string, unknown> | null;
+      if (!dupe) throw err;
+    }
+  }
+  const stamp = store.db.prepare("UPDATE tickets SET status = 'settled', foe_version = ?, match_id = ? WHERE id = ? AND status = 'queued'");
+  stamp.run(second.version_id as string, key, first.id);
+  stamp.run(first.version_id as string, key, second.id);
+  return store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(self.id) as Record<string, unknown>;
 }
 
 function settleTicket(store: Store, ticket: Record<string, unknown>, foeVersion: string | null, now: number): Record<string, unknown> {
@@ -759,12 +834,12 @@ export function requestMatch(
   store.db.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)").run(
     id, input.leaderId, input.versionId, input.mode, now, now + wait,
   );
+  const row = store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(id) as Record<string, unknown>;
+  const live = findLiveTicket(store, { mode: input.mode, leaderId: input.leaderId }, now);
+  if (live) return settlePair(store, row, live);
   const foe = findHumanOpponent(store, input.leaderId, now);
-  if (foe) {
-    const row = store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(id) as Record<string, unknown>;
-    return settleTicket(store, row, foe.versionId, now);
-  }
-  return store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(id) as Record<string, unknown>;
+  if (foe) return settleTicket(store, row, foe.versionId, now);
+  return row;
 }
 
 // Lazy settle on read. No cron: the next poll after the deadline settles.
@@ -783,6 +858,8 @@ export function readTicket(
     return out;
   }
   if (now < (ticket.settle_at as number)) {
+    const live = findLiveTicket(store, { mode: ticket.mode as TicketMode, leaderId: input.leaderId as string }, now);
+    if (live) return withMatch(store, settlePair(store, ticket, live));
     if (ticket.mode === "ranked") {
       const foe = findHumanOpponent(store, input.leaderId, now);
       if (foe) {
