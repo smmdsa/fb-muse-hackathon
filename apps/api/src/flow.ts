@@ -282,62 +282,6 @@ export async function analyzeBattle(
   return { ...telemetry, explanation };
 }
 
-// The Evolution Lab runs an honest A/B: both drafts fight the same benchmark
-// on mirrored seeds. Small samples refuse a verdict. Drafts stay drafts.
-export async function evolutionLab(
-  store: Store,
-  env: FlowEnv,
-  input: { leaderId: string; agentId: string; promptA: string; promptB: string; bouts?: number },
-): Promise<Record<string, unknown>> {
-  const agent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(input.agentId) as Record<string, unknown> | null;
-  if (!agent || agent.leader_id !== input.leaderId) throw new Error("agent not found for this leader");
-  const promptA = input.promptA.trim();
-  const promptB = input.promptB.trim();
-  if (!promptA || !promptB) throw new Error("two prompts are required");
-  if (promptA.length > MAX_PROMPT || promptB.length > MAX_PROMPT) {
-    throw new Error(`each prompt must stay under ${MAX_PROMPT} characters`);
-  }
-  const bouts = Math.min(20, Math.max(4, Math.floor(input.bouts ?? 10)));
-  const runId = mintId("lab");
-  const draftA = await compileAndPublish(store, env, { agentId: input.agentId, prompt: promptA });
-  const draftB = await compileAndPublish(store, env, { agentId: input.agentId, prompt: promptB });
-  if (!draftA.versionId) throw new Error(`draft A failed: ${draftA.errors.join("; ")}`);
-  if (!draftB.versionId) throw new Error(`draft B failed: ${draftB.errors.join("; ")}`);
-  const policyA = getVersion(store, draftA.versionId);
-  const policyB = getVersion(store, draftB.versionId);
-  if (!policyA || !policyB) throw new Error("drafts vanished");
-  let winsA = 0;
-  let winsB = 0;
-  let drawsA = 0;
-  let drawsB = 0;
-  const now = Date.now();
-  for (let i = 0; i < bouts; i += 1) {
-    // The lab keeps the duel sim. Its bouts stay small and fast.
-    const outA = fightPolicies(policyA.policy, BENCH_POLICY, `${runId}-a-${i}`);
-    const idA = `${runId}-a-${i}`;
-    store.db.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'duel')",
-    ).run(idA, `${runId}-a-${i}`, draftA.versionId, "benchmark-v1", outA.winner, outA.ticks, outA.checksum, now, JSON.stringify({ a: outA.chipsA, b: outA.chipsB }));
-    if (outA.winner === "A") winsA += 1;
-    else if (outA.winner === "DRAW") drawsA += 1;
-    const outB = fightPolicies(policyB.policy, BENCH_POLICY, `${runId}-b-${i}`);
-    const idB = `${runId}-b-${i}`;
-    store.db.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'duel')",
-    ).run(idB, `${runId}-b-${i}`, draftB.versionId, "benchmark-v1", outB.winner, outB.ticks, outB.checksum, now, JSON.stringify({ a: outB.chipsA, b: outB.chipsB }));
-    if (outB.winner === "A") winsB += 1;
-    else if (outB.winner === "DRAW") drawsB += 1;
-  }
-  const decisive = winsA + winsB;
-  let verdict = "too close to call";
-  if (bouts < 10) {
-    verdict = "sample too small — run 10 or more bouts before trusting the gap";
-  } else if (decisive > 0 && Math.max(winsA, winsB) / decisive >= 0.7) {
-    verdict = winsA > winsB ? "A leads" : "B leads";
-  }
-  return { runId, versionA: draftA.versionId, versionB: draftB.versionId, bouts, winsA, winsB, drawsA, drawsB, verdict };
-}
-
 // A retry repaints one hero. It never breeds a second agent.
 // A ready portrait returns untouched, with no new model call.
 export async function retryPortrait(

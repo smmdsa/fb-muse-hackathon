@@ -197,3 +197,12 @@ describe("compiled strategy in the MOBA engine", () => {
     assert.ok(retreat.move.x < 0);
   });
 });
+
+describe("tactical compiler contract", () => {
+  it("teaches Muse the real tower and wave sensors and actions", async () => {
+    let brief = '';
+    const fetchFn = async (_url, init) => { brief = JSON.parse(init.body).messages[0].content; return chatOk(POLICY_TEXT)(); };
+    await createMetaProvider({ META_SPARK_KEY: 'test' }, fetchFn).compileStrategy({ prompt: 'wait until minions tank the tower', agentVersionId: 'v1' });
+    for (const key of ['foeTowerTargetsAllyMinion', 'foeTowerTargetsMe', 'inFoeTowerRange', 'nearAllyMinionHp', 'nearFoeMinionHp', 'killableFoeMinionsInRange', 'nextWaveSeconds', 'distOwnBase', 'ownStructureThreatened', 'WAIT', 'LAST_HIT']) assert.ok(brief.includes(key), key);
+  });
+});

@@ -248,45 +248,11 @@ function paintVersion(d, v) {
 }
 
 // Counters keep long briefs honest. The cap is 2000, the habit is detail.
-for (const [box, count] of [["prompt", "prompt-count"], ["prompt-a", "prompt-a-count"], ["prompt-b", "prompt-b-count"]]) {
+for (const [box, count] of [["prompt", "prompt-count"]]) {
   $(box).addEventListener("input", () => {
     $(count).textContent = String($(box).value.length);
   });
 }
-
-$("lab-btn").addEventListener("click", async () => {
-  if (!agentId) return;
-  const promptA = $("prompt-a").value.trim();
-  const promptB = $("prompt-b").value.trim();
-  const bouts = Math.min(20, Math.max(4, parseInt($("lab-bouts").value, 10) || 10));
-  if (!promptA || !promptB) {
-    $("lab-msg").textContent = "Two prompts are required.";
-    return;
-  }
-  $("lab-msg").textContent = "Running bouts…";
-  $("lab-btn").disabled = true;
-  const r = await call("POST", "/v1/lab/ab", { agentId, promptA, promptB, bouts });
-  $("lab-btn").disabled = false;
-  if (r.status !== 201) {
-    $("lab-msg").textContent = `Lab failed: ${r.data.error || r.status}.`;
-    return;
-  }
-  const d = r.data;
-  $("lab-msg").textContent = `A ${d.winsA}W ${d.drawsA}D vs benchmark · B ${d.winsB}W ${d.drawsB}D · ${d.verdict}.`;
-  const box = $("lab-out");
-  box.textContent = "";
-  for (const [label, version] of [["Install A", d.versionA], ["Install B", d.versionB]]) {
-    const btn = document.createElement("button");
-    btn.className = "btn-ghost";
-    btn.type = "button";
-    btn.textContent = label;
-    btn.addEventListener("click", async () => {
-      await call("POST", `/v1/agents/${agentId}/policies/install`, { versionId: version });
-      await refresh();
-    });
-    box.appendChild(btn);
-  }
-});
 
 $("compile-btn").addEventListener("click", async () => {
   const prompt = $("prompt").value.trim();
@@ -343,7 +309,6 @@ async function boot() {
   $("compile-btn").disabled = false;
   window.factoryCooldown?.render();
   show($("train-card"), true);
-  show($("lab-card"), true);
   await refresh();
 }
 

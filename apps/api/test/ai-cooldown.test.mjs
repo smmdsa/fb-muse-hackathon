@@ -49,12 +49,6 @@ describe("AI factory cooldown", () => {
     assert.equal((await entry.fetch(req(path, "POST", { prompt: "x".repeat(2001) }), env)).status, 400);
     assert.equal((await entry.fetch(req(path, "POST", { prompt: "push" }), env)).status, 201);
   });
-  it("pauses the two-model-call lab rather than bypassing the window", async () => {
-    const env = envFor();
-    env.META_SPARK_KEY = "test";
-    assert.equal((await entry.fetch(req("/v1/lab/ab", "POST", { agentId: "a1", promptA: "push", promptB: "defend" }), env)).status, 503);
-  });
-
   it("blocks portrait generation after a real-provider compile attempt", async () => {
     const env = envFor();
     env.META_SPARK_KEY = "test";
@@ -71,4 +65,10 @@ describe("AI factory cooldown", () => {
     } finally { globalThis.fetch = realFetch; }
   });
 
+});
+
+it("does not expose the removed Evolution Lab endpoint", async () => {
+  const env = envFor();
+  const result = await entry.fetch(req("/v1/lab/ab", "POST", { agentId: "a1", promptA: "push", promptB: "defend" }), env);
+  assert.equal(result.status, 404);
 });

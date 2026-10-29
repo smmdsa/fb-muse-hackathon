@@ -9,10 +9,11 @@ export type MoveIntent =
   | "CAPTURE"
   | "PUSH"
   | "FARM"
-  | "DEFEND";
+  | "DEFEND"
+  | "WAIT";
 
 export type AbilityIntent = "AIM" | "FIRE" | "DASH" | "SHIELD";
-export type TargetIntent = "AUTO" | "FOE" | "MINION" | "STRUCTURE" | "NONE";
+export type TargetIntent = "AUTO" | "FOE" | "MINION" | "STRUCTURE" | "NONE" | "LAST_HIT";
 
 export type Operand =
   | "ownHpPct"
@@ -39,7 +40,17 @@ export type Operand =
   | "buildValue"
   | "slotsFree"
   | "structLead"
-  | "foeAlive";
+  | "foeAlive"
+  | "inFoeTowerRange"
+  | "foeTowerTargetsMe"
+  | "foeTowerTargetsAllyMinion"
+  | "allyMinionsUnderFoeTower"
+  | "nearAllyMinionHp"
+  | "nearFoeMinionHp"
+  | "killableFoeMinionsInRange"
+  | "nextWaveSeconds"
+  | "distOwnBase"
+  | "ownStructureThreatened";
 
 export type NumOp = "gt" | "gte" | "lt" | "lte";
 
@@ -104,6 +115,16 @@ export type Observation = {
   slotsFree?: number;
   structLead?: number;
   foeAlive: boolean;
+  inFoeTowerRange?: boolean;
+  foeTowerTargetsMe?: boolean;
+  foeTowerTargetsAllyMinion?: boolean;
+  allyMinionsUnderFoeTower?: number;
+  nearAllyMinionHp?: number;
+  nearFoeMinionHp?: number;
+  killableFoeMinionsInRange?: number;
+  nextWaveSeconds?: number;
+  distOwnBase?: number | null;
+  ownStructureThreatened?: boolean;
 };
 
 export type Intents = {

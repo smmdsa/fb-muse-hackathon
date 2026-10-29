@@ -408,3 +408,90 @@ describe("chip targeting in simulation", () => {
     assert.equal(drive(s, oneRule("PUSH", { target: "MINION" }), "A", cfg).fire, false);
   });
 });
+
+describe("tactical observations and intentional waiting", () => {
+  it("reports tower aggro, allied cover and local wave strength for the active player", () => {
+    const cfg = mobaCfg("tactical-read", false);
+    const s = createBattle(cfg);
+    const tower = struct(s, "b_t1");
+    s.agents.A.pos = { x: tower.pos.x - 4, y: tower.pos.y };
+    tower.target = { kind: "robot", side: "A" };
+    addMinion(s, { side: "A", pos: { x: tower.pos.x - 2, y: 8 }, hp: 100 });
+    addMinion(s, { side: "B", pos: { x: tower.pos.x - 3, y: 8 }, hp: 10 });
+    const o = observe(s, "A", cfg);
+    assert.equal(o.inFoeTowerRange, true);
+    assert.equal(o.foeTowerTargetsMe, true);
+    assert.equal(o.allyMinionsUnderFoeTower, 1);
+    assert.equal(o.nearAllyMinionHp, 100);
+    assert.equal(o.nearFoeMinionHp, 10);
+    assert.equal(o.killableFoeMinionsInRange, 1);
+  });
+  it("uses WAIT to hold position and LAST_HIT to refuse a healthy minion", () => {
+    const cfg = mobaCfg("wait-last-hit", false);
+    const s = createBattle(cfg);
+    s.agents.A.pos = { x: 24, y: 8 };
+    s.agents.B.pos = { x: 45, y: 8 };
+    const id = addMinion(s, { pos: { x: 25, y: 8 }, hp: 200 });
+    const policy = oneRule("WAIT", { target: "LAST_HIT" });
+    assert.equal(validatePolicy(policy).ok, true);
+    assert.deepEqual(drive(s, policy, "A", cfg).move, { x: 0, y: 0 });
+    assert.equal(drive(s, policy, "A", cfg).fire, false);
+    s.moba.minions.find(m => m.id === id).hp = 10;
+    assert.equal(drive(s, policy, "A", cfg).fire, true);
+  });
+});
+
+describe("tactical chip decisions", () => {
+  it("retreats when a tower targets it and waits until minions arrive", () => {
+    const cfg = mobaCfg("tower-decision", false);
+    const s = createBattle(cfg);
+    const tower = struct(s, "b_t1");
+    s.agents.A.pos = { x: tower.pos.x - 4, y: 8 };
+    const policy = oneRule("WAIT", { target: "NONE" });
+    policy.rules = [
+      { id: "escape", when: { operand: "foeTowerTargetsMe", op: "eq", value: true }, move: "RETREAT", target: "NONE" },
+      { id: "wait", when: { operand: "allyMinionsUnderFoeTower", op: "eq", value: 0 }, move: "WAIT", target: "NONE" },
+      { id: "siege", when: { operand: "allyMinionsUnderFoeTower", op: "gte", value: 1 }, move: "CAPTURE", target: "STRUCTURE" },
+    ];
+    assert.equal(validatePolicy(policy).ok, true);
+    assert.deepEqual(drive(s, policy, "A", cfg).move, { x: 0, y: 0 });
+    addMinion(s, { side: "A", pos: { x: tower.pos.x - 2, y: 8 } });
+    assert.ok(drive(s, policy, "A", cfg).move.x > 0);
+    tower.target = { kind: "robot", side: "A" };
+    assert.ok(drive(s, policy, "A", cfg).move.x < 0);
+  });
+  it("mirrors tower danger and wave counts for side B", () => {
+    const cfg = mobaCfg("tactical-mirror", false);
+    const s = createBattle(cfg);
+    const aTower = struct(s, "a_t1");
+    const bTower = struct(s, "b_t1");
+    s.agents.A.pos = { x: bTower.pos.x - 4, y: 8 };
+    s.agents.B.pos = { x: aTower.pos.x + 4, y: 8 };
+    aTower.target = { kind: "robot", side: "B" };
+    bTower.target = { kind: "robot", side: "A" };
+    addMinion(s, { side: "A", pos: { x: bTower.pos.x - 2, y: 8 }, hp: 100 });
+    addMinion(s, { side: "B", pos: { x: aTower.pos.x + 2, y: 8 }, hp: 100 });
+    const a = observe(s, "A", cfg), b = observe(s, "B", cfg);
+    for (const key of ["inFoeTowerRange", "foeTowerTargetsMe", "allyMinionsUnderFoeTower", "nearAllyMinionHp", "nearFoeMinionHp", "nextWaveSeconds", "distOwnBase"]) assert.equal(a[key], b[key], key);
+  });
+});
+
+it("keeps a pre-change MOBA checksum for a legacy policy", async () => {
+  const { fightPolicies } = await import('../src/index.ts');
+  const result = fightPolicies(BENCH_POLICY, BOT_PRESETS[0].policy, 'legacy-1', DEFAULT_MOBA);
+  assert.equal(result.checksum, '4d2b1277');
+  assert.equal(result.ticks, 41399);
+});
+
+it("reports when the nearest enemy tower has locked an allied minion", () => {
+  const cfg = mobaCfg("tower-cover", false);
+  const s = createBattle(cfg);
+  const tower = struct(s, "b_t1");
+  s.agents.A.pos = { x: tower.pos.x - 5.5, y: 8 };
+  const minionId = addMinion(s, { side: "A", pos: { x: tower.pos.x - 2, y: 8 } });
+  tower.target = { kind: "minion", id: minionId };
+  assert.equal(observe(s, "A", cfg).foeTowerTargetsAllyMinion, true);
+  const p = oneRule("WAIT");
+  p.rules[0].when = { operand: "foeTowerTargetsAllyMinion", op: "eq", value: true };
+  assert.equal(validatePolicy(p).ok, true);
+});

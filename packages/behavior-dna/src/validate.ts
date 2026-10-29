@@ -24,6 +24,7 @@ const MOVES: MoveIntent[] = [
   "PUSH",
   "FARM",
   "DEFEND",
+  "WAIT",
 ];
 
 const OPERANDS: Operand[] = [
@@ -52,6 +53,9 @@ const OPERANDS: Operand[] = [
   "slotsFree",
   "structLead",
   "foeAlive",
+  "inFoeTowerRange", "foeTowerTargetsMe", "foeTowerTargetsAllyMinion", "allyMinionsUnderFoeTower",
+  "nearAllyMinionHp", "nearFoeMinionHp", "killableFoeMinionsInRange",
+  "nextWaveSeconds", "distOwnBase", "ownStructureThreatened",
 ];
 
 // Buyable item ids. This list mirrors battle-core items.ts.
@@ -148,7 +152,7 @@ function checkRule(rule: BehaviorRule, errors: string[], seen: Set<string>): voi
       errors.push(`rule ${tag} buy names unknown item ${String(rule.buy)}`);
     }
   }
-  if (rule.target !== undefined && !["AUTO", "FOE", "MINION", "STRUCTURE", "NONE"].includes(rule.target)) {
+  if (rule.target !== undefined && !["AUTO", "FOE", "MINION", "STRUCTURE", "NONE", "LAST_HIT"].includes(rule.target)) {
     errors.push(`rule ${tag} names an unknown target`);
   }
   const known = new Set(["id", "when", "move", "fire", "dash", "shield", "buy", "target"]);
