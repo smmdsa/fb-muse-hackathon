@@ -1,0 +1,1 @@
+ALTER TABLE matches ADD COLUMN mode TEXT NOT NULL DEFAULT 'duel';

@@ -130,8 +130,9 @@ describe("matchmaking queue", () => {
     assert.equal(q.foe_version, b.version);
     const m = store.db.prepare("SELECT * FROM matches WHERE id = ?").get(q.match_id);
     assert.equal(m.rated, 1);
+    // Settle ran: placement climbs even when a MOBA bout draws.
     const after = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(a.id);
-    assert.notEqual(after.ap, 500);
+    assert.equal(after.placement, 1);
   });
 
   it("expires a ranked ticket with no humans after ten minutes", async () => {

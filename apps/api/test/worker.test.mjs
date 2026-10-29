@@ -43,6 +43,7 @@ before(() => {
     db.exec(readFileSync(new URL("../../../migrations/0007_tournaments.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0008_armory.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../../../migrations/0012_match_mode.sql", import.meta.url), "utf8"));
   db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     "l1", "commander", "t1", 1020000, 520, 5, 1,
   );
@@ -114,6 +115,7 @@ describe("worker writes", () => {
     db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0010_reports.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0011_version_labels.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0012_match_mode.sql", import.meta.url), "utf8"));
     // Reuse the shared shim: it carries batch, like the real D1 binding.
     const wenv = { DB: shim(db), ASSETS: assetsStub, ADMIN_KEY: "test-admin" };
     const call = (method, path, body, token, extraHeaders) => {
@@ -162,7 +164,8 @@ describe("worker writes", () => {
     assert.ok(t.json.checksum);
     const r = await call("POST", "/v1/matches/ranked", { aVersionId: va.json.versionId, bVersionId: vb.json.versionId, seed: "wr-1", key: "wr-1" }, sa.json.token);
     assert.equal(r.status, 201);
-    assert.equal(r.json.deltaB, -r.json.deltaA);
+    // MOBA bouts can draw: the sum form stays exact at zero too.
+    assert.equal(r.json.deltaA + r.json.deltaB, 0);
     const me = await entry.fetch(new Request("http://local/v1/me", {
       headers: { authorization: `Bearer ${sa.json.token}` },
     }), wenv);
@@ -214,8 +217,16 @@ describe("worker writes", () => {
     assert.equal(dash.versions.length, 1);
     assert.equal(dash.versions[0].fights, 3);
     assert.equal(dash.versions[0].chips.length > 0, true);
-    const fired = dash.versions[0].chips.reduce((n, c) => n + c.triggers, 0);
-    assert.ok(fired > 0 && fired <= dash.versions[0].avgTicks * dash.versions[0].fights);
+    // Every tick tallies exactly one rule per side, named or fallback.
+    // The stored tallies must sum to the fought ticks, no more, no less.
+    const stored = db.prepare("SELECT chips_json, a_version FROM matches WHERE a_version = ? OR b_version = ?").all(va.json.versionId, va.json.versionId);
+    let tallied = 0;
+    for (const m of stored) {
+      const side = m.a_version === va.json.versionId ? "a" : "b";
+      tallied += Object.values(JSON.parse(m.chips_json)[side] ?? {}).reduce((n, x) => n + x, 0);
+    }
+    const totalTicks = dash.history.reduce((n, h) => n + h.ticks, 0);
+    assert.equal(tallied, totalTicks);
     assert.ok(Array.isArray(dash.history));
     const wr = dash.history.find((h) => h.matchId === "wr-1");
     assert.ok(wr);
@@ -226,7 +237,10 @@ describe("worker writes", () => {
     assert.equal(pub.status, 200);
     const card = await pub.json();
     assert.equal(card.handle, "wa");
-    assert.equal(card.agent.wins + card.agent.losses >= 1, true);
+    // Draws count for neither side, so the card sums decisive bouts only.
+    const vaFights = db.prepare("SELECT winner FROM matches WHERE a_version = ? OR b_version = ?").all(va.json.versionId, va.json.versionId);
+    const decisive = vaFights.filter((m) => m.winner === "A" || m.winner === "B").length;
+    assert.equal(card.agent.wins + card.agent.losses, decisive);
     const raw = JSON.stringify(card);
     assert.ok(!raw.includes("token") && !raw.includes("lease") && !raw.includes("wallet"));
     const rep = await call("POST", "/v1/leaders/wa/report", { reason: "d1 spam" }, sb.json.token);
@@ -329,6 +343,7 @@ describe("worker writes", () => {
     db.exec(readFileSync(new URL("../../../migrations/0007_tournaments.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0008_armory.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0012_match_mode.sql", import.meta.url), "utf8"));
     db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l7", "solo7", "t7");
     db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a7", "l7", "v7");
     db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
@@ -363,9 +378,39 @@ describe("worker writes", () => {
     assert.equal((await full.json()).energy.energy, 10);
   });
 
+  it("settles a ranked ticket the moment a human foe stands by", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0012_match_mode"]) {
+      db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
+    }
+    const policy = (id) => JSON.stringify({ schemaVersion: 1, agentVersionId: id, dna: { aggression: 80, evasion: 40, preferredDistance: 25, energyConservation: 50 }, rules: [{ id: "r", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true }] });
+    db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l20", "queuer20", "t20");
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a20", "l20", "v20");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run("v20", "a20", policy("v20"), "shim", Date.now());
+    db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l21", "foe21", "t21");
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a21", "l21", "v21");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run("v21", "a21", policy("v21"), "shim", Date.now());
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
+    const as = (token) => (method, path, body) => entry.fetch(new Request(`http://local${path}`, {
+      method,
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: body ? JSON.stringify(body) : undefined,
+    }), wenv).then(async (r) => ({ status: r.status, json: await r.json() }));
+    const opt = await as("t21")("POST", "/v1/autobattle/opt-in");
+    assert.equal(opt.status, 200);
+    const q = await as("t20")("POST", "/v1/matchmaking/request", { versionId: "v20", mode: "ranked" });
+    assert.equal(q.status, 201);
+    assert.equal(q.json.status, "settled");
+    assert.ok(q.json.match_id);
+    const row = db.prepare("SELECT * FROM matches WHERE id = ?").get(q.json.match_id);
+    assert.equal(row.rated, 1);
+    assert.equal(row.a_version, "v20");
+    assert.equal(row.b_version, "v21");
+  });
+
   it("opts in, runs background fights, and digests without renewing", async () => {
     const db = new DatabaseSync(":memory:");
-    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives"]) {
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0012_match_mode"]) {
       db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
     }
     db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l10", "auto10", "t10");
@@ -397,7 +442,7 @@ describe("worker writes", () => {
 
   it("lists the cup and registers one hero", async () => {
     const db = new DatabaseSync(":memory:");
-    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives"]) {
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0012_match_mode"]) {
       db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
     }
     db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l11", "cup11", "t11");
@@ -427,7 +472,7 @@ describe("worker writes", () => {
 
   it("sells and equips cosmetics without touching combat", async () => {
     const db = new DatabaseSync(":memory:");
-    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives"]) {
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0012_match_mode"]) {
       db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
     }
     db.prepare("INSERT INTO leaders (id, handle, token, ac) VALUES (?, ?, ?, ?)").run("l12", "shop12", "t12", 120);
@@ -459,7 +504,7 @@ describe("worker writes", () => {
 
   it("reads back frozen season archives", async () => {
     const db = new DatabaseSync(":memory:");
-    for (const m of ["0001_schema", "0009_season_archives"]) {
+    for (const m of ["0001_schema", "0009_season_archives", "0012_match_mode"]) {
       db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
     }
     db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l13", "hist13", "t13");
@@ -499,6 +544,7 @@ describe("worker replay", () => {
     db.exec(readFileSync(new URL("../../../migrations/0007_tournaments.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0008_armory.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0012_match_mode.sql", import.meta.url), "utf8"));
     db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
       "l9", "replay-leader", "t9", 1020000, 520, 5, 1,
     );
@@ -550,6 +596,7 @@ describe("worker replay", () => {
     db.exec(readFileSync(new URL("../../../migrations/0007_tournaments.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0008_armory.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0012_match_mode.sql", import.meta.url), "utf8"));
     db.prepare("INSERT INTO leaders (id, handle, token, rating_milli, ap, placement, placed) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
       "l8", "bot-leader", "t8", 1020000, 520, 5, 1,
     );
@@ -580,7 +627,7 @@ describe("worker replay", () => {
 describe("worker ftue", () => {
   it("pays each guided stage once", async () => {
     const db = new DatabaseSync(":memory:");
-    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0010_reports", "0011_version_labels"]) {
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0010_reports", "0011_version_labels", "0012_match_mode"]) {
       db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
     }
     const wenv = { DB: shim(db), ASSETS: assetsStub };

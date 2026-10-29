@@ -100,5 +100,5 @@ export function dnaPolicy(
   if (useCenter && risk === null) {
     move = dir(me.pos, center);
   }
-  return { move, aim: { ...toFoe }, fire, dash, shield };
+  return { move, aim: { ...toFoe }, fire, dash, shield, buy: null };
 }

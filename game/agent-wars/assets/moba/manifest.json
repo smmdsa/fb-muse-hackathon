@@ -1,0 +1,136 @@
+{
+  "assets": {
+    "arena_ring": {
+      "file": "arena_ring.png",
+      "width": 628,
+      "height": 419,
+      "bytes": 231019
+    },
+    "tier_tower": {
+      "file": "tier_tower.png",
+      "width": 256,
+      "height": 171,
+      "bytes": 31841
+    },
+    "nexus_turret": {
+      "file": "nexus_turret.png",
+      "width": 256,
+      "height": 171,
+      "bytes": 46642
+    },
+    "inhibitor": {
+      "file": "inhibitor.png",
+      "width": 256,
+      "height": 171,
+      "bytes": 40820
+    },
+    "nexus": {
+      "file": "nexus.png",
+      "width": 256,
+      "height": 171,
+      "bytes": 60933
+    },
+    "minion_melee": {
+      "file": "minion_melee.png",
+      "width": 256,
+      "height": 171,
+      "bytes": 41732
+    },
+    "minion_caster": {
+      "file": "minion_caster.png",
+      "width": 256,
+      "height": 171,
+      "bytes": 19386
+    },
+    "scrap_blade": {
+      "file": "scrap_blade.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 2006
+    },
+    "cloth_weave": {
+      "file": "cloth_weave.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 3228
+    },
+    "worn_treads": {
+      "file": "worn_treads.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 4002
+    },
+    "overclock_chip": {
+      "file": "overclock_chip.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 3013
+    },
+    "hull_patch": {
+      "file": "hull_patch.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 2594
+    },
+    "repair_cell": {
+      "file": "repair_cell.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 1321
+    },
+    "tempered_edge": {
+      "file": "tempered_edge.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 2219
+    },
+    "bulwark_plate": {
+      "file": "bulwark_plate.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 3277
+    },
+    "turbo_treads": {
+      "file": "turbo_treads.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 3584
+    },
+    "rapid_cycler": {
+      "file": "rapid_cycler.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 3032
+    },
+    "reinforced_hull": {
+      "file": "reinforced_hull.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 2733
+    },
+    "siege_breaker": {
+      "file": "siege_breaker.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 3302
+    },
+    "aegis_core": {
+      "file": "aegis_core.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 3606
+    },
+    "phantom_drive": {
+      "file": "phantom_drive.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 2831
+    },
+    "warlord_frame": {
+      "file": "warlord_frame.png",
+      "width": 64,
+      "height": 43,
+      "bytes": 3213
+    }
+  }
+}

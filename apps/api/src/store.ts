@@ -60,7 +60,8 @@ export function openStore(path: string): Store {
       paid_a INTEGER NOT NULL DEFAULT 0,
       paid_b INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
-      chips_json TEXT
+      chips_json TEXT,
+      mode TEXT NOT NULL DEFAULT 'duel'
     );
     CREATE TABLE IF NOT EXISTS wallet_keys (
       wallet_id TEXT NOT NULL,
@@ -110,6 +111,11 @@ export function openStore(path: string): Store {
   const cols = db.prepare("PRAGMA table_info(versions)").all() as Record<string, unknown>[];
   if (!cols.some((c) => c.name === "label")) {
     db.exec("ALTER TABLE versions ADD COLUMN label TEXT");
+  }
+  // Mode arrived with MOBA. Old files gain the column once, then never again.
+  const matchCols = db.prepare("PRAGMA table_info(matches)").all() as Record<string, unknown>[];
+  if (!matchCols.some((c) => c.name === "mode")) {
+    db.exec("ALTER TABLE matches ADD COLUMN mode TEXT NOT NULL DEFAULT 'duel'");
   }
   return { db, close: () => db.close() };
 }

@@ -1,6 +1,7 @@
 // Engine glue. Pure packages decide. This file persists the results.
 
-import { BENCH_POLICY, fightPolicies } from "@agent-wars/battle-core";
+import { BENCH_POLICY, DEFAULT_MOBA, fightPolicies } from "@agent-wars/battle-core";
+import type { BattleConfig } from "@agent-wars/battle-core";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
 import { earnAc, createWallet } from "@agent-wars/economy";
@@ -40,19 +41,32 @@ export function getVersion(store: Store, versionId: string): { policy: AgentPoli
   return { policy: JSON.parse(row.policy_json as string) as AgentPolicy, agentId: row.agent_id as string };
 }
 
+// New fights run MOBA. Old rows without a mode read as duel.
+export type MatchMode = "duel" | "moba";
+
+export function matchMode(row: Record<string, unknown>): MatchMode {
+  return row.mode === "moba" ? "moba" : "duel";
+}
+
+// The helper maps a stored mode to its sim config. Duel passes
+// undefined, so the sim keeps its byte-identical duel defaults.
+export function battleConfigFor(mode: MatchMode): BattleConfig | undefined {
+  return mode === "moba" ? DEFAULT_MOBA : undefined;
+}
+
 // Training settles nothing. It returns the receipt only.
 export function runTraining(
   store: Store,
   input: { versionId: string; seed: string },
-): { matchId: string; winner: string; ticks: number; checksum: string } {
+): { matchId: string; winner: string; ticks: number; checksum: string; mode: MatchMode } {
   const found = getVersion(store, input.versionId);
   if (!found) throw new Error("unknown version");
-  const out = fightPolicies(found.policy, BENCH_POLICY, input.seed);
+  const out = fightPolicies(found.policy, BENCH_POLICY, input.seed, DEFAULT_MOBA);
   const id = mintId("m");
   store.db.prepare(
-    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'moba')",
   ).run(id, input.seed, input.versionId, "benchmark-v1", out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
-  return { matchId: id, ...out };
+  return { matchId: id, ...out, mode: "moba" };
 }
 
 // Ranked pre-checks. The route spends energy only after this passes.
@@ -82,7 +96,7 @@ export function runRanked(
   const aAgent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(a.agentId) as Record<string, unknown>;
   const bAgent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(b.agentId) as Record<string, unknown>;
   if (aAgent.leader_id === bAgent.leader_id) throw new Error("self match denied");
-  const out = fightPolicies(a.policy, b.policy, input.seed);
+  const out = fightPolicies(a.policy, b.policy, input.seed, DEFAULT_MOBA);
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   let applied = { deltaA: 0, deltaB: 0 };
   let paidA = 0;
@@ -111,7 +125,7 @@ export function runRanked(
   paidA = creditAc(store, aAgent.leader_id as string, input.key, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
   paidB = creditAc(store, bAgent.leader_id as string, input.key, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
   store.db.prepare(
-    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'moba')",
   ).run(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, paidA, paidB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
   };
   try {
@@ -121,7 +135,7 @@ export function runRanked(
     if (dupe && /constraint|UNIQUE|PRIMARY/i.test((err as Error).message)) return settledResult(store, dupe);
     throw err;
   }
-  return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA, paidB };
+  return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA, paidB, mode: "moba" };
 }
 
 // A settled row replays as the original result shape, never the raw row.
@@ -139,6 +153,7 @@ function settledResult(store: Store, row: Record<string, unknown>): Record<strin
     deltaB: row.delta_b,
     paidA: credited("a"),
     paidB: credited("b"),
+    mode: matchMode(row),
     deduped: true,
   };
 }
@@ -297,17 +312,18 @@ export async function evolutionLab(
   let drawsB = 0;
   const now = Date.now();
   for (let i = 0; i < bouts; i += 1) {
+    // The lab keeps the duel sim. Its bouts stay small and fast.
     const outA = fightPolicies(policyA.policy, BENCH_POLICY, `${runId}-a-${i}`);
     const idA = `${runId}-a-${i}`;
     store.db.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'duel')",
     ).run(idA, `${runId}-a-${i}`, draftA.versionId, "benchmark-v1", outA.winner, outA.ticks, outA.checksum, now, JSON.stringify({ a: outA.chipsA, b: outA.chipsB }));
     if (outA.winner === "A") winsA += 1;
     else if (outA.winner === "DRAW") drawsA += 1;
     const outB = fightPolicies(policyB.policy, BENCH_POLICY, `${runId}-b-${i}`);
     const idB = `${runId}-b-${i}`;
     store.db.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'duel')",
     ).run(idB, `${runId}-b-${i}`, draftB.versionId, "benchmark-v1", outB.winner, outB.ticks, outB.checksum, now, JSON.stringify({ a: outB.chipsA, b: outB.chipsB }));
     if (outB.winner === "A") winsB += 1;
     else if (outB.winner === "DRAW") drawsB += 1;
@@ -518,6 +534,7 @@ export function fightHistory(store: Store, versionIds: string[]): Record<string,
       ticks: m.ticks,
       checksum: m.checksum,
       rated: m.rated,
+      mode: matchMode(m),
       myDelta: mine === "a" ? m.delta_a : m.delta_b,
       myPaid: mine === "a" ? m.paid_a : m.paid_b,
       foe: mine === "a" ? m.b_version : m.a_version,
@@ -661,7 +678,7 @@ export function findHumanOpponent(
 export function runCasual(
   store: Store,
   input: { aVersionId: string; bVersionId?: string; bBot?: string; seed: string; leaderId: string },
-): { matchId: string; winner: string; ticks: number; checksum: string; foe: string; bot: boolean; paid: number } {
+): { matchId: string; winner: string; ticks: number; checksum: string; foe: string; bot: boolean; paid: number; mode: MatchMode } {
   const found = getVersion(store, input.aVersionId);
   if (!found) throw new Error("unknown version");
   const bot = input.bBot ? pickBotFor(store, input.leaderId) : null;
@@ -671,7 +688,7 @@ export function runCasual(
     ? (getVersion(store, input.bVersionId)?.policy ?? null)
     : (bot?.policy ?? null);
   if (!foePolicy) throw new Error("unknown foe version");
-  const out = fightPolicies(found.policy, foePolicy, input.seed);
+  const out = fightPolicies(found.policy, foePolicy, input.seed, DEFAULT_MOBA);
   const id = mintId("m");
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   // One write block: the match row and the wallet credit land together.
@@ -679,10 +696,10 @@ export function runCasual(
   transact(store, () => {
     paid = creditAc(store, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
     store.db.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?)"
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, 'moba')"
     ).run(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, paid, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
   });
-  return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !!bot, paid };
+  return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !!bot, paid, mode: "moba" };
 }
 
 function pickBotFor(store: Store, leaderId: string): { id: string; policy: import("@agent-wars/behavior-dna").AgentPolicy } {
@@ -872,6 +889,7 @@ export function autobattleDigest(store: Store, leaderId: string, now = Date.now(
         winner: m.winner,
         ticks: m.ticks,
         rated: m.rated,
+        mode: matchMode(m),
         myDelta: mine === "a" ? m.delta_a : m.delta_b,
         myPaid: mine === "a" ? m.paid_a : m.paid_b,
         at: m.created_at,

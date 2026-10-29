@@ -6,7 +6,7 @@ import { timingSafeEqual } from "node:crypto";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, board, buyItem, cancelTicket, compileAndPublish, claimFtue, createAgent, createTournament, dashboard, deleteVersion, energyFor, energyView, equipItem, evolutionLab, forceDeleteVersion, ftueStatus, getLeader, getTournament, getVersion, installVersion, listTournaments, MAX_PROMPT, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, renameVersion, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
+import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, battleConfigFor, board, buyItem, cancelTicket, compileAndPublish, claimFtue, createAgent, createTournament, dashboard, deleteVersion, energyFor, energyView, equipItem, evolutionLab, forceDeleteVersion, ftueStatus, getLeader, getTournament, getVersion, installVersion, listTournaments, matchMode, MAX_PROMPT, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, renameVersion, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 
@@ -534,8 +534,11 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           send(res, 410, { error: "replay unavailable: a version is gone" });
           return;
         }
-        const again = fightPolicies(a.policy, pb, match.seed as string);
-        const replay = buildReplay(a.policy, pb, match.seed as string);
+        // The row names its sim. MOBA rows re-simulate as MOBA and
+        // serve v2 replays. Duel rows keep the v1 path untouched.
+        const cfg = battleConfigFor(matchMode(match));
+        const again = fightPolicies(a.policy, pb, match.seed as string, cfg);
+        const replay = buildReplay(a.policy, pb, match.seed as string, cfg);
         send(res, 200, { stored: match, recomputed: again, replay, identical: again.checksum === match.checksum });
         return;
       }

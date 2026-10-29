@@ -21,6 +21,9 @@ const MOVES: MoveIntent[] = [
   "STRAFE",
   "SEEK_COVER",
   "CAPTURE",
+  "PUSH",
+  "FARM",
+  "DEFEND",
 ];
 
 const OPERANDS: Operand[] = [
@@ -36,15 +39,47 @@ const OPERANDS: Operand[] = [
   "objectiveDist",
   "timeLeft",
   "edgeDist",
+  "ownGold",
+  "ownDeaths",
+  "gameTime",
+  "distFoeTower",
+  "foeTowerHpPct",
+  "nearFoeMinions",
+  "nearAllyMinions",
+  "distFoeMinion",
+  "foeHpPct",
+  "buildValue",
+  "slotsFree",
+  "structLead",
 ];
+
+// Buyable item ids. This list mirrors battle-core items.ts.
+// behavior-dna cannot import battle-core, so it keeps its own copy.
+export const ITEM_IDS: ReadonlySet<string> = new Set([
+  "scrap_blade",
+  "cloth_weave",
+  "worn_treads",
+  "overclock_chip",
+  "hull_patch",
+  "repair_cell",
+  "tempered_edge",
+  "bulwark_plate",
+  "turbo_treads",
+  "rapid_cycler",
+  "reinforced_hull",
+  "siege_breaker",
+  "aegis_core",
+  "phantom_drive",
+  "warlord_frame",
+]);
 
 export type Check = { ok: boolean; errors: string[] };
 
 // The gate checks one full policy and names every break.
 export function validatePolicy(policy: AgentPolicy): Check {
   const errors: string[] = [];
-  if (policy.schemaVersion !== 1) {
-    errors.push("schemaVersion must be 1");
+  if (policy.schemaVersion !== 1 && policy.schemaVersion !== 2) {
+    errors.push("schemaVersion must be 1 or 2");
   }
   if (!policy.agentVersionId || typeof policy.agentVersionId !== "string") {
     errors.push("agentVersionId must be a stable non-empty id");
@@ -103,7 +138,12 @@ function checkRule(rule: BehaviorRule, errors: string[], seen: Set<string>): voi
       errors.push(`rule ${tag} flag ${key} must be a boolean`);
     }
   }
-  const known = new Set(["id", "when", "move", "fire", "dash", "shield"]);
+  if (rule.buy !== undefined) {
+    if (typeof rule.buy !== "string" || !ITEM_IDS.has(rule.buy)) {
+      errors.push(`rule ${tag} buy names unknown item ${String(rule.buy)}`);
+    }
+  }
+  const known = new Set(["id", "when", "move", "fire", "dash", "shield", "buy"]);
   for (const key of Object.keys(rule)) {
     if (!known.has(key)) {
       errors.push(`rule ${tag} holds unknown field ${key}`);
