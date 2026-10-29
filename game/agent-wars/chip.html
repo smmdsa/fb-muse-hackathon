@@ -48,11 +48,19 @@
 <section class="panel" id="train-card" hidden>
 <h2>01 / Battle plan</h2>
 <p class="sub">Write a line or paragraphs — detail wins fights. Compile mints a draft. Install sends one draft to the arena.</p>
+<div id="factory-gate">
+<button id="factory-start-btn" class="btn-primary" type="button">START CHIP FACTORY</button>
+<p class="sub" id="factory-gate-msg">One build per 5 minutes. The assembly bay cools down after each build.</p>
+</div>
+<div id="factory-form" hidden>
 <label for="prompt">Battle plan</label>
 <textarea id="prompt" data-factory-control name="prompt" rows="5" maxlength="2000" placeholder="My robot is a patient ambusher. It holds the center early and saves energy. When the foe closes under 6 meters it dashes sideways and fires. Below a quarter of health it retreats behind cover and only peeks to shoot."></textarea>
 <p class="sub"><span id="prompt-count">0</span>/2000</p>
 <div class="row">
 <button id="compile-btn" data-factory-control class="btn-primary" type="button">Compile</button>
+</div>
+</div>
+<div class="row">
 <button id="fight-btn" class="btn-ghost" type="button" disabled>Training fight</button>
 </div>
 <p class="sub" id="train-msg">Compile turns words into chips. Fight runs the version against the benchmark.</p>

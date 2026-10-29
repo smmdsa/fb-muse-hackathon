@@ -7,6 +7,7 @@ const HANDLE_KEY = "aw_handle";
 let token = localStorage.getItem(TOKEN_KEY) || "";
 let agentId = "";
 let latestVersion = "";
+let factoryFormOpen = false;
 
 function headers() {
   return { "content-type": "application/json", authorization: `Bearer ${token}` };
@@ -22,6 +23,44 @@ async function call(method, path, body) {
   }); } finally { await window.factoryCooldown?.finish(method, path); }
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
+}
+
+// The gate hides the build form until the user starts the factory.
+// After a build the form closes and the gate shows the cooldown.
+// Status comes from factory-cooldown.js; without it the gate stays open.
+function factoryStatus() {
+  if (window.factoryCooldown && typeof window.factoryCooldown.status === "function") {
+    return window.factoryCooldown.status();
+  }
+  return { mode: "ready", seconds: 0 };
+}
+
+function updateFactoryGate() {
+  const gate = $("factory-gate");
+  const form = $("factory-form");
+  const start = $("factory-start-btn");
+  const msg = $("factory-gate-msg");
+  if (!gate || !form || !start || !msg) return;
+  if (!agentId) return;
+  const st = factoryStatus();
+  const cooling = (st.mode === "cooling" && st.seconds > 0) || st.mode === "busy";
+  if (factoryFormOpen && !cooling) {
+    show(gate, false);
+    show(form, true);
+    return;
+  }
+  if (cooling) factoryFormOpen = false;
+  show(gate, true);
+  show(form, false);
+  start.disabled = cooling;
+  if (st.mode === "busy") {
+    msg.textContent = "Building your request…";
+  } else if (cooling) {
+    const s = st.seconds;
+    msg.textContent = `Assembly bay cooling down. Next build in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}.`;
+  } else {
+    msg.textContent = "One build per 5 minutes. The assembly bay cools down after each build.";
+  }
 }
 
 function show(el, on) {
@@ -254,6 +293,14 @@ for (const [box, count] of [["prompt", "prompt-count"]]) {
   });
 }
 
+$("factory-start-btn").addEventListener("click", () => {
+  factoryFormOpen = true;
+  updateFactoryGate();
+  $("prompt").focus();
+});
+
+setInterval(updateFactoryGate, 1000);
+
 $("compile-btn").addEventListener("click", async () => {
   const prompt = $("prompt").value.trim();
   if (!prompt) {
@@ -264,9 +311,18 @@ $("compile-btn").addEventListener("click", async () => {
   $("fight-btn").disabled = true;
   const r = await call("POST", `/v1/agents/${agentId}/policies/compile`, { prompt });
   if (r.status !== 201) {
-    $("train-msg").textContent = `Compile failed: ${(r.data.errors || [r.data.error]).join("; ")}`;
+    if (r.status === 429) {
+      factoryFormOpen = false;
+      updateFactoryGate();
+      const s = Math.max(0, Number(r.data.retryAfterSeconds) || 0);
+      $("train-msg").textContent = `Factory recharging — next build in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}.`;
+    } else {
+      $("train-msg").textContent = `Compile failed: ${(r.data.errors || [r.data.error]).join("; ")}`;
+    }
     return;
   }
+  factoryFormOpen = false;
+  updateFactoryGate();
   latestVersion = r.data.versionId;
   $("train-msg").textContent = `Draft minted by ${r.data.isMock ? "mock" : r.data.provider}. Install it below, then queue.`;
   $("fight-btn").disabled = false;
@@ -302,12 +358,15 @@ async function boot() {
     $("train-msg").textContent = "Breed a hero in the barracks first — chips need a mind to drive.";
     show($("train-card"), true);
     $("compile-btn").disabled = true;
+    $("factory-start-btn").disabled = true;
+    $("factory-gate-msg").textContent = "Breed a hero in the barracks first — chips need a mind to drive.";
     return;
   }
   agentId = me.data.agent.id;
   window.factoryAgentReady = true;
   $("compile-btn").disabled = false;
   window.factoryCooldown?.render();
+  updateFactoryGate();
   show($("train-card"), true);
   await refresh();
 }

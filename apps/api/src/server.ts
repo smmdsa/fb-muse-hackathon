@@ -28,7 +28,7 @@ type Ctx = { store: Store };
 function cooldownStatus(ctx: Ctx, leader: string, now = Date.now()) {
   const row = ctx.store.db.prepare("SELECT next_allowed_at FROM ai_cooldowns WHERE leader_id = ?").get(leader) as { next_allowed_at: number } | undefined;
   const nextAllowedAt = row?.next_allowed_at ?? 0;
-  return { nextAllowedAt, retryAfterSeconds: Math.max(0, Math.ceil((nextAllowedAt - now) / 1000)) };
+  return { nextAllowedAt, retryAfterSeconds: Math.max(0, Math.ceil((nextAllowedAt - now) / 1000)), now };
 }
 function reserveAi(ctx: Ctx, res: ServerResponse, leader: string): boolean {
   const now = Date.now();
