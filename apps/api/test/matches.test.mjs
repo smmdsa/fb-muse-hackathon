@@ -45,8 +45,9 @@ describe("matches", () => {
       keys.a.token,
     );
     assert.equal(r.status, 201);
-    assert.ok(Math.abs(r.json.deltaA) >= 12 && Math.abs(r.json.deltaA) <= 28);
-    assert.equal(r.json.deltaB, -r.json.deltaA);
+    // MOBA bouts can draw: deltas stay zero-sum and bounded either way.
+    assert.equal(r.json.deltaA + r.json.deltaB, 0);
+    assert.ok(Math.abs(r.json.deltaA) <= 28);
     const me = await call("GET", "/v1/me", null, keys.a.token);
     assert.equal(me.json.leader.ap, 500 + r.json.deltaA);
     const replay = await call("GET", "/v1/matches/rank-1/replay", null, keys.a.token);

@@ -21,6 +21,25 @@ export function forgeWorld(): WorldConfig {
   return { width, height, covers, control, tickHz: 30, maxTicks: 2700 };
 }
 
+// The builder returns the one-lane MOBA map.
+export function mobaWorld(): WorldConfig {
+  const width = 48;
+  const height = 16;
+  const covers: CoverBox[] = [
+    { minX: 19.5, minY: 3.0, maxX: 21.5, maxY: 5.0 },
+    { minX: 26.5, minY: 3.0, maxX: 28.5, maxY: 5.0 },
+    { minX: 19.5, minY: 11.0, maxX: 21.5, maxY: 13.0 },
+    { minX: 26.5, minY: 11.0, maxX: 28.5, maxY: 13.0 },
+  ];
+  const control: CoverBox = {
+    minX: width / 2 - 1,
+    minY: height / 2 - 1,
+    maxX: width / 2 + 1,
+    maxY: height / 2 + 1,
+  };
+  return { width, height, covers, control, tickHz: 30, maxTicks: 54000 };
+}
+
 // The check returns true when the point sits inside the box.
 export function pointInBox(x: number, y: number, box: CoverBox): boolean {
   return x >= box.minX && x <= box.maxX && y >= box.minY && y <= box.maxY;

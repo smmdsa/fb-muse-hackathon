@@ -13,7 +13,7 @@ export const FALLBACK_RULE_ID = "fallback-safe";
 
 // The safe policy holds the line. It never fires and walks to center.
 export function fallback(): Intents {
-  return { move: "CAPTURE", fire: false, dash: false, shield: false, ruleId: FALLBACK_RULE_ID };
+  return { move: "CAPTURE", fire: false, dash: false, shield: false, buy: null, ruleId: FALLBACK_RULE_ID };
 }
 
 // The evaluator walks rules in order and returns the first match.
@@ -32,6 +32,7 @@ function toIntents(rule: BehaviorRule): Intents {
     fire: rule.fire === true,
     dash: rule.dash === true,
     shield: rule.shield === true,
+    buy: rule.buy ?? null,
     ruleId: rule.id,
   };
 }
@@ -65,6 +66,18 @@ function valueOf(operand: Leaf["operand"], obs: Observation): number | boolean |
     case "objectiveDist": return obs.objectiveDist;
     case "timeLeft": return obs.timeLeft;
     case "edgeDist": return obs.edgeDist;
+    case "ownGold": return obs.ownGold ?? null;
+    case "ownDeaths": return obs.ownDeaths ?? null;
+    case "gameTime": return obs.gameTime ?? null;
+    case "distFoeTower": return obs.distFoeTower ?? null;
+    case "foeTowerHpPct": return obs.foeTowerHpPct ?? null;
+    case "nearFoeMinions": return obs.nearFoeMinions ?? null;
+    case "nearAllyMinions": return obs.nearAllyMinions ?? null;
+    case "distFoeMinion": return obs.distFoeMinion ?? null;
+    case "foeHpPct": return obs.lineOfSight ? (obs.foeHpPct ?? null) : null;
+    case "buildValue": return obs.buildValue ?? null;
+    case "slotsFree": return obs.slotsFree ?? null;
+    case "structLead": return obs.structLead ?? null;
   }
 }
 

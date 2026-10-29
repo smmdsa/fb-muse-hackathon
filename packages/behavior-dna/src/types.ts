@@ -6,7 +6,10 @@ export type MoveIntent =
   | "KITE"
   | "STRAFE"
   | "SEEK_COVER"
-  | "CAPTURE";
+  | "CAPTURE"
+  | "PUSH"
+  | "FARM"
+  | "DEFEND";
 
 export type AbilityIntent = "AIM" | "FIRE" | "DASH" | "SHIELD";
 
@@ -22,7 +25,19 @@ export type Operand =
   | "foeLastSeenAge"
   | "objectiveDist"
   | "timeLeft"
-  | "edgeDist";
+  | "edgeDist"
+  | "ownGold"
+  | "ownDeaths"
+  | "gameTime"
+  | "distFoeTower"
+  | "foeTowerHpPct"
+  | "nearFoeMinions"
+  | "nearAllyMinions"
+  | "distFoeMinion"
+  | "foeHpPct"
+  | "buildValue"
+  | "slotsFree"
+  | "structLead";
 
 export type NumOp = "gt" | "gte" | "lt" | "lte";
 
@@ -43,6 +58,7 @@ export type BehaviorRule = {
   fire?: boolean;
   dash?: boolean;
   shield?: boolean;
+  buy?: string;
 };
 
 export type DnaTraits = {
@@ -53,7 +69,7 @@ export type DnaTraits = {
 };
 
 export type AgentPolicy = {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   agentVersionId: string;
   dna: DnaTraits;
   rules: BehaviorRule[];
@@ -72,6 +88,18 @@ export type Observation = {
   objectiveDist: number;
   timeLeft: number;
   edgeDist: number;
+  ownGold?: number;
+  ownDeaths?: number;
+  gameTime?: number;
+  distFoeTower?: number | null;
+  foeTowerHpPct?: number | null;
+  nearFoeMinions?: number;
+  nearAllyMinions?: number;
+  distFoeMinion?: number | null;
+  foeHpPct?: number | null;
+  buildValue?: number;
+  slotsFree?: number;
+  structLead?: number;
 };
 
 export type Intents = {
@@ -79,5 +107,6 @@ export type Intents = {
   fire: boolean;
   dash: boolean;
   shield: boolean;
+  buy: string | null;
   ruleId: string;
 };

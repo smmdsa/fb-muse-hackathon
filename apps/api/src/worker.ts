@@ -7,7 +7,7 @@ import { addEntry, createEvent, lock, register as registerEntry, reportGame, see
 import type { EventPhase } from "@agent-wars/tournaments";
 import type { Championship } from "@agent-wars/tournaments";
 import { CATALOG } from "@agent-wars/economy";
-import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies, pickBot } from "@agent-wars/battle-core";
+import { BENCH_POLICY, BOT_PRESETS, buildReplay, DEFAULT_MOBA, fightPolicies, pickBot } from "@agent-wars/battle-core";
 import { MAX_DEFENSE_PER_DAY, recordDefense } from "@agent-wars/autobattle";
 import { pickOpponent } from "@agent-wars/matchmaker";
 import type { Candidate, History } from "@agent-wars/matchmaker";
@@ -120,6 +120,11 @@ async function leaderboard(env: WorkerEnv, seasonId: string): Promise<Response> 
   return json({ seasonId, rows });
 }
 
+// New fights run MOBA. Old rows without a mode read as duel.
+function matchMode(row: Record<string, unknown>): "duel" | "moba" {
+  return row.mode === "moba" ? "moba" : "duel";
+}
+
 // Replay re-simulates a stored match and compares checksums.
 async function replay(env: WorkerEnv, id: string): Promise<Response> {
   const match = await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(id).first<Record<string, unknown>>();
@@ -143,8 +148,11 @@ async function replay(env: WorkerEnv, id: string): Promise<Response> {
   } else {
     return json({ error: "replay unavailable: a version is gone" }, 410);
   }
-  const again = fightPolicies(pa, pb, match.seed as string);
-  const replay = buildReplay(pa, pb, match.seed as string);
+  // The row names its sim. MOBA rows re-simulate as MOBA and
+  // serve v2 replays. Duel rows keep the v1 path untouched.
+  const cfg = matchMode(match) === "moba" ? DEFAULT_MOBA : undefined;
+  const again = fightPolicies(pa, pb, match.seed as string, cfg);
+  const replay = buildReplay(pa, pb, match.seed as string, cfg);
   return json({ stored: match, recomputed: { winner: again.winner, ticks: again.ticks, checksum: again.checksum }, replay, identical: again.checksum === match.checksum });
 }
 
@@ -300,6 +308,7 @@ async function autoDigestD1(env: WorkerEnv, leaderId: string, now: number): Prom
         winner: m.winner,
         ticks: m.ticks,
         rated: m.rated,
+        mode: matchMode(m),
         myDelta: mine === "a" ? m.delta_a : m.delta_b,
         myPaid: mine === "a" ? m.paid_a : m.paid_b,
         at: m.created_at,
@@ -424,6 +433,7 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
         ticks: m.ticks,
         checksum: m.checksum,
         rated: m.rated,
+        mode: matchMode(m),
         myDelta: mine === "a" ? m.delta_a : m.delta_b,
         myPaid: mine === "a" ? m.paid_a : m.paid_b,
         foe: mine === "a" ? m.b_version : m.a_version,
@@ -506,26 +516,31 @@ async function runCasualD1(
     foeLabel = bot.id;
     foePolicy = bot.policy;
   }
-  const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, foePolicy, input.seed);
+  const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, foePolicy, input.seed, DEFAULT_MOBA);
   const id = mintId("m");
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   const plan = await planPay(env, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
   const writes: unknown[] = [
     env.DB.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?)",
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, 'moba')",
     ).bind(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, plan.credited, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
     ...plan.stmts,
   ];
   await env.DB.batch(writes as never[]);
-  return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !input.bVersionId, paid: plan.credited };
+  return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !input.bVersionId, paid: plan.credited, mode: "moba" };
 }
 
 async function settleTicketD1(env: WorkerEnv, ticket: Record<string, unknown>, foeVersion: string | null): Promise<Record<string, unknown>> {
   const mode = ticket.mode as string;
   let matchId: string;
   if (mode === "ranked" && foeVersion) {
-    const settled = await settleRankedD1(env, ticket, foeVersion);
-    matchId = settled;
+    const settled = await settleRankedD1(env, {
+      aVersionId: ticket.version_id as string,
+      bVersionId: foeVersion,
+      seed: `q-${ticket.id}`,
+      key: ticket.id as string,
+    });
+    matchId = settled.matchId as string;
   } else {
     const settled = await runCasualD1(env, {
       aVersionId: ticket.version_id as string,
@@ -557,6 +572,7 @@ async function settleRankedD1(
     JSON.parse(a.policy_json as string) as AgentPolicy,
     JSON.parse(b.policy_json as string) as AgentPolicy,
     input.seed,
+    DEFAULT_MOBA,
   );
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   const ledger = createLedger("local-s1");
@@ -588,7 +604,7 @@ async function settleRankedD1(
     ...planA.stmts,
     ...planB.stmts,
     env.DB.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'moba')",
     ).bind(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, planA.credited, planB.credited, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
   );
   try {
@@ -600,7 +616,7 @@ async function settleRankedD1(
     if (!stored) throw new Error("settle failed");
     return settledResultD1(env, stored as Record<string, number | string>);
   }
-  return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA: planA.credited, paidB: planB.credited };
+  return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA: planA.credited, paidB: planB.credited, mode: "moba" };
 }
 
 async function requestMatchD1(
@@ -664,6 +680,7 @@ async function settledResultD1(env: WorkerEnv, row: Record<string, unknown>): Pr
     deltaB: row.delta_b,
     paidA: await credited("a"),
     paidB: await credited("b"),
+    mode: matchMode(row),
     deduped: true,
   };
 }
@@ -1050,12 +1067,12 @@ export default {
       if (!owner || owner.leader_id !== me.id) return json({ error: "version not found for this leader" }, 404);
       const v = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(versionId).first<Record<string, unknown>>();
       if (!v) return json({ error: "unknown version" }, 404);
-      const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, BENCH_POLICY, seed);
+      const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, BENCH_POLICY, seed, DEFAULT_MOBA);
       const id = mintId("m");
       await env.DB.prepare(
-        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'moba')",
       ).bind(id, seed, versionId, "benchmark-v1", out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })).run();
-      return json({ matchId: id, ...out }, 201);
+      return json({ matchId: id, ...out, mode: "moba" }, 201);
     }
     const analysisMatch = request.method === "POST" && /^\/v1\/battles\/[^/]+\/analysis$/.exec(url.pathname);
     if (analysisMatch) {
@@ -1113,16 +1130,17 @@ export default {
       let drawsA = 0;
       let drawsB = 0;
       const now = Date.now();
+      // The lab keeps the duel sim. Its bouts stay small and fast.
       for (let i = 0; i < bouts; i += 1) {
         const outA = fightPolicies(policies[0], BENCH_POLICY, `${runId}-a-${i}`);
         await env.DB.prepare(
-          "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+          "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'duel')",
         ).bind(`${runId}-a-${i}`, `${runId}-a-${i}`, drafts[0], "benchmark-v1", outA.winner, outA.ticks, outA.checksum, now, JSON.stringify({ a: outA.chipsA, b: outA.chipsB })).run();
         if (outA.winner === "A") winsA += 1;
         else if (outA.winner === "DRAW") drawsA += 1;
         const outB = fightPolicies(policies[1], BENCH_POLICY, `${runId}-b-${i}`);
         await env.DB.prepare(
-          "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+          "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'duel')",
         ).bind(`${runId}-b-${i}`, `${runId}-b-${i}`, drafts[1], "benchmark-v1", outB.winner, outB.ticks, outB.checksum, now, JSON.stringify({ a: outB.chipsA, b: outB.chipsB })).run();
         if (outB.winner === "A") winsB += 1;
         else if (outB.winner === "DRAW") drawsB += 1;

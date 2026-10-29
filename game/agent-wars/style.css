@@ -456,6 +456,27 @@ a.btn-primary { text-decoration: none; display: inline-block; font-family: var(-
 .rule { display: flex; justify-content: space-between; align-items: center; gap: 15px; border-bottom: 1px solid var(--line); padding: 9px 0; }
 .rule small { display: block; color: var(--dim); font-size: 12px; }
 a.link-quiet { color: var(--dim); font-size: 14px; }
+/* MOBA viewer: gold, read-only builds, kill feed. */
+.moba-hud { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 12px; align-items: start; margin-bottom: 12px; }
+.moba-hud[hidden] { display: none; }
+.moba-side { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.moba-side.right { justify-content: end; text-align: right; }
+.builds { display: flex; gap: 4px; flex-wrap: wrap; }
+.builds img { width: 30px; height: 30px; object-fit: contain; border: 1px solid var(--line); border-radius: 2px; background: var(--panel-low); }
+.builds .slot-empty { width: 30px; height: 30px; border: 1px dashed var(--line); border-radius: 2px; }
+.moba-kills { min-width: 0; }
+#moba-feed { margin: 0; padding-left: 20px; max-height: 96px; overflow: auto; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; }
+#moba-feed li.kill { color: var(--ink); font-weight: 700; }
+#moba-feed li.nexus { color: var(--gold); font-weight: 800; }
+#moba-feed li.econ { color: var(--gold); }
+#end-builds { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; margin: 4px 0 8px; }
+#end-builds[hidden] { display: none; }
+.recap-side { min-width: 220px; max-width: 320px; }
+.recap-head { margin: 0 0 6px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.recap-icons { justify-content: center; }
+.recap-icons img { width: 34px; height: 34px; }
+.recap-none { color: var(--dim); font-size: 13px; }
+@media (max-width: 700px) { .moba-hud { grid-template-columns: 1fr; } }
 @media (max-width: 700px) {
   .command-grid { grid-template-columns: 1fr; }
   .lower { grid-template-columns: 1fr; }

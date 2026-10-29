@@ -44,7 +44,9 @@ describe("public profiles", () => {
     assert.equal(r.json.handle, "pub-alpha");
     assert.equal(typeof r.json.ap, "number");
     assert.ok(r.json.tier);
-    assert.equal(r.json.agent.wins + r.json.agent.losses, 1);
+    // Draws count for neither side, so the card sums decisive bouts only.
+    const row = store.db.prepare("SELECT winner FROM matches WHERE id = ?").get("pub-1");
+    assert.equal(r.json.agent.wins + r.json.agent.losses, row.winner === "DRAW" ? 0 : 1);
     const raw = JSON.stringify(r.json);
     for (const banned of ["token", "energy", "lease", "wallet", "autobattle", "ac\"", "rp\""]) {
       assert.ok(!raw.includes(banned), `leaked ${banned}`);

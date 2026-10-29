@@ -1,6 +1,7 @@
 // Deterministic battle step. Fixed dt keeps replays identical.
 
 import { fnv1a } from "./rng.ts";
+import { createMobaAgent, createMobaState, mobaStateKey, stepMobaBattle } from "./moba.ts";
 import { circleHitsBox, forgeWorld, pointInBox, segmentHitsBox } from "./world.ts";
 import type {
   AgentAction,
@@ -21,6 +22,7 @@ export const DEFAULT_BATTLE: BattleConfig = {
     maxEnergy: 100,
     energyRegen: 8,
   },
+  mode: "duel",
 };
 
 const FIRE_INTERVAL = 0.5;
@@ -62,6 +64,18 @@ function spawn(id: AgentId, cfg: BattleConfig): AgentState {
 
 // The factory builds the start state for a seed.
 export function createBattle(cfg: BattleConfig = DEFAULT_BATTLE): BattleState {
+  if (cfg.mode === "moba") {
+    return {
+      tick: 0,
+      time: 0,
+      agents: { A: createMobaAgent("A", cfg), B: createMobaAgent("B", cfg) },
+      projectiles: [],
+      nextProjectileId: 1,
+      over: false,
+      winner: null,
+      moba: createMobaState(),
+    };
+  }
   return {
     tick: 0,
     time: 0,
@@ -106,6 +120,7 @@ export function stepBattle(
   cfg: BattleConfig = DEFAULT_BATTLE,
 ): BattleState {
   if (state.over) return state;
+  if (cfg.mode === "moba" || state.moba) return stepMobaBattle(state, actions, cfg);
   const dt = 1 / cfg.world.tickHz;
   const time = state.time + dt;
   const tick = state.tick + 1;
@@ -245,6 +260,7 @@ export function decideWinner(a: AgentState, b: AgentState): AgentId | "DRAW" {
 
 // The helper serializes state for hashing.
 export function stateKey(s: BattleState): string {
+  if (s.moba) return mobaStateKey(s);
   const f = (n: number): string => n.toFixed(4);
   const a = s.agents.A;
   const b = s.agents.B;

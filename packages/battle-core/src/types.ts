@@ -21,6 +21,7 @@ export type AgentAction = {
   fire: boolean;
   dash: boolean;
   shield: boolean;
+  buy?: string | null;
 };
 
 export type AgentConfig = {
@@ -45,6 +46,12 @@ export type AgentState = {
   lastShotAt: number;
   damageDealt: number;
   controlTime: number;
+  gold?: number;
+  items?: string[];
+  deaths?: number;
+  respawnAt?: number;
+  spawnShieldUntil?: number;
+  autoCell?: boolean;
 };
 
 export type Projectile = {
@@ -54,6 +61,9 @@ export type Projectile = {
   prev: Vec2;
   vel: Vec2;
   alive: boolean;
+  dmg?: number;
+  srcTower?: StructureId | null;
+  srcMinion?: number | null;
 };
 
 export type CoverBox = {
@@ -72,10 +82,14 @@ export type WorldConfig = {
   maxTicks: number;
 };
 
+export type BattleMode = "duel" | "moba";
+
 export type BattleConfig = {
   seed: string;
   world: WorldConfig;
   agent: AgentConfig;
+  mode?: BattleMode;
+  autoBuy?: boolean;
 };
 
 export type BattleState = {
@@ -86,4 +100,77 @@ export type BattleState = {
   nextProjectileId: number;
   over: boolean;
   winner: AgentId | "DRAW" | null;
+  moba?: MobaState;
+};
+
+export type StructureId =
+  | "a_t1" | "a_t2" | "a_inhib" | "a_nt_top" | "a_nt_bot" | "a_nexus"
+  | "b_t1" | "b_t2" | "b_inhib" | "b_nt_top" | "b_nt_bot" | "b_nexus";
+
+export type StructureKind = "tower" | "inhibitor" | "nexus_turret" | "nexus";
+
+export type TowerTarget =
+  | { kind: "robot"; side: AgentId }
+  | { kind: "minion"; id: number };
+
+export type StructureState = {
+  id: StructureId;
+  side: AgentId;
+  kind: StructureKind;
+  pos: Vec2;
+  radius: number;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  target: TowerTarget | null;
+  lastShotAt: number;
+  heatSide: AgentId | null;
+  heatCount: number;
+  heatOutSince: number | null;
+};
+
+export type MinionKind = "melee" | "caster";
+
+export type MinionTarget =
+  | { kind: "robot"; side: AgentId }
+  | { kind: "minion"; id: number }
+  | { kind: "structure"; id: StructureId };
+
+export type MinionState = {
+  id: number;
+  side: AgentId;
+  kind: MinionKind;
+  pos: Vec2;
+  hp: number;
+  alive: boolean;
+  target: MinionTarget | null;
+  wpIndex: number;
+  lastShotAt: number;
+};
+
+export type MobaEvent =
+  | { t: number; type: "wave"; side: AgentId }
+  | { t: number; type: "buy"; side: AgentId; item: string; gold: number }
+  | { t: number; type: "combine"; side: AgentId; item: string }
+  | { t: number; type: "kill"; side: AgentId }
+  | { t: number; type: "respawn"; side: AgentId }
+  | { t: number; type: "structure"; side: AgentId; id: StructureId };
+
+export type DamageEvent = {
+  t: number;
+  atkSide: AgentId;
+  victimSide: AgentId;
+  victimRobot: boolean;
+  byRobot: boolean;
+  x: number;
+  y: number;
+};
+
+export type MobaState = {
+  minions: MinionState[];
+  structures: StructureState[];
+  nextMinionId: number;
+  lifetimeGold: Record<AgentId, number>;
+  log: MobaEvent[];
+  dmg: DamageEvent[];
 };
