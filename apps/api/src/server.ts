@@ -544,7 +544,17 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const cfg = battleConfigFor(matchMode(match));
         const again = fightPolicies(a.policy, pb, match.seed as string, cfg);
         const replay = buildReplay(a.policy, pb, match.seed as string, cfg);
-        send(res, 200, { stored: match, recomputed: again, replay, identical: again.checksum === match.checksum, startedAt: match.created_at, now: Date.now() });
+        const agentCard = (ver: { agentId: string } | null, versionId: string) => {
+          if (!ver) {
+            if (versionId === "benchmark-v1") return { name: "BENCHMARK", portrait_url: null };
+            if (versionId.startsWith("bot:")) return { name: versionId.slice(4).toUpperCase(), portrait_url: null };
+            return null;
+          }
+          const row = ctx.store.db.prepare("SELECT name, portrait_url FROM agents WHERE id = ?").get(ver.agentId) as Record<string, unknown> | null;
+          return row ? { name: row.name, portrait_url: row.portrait_url } : null;
+        };
+        const agents = { a: agentCard(a, match.a_version as string), b: agentCard(b, match.b_version as string) };
+        send(res, 200, { stored: match, recomputed: again, replay, identical: again.checksum === match.checksum, startedAt: match.created_at, now: Date.now(), agents });
         return;
       }
       send(res, 404, { error: "unknown route" });

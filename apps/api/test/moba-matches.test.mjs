@@ -51,7 +51,7 @@ describe("moba fights and replays", () => {
   it("T3.1: the replay route re-simulates and reports identical", async () => {
     const replay = await call("GET", `/v1/matches/${keys.trainId}/replay`, null, keys.a.token);
     assert.equal(replay.status, 200);
-    assert.deepEqual(Object.keys(replay.json).sort(), ["identical", "now", "recomputed", "replay", "startedAt", "stored"]);
+    assert.deepEqual(Object.keys(replay.json).sort(), ["agents", "identical", "now", "recomputed", "replay", "startedAt", "stored"]);
     assert.equal(replay.json.startedAt, replay.json.stored.created_at);
     assert.ok(replay.json.now >= replay.json.startedAt);
     assert.equal(replay.json.identical, true);
@@ -68,6 +68,16 @@ describe("moba fights and replays", () => {
     assert.ok(v2.frames[0].builds === null || typeof v2.frames[0].builds === "object");
     assert.ok(Array.isArray(v2.events));
     assert.equal(v2.checksum, replay.json.stored.checksum);
+  });
+
+  it("replay names both agents, human and benchmark", async () => {
+    const replay = await call("GET", `/v1/matches/${keys.trainId}/replay`, null, keys.a.token);
+    assert.equal(replay.status, 200);
+    const me = await call("GET", "/v1/me", null, keys.a.token);
+    assert.equal(replay.json.agents.a.name, me.json.agent.name);
+    assert.equal(replay.json.agents.a.portrait_url, me.json.agent.portrait_url);
+    assert.equal(replay.json.agents.b.name, "BENCHMARK");
+    assert.equal(replay.json.agents.b.portrait_url, null);
   });
 
   it("T3.3: one ranked fixture settles with correct AP deltas", async () => {
