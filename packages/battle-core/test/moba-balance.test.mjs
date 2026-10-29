@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   BENCH_POLICY,
+  BOT_PRESETS,
   DEFAULT_MOBA,
   buildMobaReplay,
   createBattle,
@@ -11,9 +12,12 @@ import {
 } from "../src/index.ts";
 
 // Balance pass. Spec sections 11-12, checks T5.1-T5.4.
-// Fixture seed is fixed. MOBA bench fights are seed-invariant for a
-// fixed policy, so one seed pins the whole mirror matchup.
+// Fixture seed is fixed. The reference bout pits the benchmark
+// against the breaker bot: fixed policies, asymmetric styles, one
+// seed pins the whole matchup. (Identical optimal policies trade
+// evenly to the cap, so the mirror no longer paces the game.)
 const SEED = "t5-balance";
+const BREAKER = BOT_PRESETS.find((b) => b.id === "bot:breaker").policy;
 
 function mobaCfg(seed, autoBuy = true) {
   return { ...DEFAULT_MOBA, world: { ...DEFAULT_MOBA.world }, agent: { ...DEFAULT_MOBA.agent }, seed, autoBuy };
@@ -26,14 +30,15 @@ function struct(s, id) {
 const IDLE_A = { move: { x: 0, y: 0 }, aim: { x: 1, y: 0 }, fire: false, dash: false, shield: false, buy: null };
 const IDLE_B = { move: { x: 0, y: 0 }, aim: { x: -1, y: 0 }, fire: false, dash: false, shield: false, buy: null };
 
-describe("T5.1 bench vs bench ends in 5-10 min", () => {
-  it("decisive winner with ticks in [9000, 18000]", () => {
+describe("T5.1 reference bout ends in 10-20 min", () => {
+  it("decisive winner with ticks in [18000, 36000]", () => {
     const cfg = mobaCfg(SEED);
-    const out = fightPolicies(BENCH_POLICY, BENCH_POLICY, SEED, cfg);
+    const out = fightPolicies(BENCH_POLICY, BREAKER, SEED, cfg);
     assert.ok(out.winner === "A" || out.winner === "B", `winner reads ${out.winner}`);
-    assert.ok(out.ticks >= 9000 && out.ticks <= 18000, `ticks read ${out.ticks}`);
+    assert.ok(out.ticks >= 18000 && out.ticks <= 36000, `ticks read ${out.ticks}`);
+    assert.ok(out.ticks < cfg.world.maxTicks, "nexus decides, not the cap");
     assert.equal(out.winner, "A");
-    assert.equal(out.ticks, 15964);
+    assert.equal(out.ticks, 24231);
   });
 });
 
@@ -42,25 +47,25 @@ describe("T5.2 both tier-1 towers stand at 2:30", () => {
     const cfg = mobaCfg(SEED);
     let s = createBattle(cfg);
     while (!s.over && s.tick < 4500) {
-      s = stepBattle(s, { A: drive(s, BENCH_POLICY, "A", cfg), B: drive(s, BENCH_POLICY, "B", cfg) }, cfg);
+      s = stepBattle(s, { A: drive(s, BENCH_POLICY, "A", cfg), B: drive(s, BREAKER, "B", cfg) }, cfg);
     }
     assert.equal(s.tick, 4500);
     assert.ok(struct(s, "a_t1").alive, "a_t1 stands at 2:30");
     assert.ok(struct(s, "b_t1").alive, "b_t1 stands at 2:30");
-    assert.equal(Math.round(struct(s, "a_t1").hp), 1194);
-    assert.equal(Math.round(struct(s, "b_t1").hp), 1157);
+    assert.equal(Math.round(struct(s, "a_t1").hp), 505);
+    assert.equal(Math.round(struct(s, "b_t1").hp), 606);
   });
 });
 
 describe("T5.3 T5.1 replay JSON under 1 MB", () => {
   it("byte length below 1048576", () => {
     const cfg = mobaCfg(SEED);
-    const replay = buildMobaReplay(BENCH_POLICY, BENCH_POLICY, SEED, cfg);
+    const replay = buildMobaReplay(BENCH_POLICY, BREAKER, SEED, cfg);
     assert.equal(replay.winner, "A");
-    assert.equal(replay.ticks, 15964);
+    assert.equal(replay.ticks, 24231);
     const bytes = JSON.stringify(replay).length;
     assert.ok(bytes < 1048576, `replay reads ${bytes} bytes`);
-    assert.equal(bytes, 900906);
+    assert.equal(bytes, 787947);
   });
 });
 

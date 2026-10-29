@@ -63,11 +63,12 @@ export const SPAWN_SHIELD_SECS = 2;
 export const NEXUS_HEAL_PCT = 0.04;
 export const NEXUS_HEAL_RANGE = 2.5;
 export const AUTO_BUY_EVERY = 30;
-export const AUTO_CELL_START = 50;
-export const AUTO_CELL_STOP = 80;
+export const AUTO_CELL_START = 20;
+export const AUTO_CELL_STOP = 50;
 export const PROJECTILE_SPEED = 14;
 export const MELEE_GOLD = 20;
 export const CASTER_GOLD = 14;
+export const SUPER_GOLD = 60;
 export const ROBOT_GOLD = 300;
 
 export const DEFAULT_MOBA: BattleConfig = {
@@ -101,7 +102,7 @@ const STRUCTURE_DEFS: Record<string, StructureDef> = {
   t1: { kind: "tower", hp: 1200, radius: 0.6, interval: 1.2 },
   t2: { kind: "tower", hp: 1500, radius: 0.6, interval: 1.2 },
   inhib: { kind: "inhibitor", hp: 800, radius: 0.6, interval: 0 },
-  nt: { kind: "nexus_turret", hp: 900, radius: 0.6, interval: 0.8 },
+  nt: { kind: "nexus_turret", hp: 900, radius: 0.6, interval: 1.0 },
   nexus: { kind: "nexus", hp: 1200, radius: 0.9, interval: 0 },
 };
 
@@ -283,10 +284,13 @@ function norm(v: Vec2): Vec2 {
 const MINION_STATS: Record<MinionKind, { hp: number; dmg: number; interval: number; range: number }> = {
   melee: { hp: 200, dmg: 12, interval: 1.0, range: 1.0 },
   caster: { hp: 100, dmg: 16, interval: 1.0, range: 2.5 },
+  super: { hp: 1000, dmg: 30, interval: 1.0, range: 1.0 },
 };
 
 export function minionGold(kind: MinionKind): number {
-  return kind === "melee" ? MELEE_GOLD : CASTER_GOLD;
+  if (kind === "melee") return MELEE_GOLD;
+  if (kind === "super") return SUPER_GOLD;
+  return CASTER_GOLD;
 }
 
 // The spawner adds one full wave per side. A first, then B.
@@ -301,6 +305,14 @@ function spawnWave(moba: MobaState, time: number, tick: number): void {
       { kind: "caster", x: nx + 0.1 * d, y: 8.0 },
       { kind: "caster", x: nx + 0.1 * d, y: 8.7 },
     ];
+    // Amendment A10: a fallen foe inhibitor promotes every wave with
+    // one super minion. The super tanks towers while the robot
+    // sieges, which closes symmetric endgames that otherwise grind
+    // to the tick cap with both nexus turrets standing.
+    const foeInhib = structById(moba.structures, `${side === "A" ? "b" : "a"}_inhib` as StructureId);
+    if (foeInhib && !foeInhib.alive) {
+      spots.push({ kind: "super", x: nx + 1.6 * d, y: 8.0 });
+    }
     for (const s of spots) {
       moba.minions.push({
         id: moba.nextMinionId++,
@@ -407,7 +419,8 @@ function damageMinion(
   kind: Killer["kind"],
 ): void {
   if (!victim.alive) return;
-  victim.hp -= raw * (kind === "minion" ? MINION_VS_MINION_MULT : 1);
+  const vsMinion = kind === "minion" && victim.kind !== "super";
+  victim.hp -= raw * (vsMinion ? MINION_VS_MINION_MULT : 1);
   recordHit(ctx, victim.side, false, atkSide, kind === "robot", victim.pos, `minion:${victim.id}`, kind);
 }
 
@@ -486,7 +499,16 @@ export function autoCombine(agent: AgentState, tick: number, log: MobaEvent[]): 
   }
 }
 
-// Auto-buy fallback. One buy per run. Tier 1 parts only.
+// Combine fee the auto-buyer keeps liquid while a base part waits
+// for its upgrade. Without the reserve, parts and cells eat every
+// coin, combines never land, and kill-trading grinds to the cap.
+export const COMBINE_RESERVE = 350;
+export const COMBINE_RESERVE_T3 = 400;
+
+// Auto-buy fallback. One buy per run. Tier 1 parts only. The fee
+// reserve saves combines first: parts only spend past it, and cells
+// only spend gold too poor to forge. Per-tick auto-combine then
+// lands every upgrade the moment its fee goes liquid.
 export function autoBuyOne(agent: AgentState, tick: number, log: MobaEvent[]): void {
   if (!agent.alive) return;
   const items = agent.items ?? [];
@@ -498,17 +520,23 @@ export function autoBuyOne(agent: AgentState, tick: number, log: MobaEvent[]): v
   } else if (hpPct < AUTO_CELL_START) {
     agent.autoCell = true;
   }
-  if (agent.autoCell && gold >= BASE_ITEMS.repair_cell.cost) {
-    tryBuy(agent, "repair_cell", tick, log);
-    return;
+  const holdBase = items.some((id) => BASE_ITEMS[id] && !BASE_ITEMS[id].consumable);
+  const holdT2 = items.some((id) => {
+    const r = RECIPE_BY_ID[id];
+    return !!r && r.parts.every((p) => !!BASE_ITEMS[p]);
+  });
+  const reserve = holdBase ? COMBINE_RESERVE : holdT2 ? COMBINE_RESERVE_T3 : 0;
+  if (items.length < MAX_SLOTS) {
+    const covered = coveredBases(items);
+    for (const id of AUTO_BUY_ORDER) {
+      if (covered.has(id)) continue;
+      if (gold < BASE_ITEMS[id].cost + reserve) continue;
+      tryBuy(agent, id, tick, log);
+      return;
+    }
   }
-  if (items.length >= MAX_SLOTS) return;
-  const covered = coveredBases(items);
-  for (const id of AUTO_BUY_ORDER) {
-    if (covered.has(id)) continue;
-    if (gold < BASE_ITEMS[id].cost) continue;
-    tryBuy(agent, id, tick, log);
-    return;
+  if (gold < BASE_ITEMS.scrap_blade.cost && agent.autoCell && gold >= BASE_ITEMS.repair_cell.cost) {
+    tryBuy(agent, "repair_cell", tick, log);
   }
 }
 
@@ -673,7 +701,8 @@ function updateMinionTarget(ctx: Ctx, m: MinionState): void {
 }
 
 // Segment-circle hit. It returns the hit fraction or null.
-function segCircle(
+// The driver reuses it for lane routing, so it stays exported.
+export function segCircle(
   x1: number, y1: number, x2: number, y2: number,
   cx: number, cy: number, r: number,
 ): number | null {
@@ -864,8 +893,13 @@ export function stepMobaBattle(
     if (!a.alive) continue;
     if (actions[id].fire && time - a.lastShotAt >= robotInterval(a.items ?? [])) {
       a.lastShotAt = time;
-      const sx = a.pos.x + a.aim.x * (cfg.agent.radius + 0.1);
-      const sy = a.pos.y + a.aim.y * (cfg.agent.radius + 0.1);
+      // Amendment A7: MOBA shots leave from the robot center. A muzzle
+      // offset spawns the shot past a point-blank victim, so stacked
+      // robots fire forever without damage. Duel keeps its offset, so
+      // duel replays stay byte-identical.
+      const muzzle = cfg.mode === "moba" ? 0 : cfg.agent.radius + 0.1;
+      const sx = a.pos.x + a.aim.x * muzzle;
+      const sy = a.pos.y + a.aim.y * muzzle;
       projectiles.push({
         id: nextId++,
         owner: id,

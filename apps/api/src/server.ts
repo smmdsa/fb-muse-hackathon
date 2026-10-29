@@ -544,7 +544,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const cfg = battleConfigFor(matchMode(match));
         const again = fightPolicies(a.policy, pb, match.seed as string, cfg);
         const replay = buildReplay(a.policy, pb, match.seed as string, cfg);
-        send(res, 200, { stored: match, recomputed: again, replay, identical: again.checksum === match.checksum });
+        send(res, 200, { stored: match, recomputed: again, replay, identical: again.checksum === match.checksum, startedAt: match.created_at, now: Date.now() });
         return;
       }
       send(res, 404, { error: "unknown route" });

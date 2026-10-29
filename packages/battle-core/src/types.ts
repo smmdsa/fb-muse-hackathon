@@ -129,7 +129,7 @@ export type StructureState = {
   heatOutSince: number | null;
 };
 
-export type MinionKind = "melee" | "caster";
+export type MinionKind = "melee" | "caster" | "super";
 
 export type MinionTarget =
   | { kind: "robot"; side: AgentId }

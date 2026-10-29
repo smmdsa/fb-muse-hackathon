@@ -51,6 +51,7 @@ const OPERANDS: Operand[] = [
   "buildValue",
   "slotsFree",
   "structLead",
+  "foeAlive",
 ];
 
 // Buyable item ids. This list mirrors battle-core items.ts.

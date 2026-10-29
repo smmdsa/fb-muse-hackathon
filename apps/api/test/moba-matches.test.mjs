@@ -51,7 +51,9 @@ describe("moba fights and replays", () => {
   it("T3.1: the replay route re-simulates and reports identical", async () => {
     const replay = await call("GET", `/v1/matches/${keys.trainId}/replay`, null, keys.a.token);
     assert.equal(replay.status, 200);
-    assert.deepEqual(Object.keys(replay.json).sort(), ["identical", "recomputed", "replay", "stored"]);
+    assert.deepEqual(Object.keys(replay.json).sort(), ["identical", "now", "recomputed", "replay", "startedAt", "stored"]);
+    assert.equal(replay.json.startedAt, replay.json.stored.created_at);
+    assert.ok(replay.json.now >= replay.json.startedAt);
     assert.equal(replay.json.identical, true);
     assert.equal(replay.json.recomputed.checksum, replay.json.stored.checksum);
     const v2 = replay.json.replay;

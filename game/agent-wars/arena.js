@@ -155,6 +155,8 @@ async function playSettled(match) {
       ticks: match.ticks,
       checksumOk: true,
       econ: econFor(match, arenaVersion),
+      startedAt: r.data.startedAt || 0,
+      serverNow: r.data.now || 0,
     });
   }
 }

@@ -153,7 +153,7 @@ async function replay(env: WorkerEnv, id: string): Promise<Response> {
   const cfg = matchMode(match) === "moba" ? DEFAULT_MOBA : undefined;
   const again = fightPolicies(pa, pb, match.seed as string, cfg);
   const replay = buildReplay(pa, pb, match.seed as string, cfg);
-  return json({ stored: match, recomputed: { winner: again.winner, ticks: again.ticks, checksum: again.checksum }, replay, identical: again.checksum === match.checksum });
+  return json({ stored: match, recomputed: { winner: again.winner, ticks: again.ticks, checksum: again.checksum }, replay, identical: again.checksum === match.checksum, startedAt: match.created_at, now: Date.now() });
 }
 
 // One settlement writes as one batch. Reads stay ahead; every write below

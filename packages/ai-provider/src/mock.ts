@@ -62,15 +62,33 @@ function traitsFor(prompt: string): DnaTraits {
   };
 }
 
+const MOBA_FARM: BehaviorRule = {
+  id: "farm-minions",
+  when: { any: [{ operand: "nearFoeMinions", op: "gte", value: 1 }, { operand: "distFoe", op: "lt", value: 6 }] },
+  move: "FARM",
+  fire: true,
+};
+
+const MOBA_PUSH: BehaviorRule = {
+  id: "push-wave",
+  when: { any: [{ operand: "nearAllyMinions", op: "gte", value: 1 }, { operand: "distFoe", op: "gte", value: 6 }] },
+  move: "PUSH",
+  fire: true,
+};
+
+// Dual-mode pool. MOBA rules pair their lane trigger with a duel
+// trigger, so every hash trio below fights in both sims: the MOBA
+// side reads minions, the duel side reads the foe. Evolution Lab
+// keeps dueling these drafts; the arena plays them on the lane.
 const RULE_POOL: BehaviorRule[] = [
   { id: "weak-retreat", when: { operand: "ownHpPct", op: "lt", value: 25 }, move: "RETREAT" },
+  MOBA_FARM,
   { id: "far-approach", when: { operand: "distFoe", op: "gt", value: 8 }, move: "APPROACH" },
-  { id: "mid-strafe", when: { all: [{ operand: "distFoe", op: "gte", value: 4 }, { operand: "distFoe", op: "lte", value: 10 }] }, move: "STRAFE", fire: true },
   { id: "close-fire", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true },
+  MOBA_PUSH,
+  { id: "mid-strafe", when: { all: [{ operand: "distFoe", op: "gte", value: 4 }, { operand: "distFoe", op: "lte", value: 10 }] }, move: "STRAFE", fire: true },
   { id: "seek-center", when: { operand: "objectiveDist", op: "gt", value: 6 }, move: "CAPTURE" },
-  { id: "hide-behind-cover", when: { operand: "coverDist", op: "lt", value: 3 }, move: "SEEK_COVER" },
-  { id: "shield-threat", when: { operand: "projectileTti", op: "lt", value: 0.4 }, move: "STRAFE", shield: true },
-  { id: "late-push", when: { operand: "timeLeft", op: "lt", value: 20 }, move: "APPROACH", fire: true, dash: true },
+  { id: "defend-base", when: { operand: "ownHpPct", op: "lt", value: 50 }, move: "DEFEND" },
 ];
 
 // The drafter picks three rules by prompt hash and stamps stable ids.
@@ -81,7 +99,7 @@ function draftFor(prompt: string, agentVersionId: string): AgentPolicy {
     return { ...src, when: JSON.parse(JSON.stringify(src.when)) as BehaviorRule["when"] };
   });
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     agentVersionId,
     dna: traitsFor(prompt),
     rules,

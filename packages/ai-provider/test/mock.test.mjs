@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { validatePolicy } from "@agent-wars/behavior-dna";
+import { evaluate, validatePolicy } from "@agent-wars/behavior-dna";
 import { compileMock, explainMock, explainerFromEnv, providerFromEnv, repairOnce } from "../src/index.ts";
 
 describe("mock compile", () => {
@@ -45,6 +45,39 @@ describe("mock compile", () => {
     };
     const fixed = repairOnce(bad);
     assert.equal(validatePolicy(fixed).ok, false);
+  });
+
+  it("drafts schema v2 trios that match in moba and in duel", async () => {
+    const base = {
+      ownHpPct: 100, energy: 100, distFoe: 20, projectileTti: null, coverDist: 9,
+      lineOfSight: true, dashReady: true, shieldReady: true, foeLastSeenAge: 0,
+      objectiveDist: 10, timeLeft: 1500, edgeDist: 4,
+    };
+    const lane = {
+      ownGold: 400, ownDeaths: 0, gameTime: 300, distFoeTower: 12,
+      foeTowerHpPct: 100, nearFoeMinions: 2, nearAllyMinions: 2, distFoeMinion: 3,
+      foeHpPct: 90, buildValue: 250, slotsFree: 5, structLead: 0,
+    };
+    const duelFar = { ...base };
+    const duelNear = { ...base, distFoe: 5, objectiveDist: 4 };
+    const mobaFar = { ...base, ...lane };
+    const mobaNear = { ...base, ...lane, distFoe: 5, objectiveDist: 4 };
+    // The hash spreads prompts over every trio. Collect each distinct
+    // triple by rule ids, then prove dual-mode liveness per triple.
+    const trios = new Map();
+    for (let i = 0; i < 500 && trios.size < 8; i += 1) {
+      const out = await compileMock({ prompt: `lane probe ${i}`, agentVersionId: "v1" });
+      assert.equal(out.policy.schemaVersion, 2);
+      assert.equal(validatePolicy(out.policy).ok, true);
+      const key = out.policy.rules.map((r) => r.id).join("+");
+      if (!trios.has(key)) trios.set(key, out.policy);
+    }
+    assert.equal(trios.size, 8);
+    const hits = (policy, obs) => policy.rules.some((r) => evaluate({ ...policy, rules: [r] }, obs).ruleId === r.id);
+    for (const [key, policy] of trios) {
+      assert.ok(hits(policy, mobaFar) || hits(policy, mobaNear), `${key} matches a moba tick`);
+      assert.ok(hits(policy, duelFar) || hits(policy, duelNear), `${key} matches a duel tick`);
+    }
   });
 
   it("picks mock when no key is set", () => {

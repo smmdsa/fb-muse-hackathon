@@ -654,11 +654,14 @@ if (speedBtn) {
 }
 
 // Server replay playback. Frames come from GET /v1/matches/:id/replay.
-// Frames sample one fight every 9 ticks, so each frame holds 300 ms of
-// fight time. Playback honors fight time: robots glide between frames
-// instead of teleporting, and the clock runs at true speed.
+// Duel frames sample one fight every 9 ticks, so each frame holds
+// 300 ms of fight time. MOBA frames sample every 18 ticks (600 ms).
+// Playback honors fight time: robots glide between frames instead of
+// teleporting, and the clock runs at true speed.
 const REPLAY_EVERY = 9;
 const FRAME_MS = REPLAY_EVERY * 1000 * TICK;
+const MOBA_EVERY = 18;
+const MOBA_FRAME_MS = MOBA_EVERY * 1000 * TICK;
 const SPEEDS = [1, 2, 4];
 let replayFrames = null;
 let replayIdx = 0;
@@ -918,6 +921,8 @@ function stopMoba() {
   if (hud) hud.hidden = true;
   const unit = document.getElementById("arena-clock-unit");
   if (unit) unit.textContent = "s";
+  const live = document.getElementById("moba-live");
+  if (live) live.hidden = true;
 }
 
 // The recap clears on every new replay. Duel replays never show it.
@@ -931,6 +936,7 @@ function hideRecap() {
 
 function playMobaReplay(replay, meta) {
   const frames = replay.frames || [];
+  const lastTick = frames.length ? frames[frames.length - 1].t : 0;
   moba = {
     frames,
     events: (replay.events || []).slice().sort((x, y) => x.t - y.t),
@@ -953,6 +959,15 @@ function playMobaReplay(replay, meta) {
     minLast: new Map(),
     meta: meta || {},
     nexusDead: null,
+    // Wall-clock sync. The server owns the result, the frames, and
+    // the start anchor; every viewer renders the same fight-clock,
+    // background tabs included. Virtual time advances by measured
+    // wall delta, so throttled timers jump instead of drifting.
+    virtual: 0,
+    wall: performance.now(),
+    duration: lastTick * TICK,
+    startedAt: (meta && meta.startedAt) || 0,
+    offset: (meta && meta.serverNow) ? meta.serverNow - Date.now() : 0,
   };
   replayAlpha = 0;
   shots = [];
@@ -965,6 +980,20 @@ function playMobaReplay(replay, meta) {
     mobaBuildsFrom(frames[0]);
     for (const mn of frames[0].minions || []) moba.minLast.set(mn.id, { x: mn.x, y: mn.y, side: mn.side });
   }
+  // Join live when the fight is still airing: both browsers open on
+  // the same frame, and a late tab catches up instead of replaying.
+  const edge = mobaEdge();
+  if (moba.startedAt && edge < moba.duration) {
+    mobaSeek(Math.max(0, edge));
+    mobaFeed("Joined live at " + mobaClock(moba.curr.t), "");
+  }
+  const live = document.getElementById("moba-live");
+  if (live && !live.dataset.wired) {
+    live.dataset.wired = "1";
+    live.style.cursor = "pointer";
+    live.addEventListener("click", () => mobaJumpLive());
+  }
+  mobaSyncLive();
   pillSeed.textContent = "seed " + (replay.seed || "server");
   pillState.textContent = "replay";
   pillWinner.textContent = "winner: —";
@@ -1007,20 +1036,119 @@ function mobaHpById() {
   return out;
 }
 
+// Live edge in fight seconds: how far the server clock says the
+// fight has aired. Infinity when no anchor started this replay.
+function mobaEdge() {
+  if (!moba || !moba.startedAt) return Infinity;
+  return (Date.now() + moba.offset - moba.startedAt) / 1000;
+}
+
+// Seek jumps the viewer to a fight second. Seeks land quiet: structs,
+// builds, and the event cursor catch up with no sparks or bolts.
+function mobaSeek(sec) {
+  const frames = moba.frames;
+  if (!frames.length) return;
+  let i = 0;
+  while (i + 1 < frames.length && frames[i + 1].t * TICK <= sec) i += 1;
+  moba.idx = i + 1;
+  moba.prev = frames[Math.max(0, i - 1)];
+  moba.curr = frames[i];
+  moba.virtual = Math.min(moba.duration, Math.max(frames[i].t * TICK, sec));
+  moba.structs = null;
+  for (let k = i; k >= 0; k -= 1) {
+    if (frames[k].structs) {
+      moba.structs = frames[k].structs.slice();
+      break;
+    }
+  }
+  for (let k = 0; k <= i; k += 1) mobaBuildsFrom(frames[k]);
+  moba.maxA = 550;
+  moba.maxB = 550;
+  moba.minLast = new Map();
+  for (const mn of moba.curr.minions || []) moba.minLast.set(mn.id, { x: mn.x, y: mn.y, side: mn.side });
+  moba.evIdx = 0;
+  mobaReveal(moba.curr.t, true);
+  moba.beam = null;
+  moba.beamLeft = 0;
+  moba.nexusDead = null;
+  tick = moba.curr.t;
+  time = moba.curr.t * TICK;
+  moba.wall = performance.now();
+  mobaSyncHud();
+  drawMoba(1);
+  syncMoba();
+}
+
+function mobaJumpLive() {
+  if (!moba) return;
+  mobaSeek(Math.min(mobaEdge(), moba.duration));
+  if (paused && typeof pauseBtn !== "undefined" && pauseBtn) pauseBtn.click();
+}
+
+// The live badge tracks the edge. At the edge it pulses LIVE; behind
+// it counts the gap and jumps on click; concluded fights hide it.
+function mobaSyncLive() {
+  const el = document.getElementById("moba-live");
+  if (!el || !moba) return;
+  const edge = mobaEdge();
+  if (!moba.startedAt || edge >= moba.duration) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  const behind = edge - moba.virtual;
+  if (!paused && behind < 3) {
+    el.textContent = "● LIVE";
+    el.classList.add("live");
+  } else {
+    el.textContent = "−" + mobaClock(Math.max(0, Math.round(behind * 30))) + " behind · tap for live";
+    el.classList.remove("live");
+  }
+}
+
 function mobaStep() {
-  if (paused || !moba || !moba.curr) return;
-  if (moba.idx >= moba.frames.length && replayAlpha >= FRAME_MS) {
+  if (!moba || !moba.curr) return;
+  const nowW = performance.now();
+  if (paused) {
+    moba.wall = nowW;
+    mobaSyncLive();
+    return;
+  }
+  const dt = Math.max(0, (nowW - moba.wall) / 1000);
+  moba.wall = nowW;
+  // Live playback never spoils unaired frames: virtual time caps at
+  // the edge while the fight airs, at the end once it concludes.
+  const cap = Math.min(moba.duration, mobaEdge());
+  moba.virtual = Math.min(cap, moba.virtual + dt * replaySpeed);
+  if (moba.virtual >= moba.duration && moba.idx >= moba.frames.length) {
     clearInterval(timer);
     finishReplay();
     return;
   }
-  replayAlpha += STEP_MS * replaySpeed;
-  while (replayAlpha >= FRAME_MS && moba.idx < moba.frames.length) {
-    replayAlpha -= FRAME_MS;
+  const targetTick = moba.virtual / TICK;
+  let crossed = 0;
+  while (moba.idx < moba.frames.length && moba.frames[moba.idx].t <= targetTick) {
     moba.prev = moba.curr;
     moba.curr = moba.frames[moba.idx];
     moba.idx += 1;
-    mobaOnFrame(moba.prev, moba.curr);
+    crossed += 1;
+  }
+  if (crossed > 0 && crossed <= 6) {
+    // Replay the crossed span for full effects.
+    let p = moba.frames[Math.max(0, moba.idx - crossed - 1)];
+    for (let k = moba.idx - crossed; k < moba.idx; k += 1) {
+      mobaOnFrame(p, moba.frames[k]);
+      p = moba.frames[k];
+    }
+  } else {
+    // Long jump (background tab, speed burst): land quiet, no spark flood.
+    const f = moba.curr;
+    if (f.structs) moba.structs = f.structs.slice();
+    mobaBuildsFrom(f);
+    moba.minLast = new Map();
+    for (const mn of f.minions || []) moba.minLast.set(mn.id, { x: mn.x, y: mn.y, side: mn.side });
+    mobaReveal(f.t);
+    mobaSyncHud();
   }
   const f = moba.curr;
   const fxA = faceDelta(f.a.x, moba.prev.a.x);
@@ -1029,12 +1157,16 @@ function mobaStep() {
   const fxB = faceDelta(f.b.x, moba.prev.b.x);
   const fyB = faceDelta(f.b.y, moba.prev.b.y);
   if (fxB !== 0 || fyB !== 0) moba.faceB = { x: fxB, y: fyB };
-  mobaFly(STEP_MS * replaySpeed / 1000);
+  mobaFly(dt * replaySpeed);
   tick = f.t;
   time = f.t * TICK;
-  const t = Math.min(1, replayAlpha / FRAME_MS);
+  const next = moba.frames[moba.idx];
+  const span = next ? (next.t - f.t) * TICK : MOBA_FRAME_MS / 1000;
+  const t = span > 0 ? Math.min(1, Math.max(0, (moba.virtual - f.t * TICK) / span)) : 1;
+  replayAlpha = t * MOBA_FRAME_MS;
   drawMoba(t);
   syncMoba();
+  mobaSyncLive();
 }
 
 function mobaOnFrame(p, f) {
@@ -1075,10 +1207,11 @@ function mobaOnFrame(p, f) {
   mobaSyncHud();
 }
 
-function mobaReveal(until) {
+function mobaReveal(until, silent) {
   while (moba.evIdx < moba.events.length && moba.events[moba.evIdx].t <= until) {
     const e = moba.events[moba.evIdx];
     moba.evIdx += 1;
+    if (silent) continue;
     const clock = mobaClock(e.t);
     const name = (s) => (s === "A" ? "Cyan" : "Crimson");
     if (e.type === "wave") note("t" + e.t + " wave spawns for " + name(e.side));
@@ -1201,7 +1334,7 @@ function mobaPickAttacker(v, f) {
     if (mn.side !== foe) continue;
     const d = Math.hypot(mn.x - v.x, mn.y - v.y);
     if (mn.kind === "caster" && d <= MOBA_CASTER_RANGE + 0.9) cands.push({ d, x: mn.x, y: mn.y, kind: "caster" });
-    else if (mn.kind === "melee" && d <= MOBA_MELEE_RANGE + 0.9) cands.push({ d: d - 0.01, x: mn.x, y: mn.y, kind: "slash" });
+    else if ((mn.kind === "melee" || mn.kind === "super") && d <= MOBA_MELEE_RANGE + 0.9) cands.push({ d: d - 0.01, x: mn.x, y: mn.y, kind: "slash" });
   }
   if (moba.structs) {
     for (let i = 0; i < moba.order.length; i += 1) {
@@ -1390,8 +1523,16 @@ function mobaMinion(mn, s, ox, oy) {
   const color = MOBA_COLOR[mn.side];
   const px = ox + mn.x * s;
   const py = oy + mn.y * s;
-  const r = 0.36 * s;
-  const max = mn.kind === "melee" ? 200 : 100;
+  const big = mn.kind === "super";
+  const r = (big ? 0.55 : 0.36) * s;
+  const max = mn.kind === "melee" ? 200 : big ? 1000 : 100;
+  if (big) {
+    ctx.strokeStyle = "#ffd76a";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(px, py, r * 1.25, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   ctx.fillStyle = "#05070f";
   ctx.beginPath();
   ctx.ellipse(px, py + r * 0.9, r, r * 0.35, 0, 0, Math.PI * 2);
@@ -1400,7 +1541,7 @@ function mobaMinion(mn, s, ox, oy) {
   ctx.strokeStyle = "#05070f";
   ctx.lineWidth = 2;
   ctx.beginPath();
-  if (mn.kind === "melee") {
+  if (mn.kind === "melee" || mn.kind === "super") {
     ctx.moveTo(px, py - r);
     ctx.lineTo(px + r, py);
     ctx.lineTo(px, py + r);
@@ -1612,6 +1753,8 @@ function finishMoba() {
   if (econ) econ.textContent = m.econ ? String(m.econ) : "";
   pillWinner.textContent = "winner: " + (winner || "DRAW");
   pillState.textContent = "done";
+  const live = document.getElementById("moba-live");
+  if (live) live.hidden = true;
   mobaRecap();
   endcard.hidden = false;
   drawMoba(1);
