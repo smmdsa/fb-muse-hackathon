@@ -78,6 +78,7 @@ function valueOf(operand: Leaf["operand"], obs: Observation): number | boolean |
     case "buildValue": return obs.buildValue ?? null;
     case "slotsFree": return obs.slotsFree ?? null;
     case "structLead": return obs.structLead ?? null;
+    case "foeAlive": return obs.foeAlive;
   }
 }
 

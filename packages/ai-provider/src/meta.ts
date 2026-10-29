@@ -20,21 +20,24 @@ const defaultFetch = (url: string, init: Record<string, unknown>) => {
 
 // The system brief pins the exact policy JSON the model must return.
 // It names every legal operand, operator, and move, because anything
-// else rejects the whole draft at validation.
+// else rejects the whole draft at validation. Fights run on the MOBA
+// lane, so the brief teaches that map: minions, towers, gold, shop.
 const COMPILE_SYSTEM = [
-  "You draft fighting-robot policies for the game AGENT WARS.",
+  "You draft fighting-robot policies for the MOBA mode of AGENT WARS.",
   "Reply with one JSON object and nothing else.",
-  "Shape: {\"schemaVersion\":1,\"agentVersionId\":\"<id>\",",
+  "Shape: {\"schemaVersion\":2,\"agentVersionId\":\"<id>\",",
   "\"dna\":{\"aggression\":0-100,\"evasion\":0-100,\"preferredDistance\":0-100,\"energyConservation\":0-100},",
   "\"rules\":[{\"id\":\"<slug>\",\"when\":{...},\"move\":\"<MOVE>\",",
-  "\"fire\":true|false,\"shield\":true|false,\"dash\":true|false}]}.",
+  "\"fire\":true|false,\"shield\":true|false,\"dash\":true|false,\"buy\":\"<item>\"}]}.",
   "Send 2 to 6 rules. Keep every trait an integer 0-100.",
   "The brief can run paragraphs long. Read it whole, distill the overall battle plan, then mint rules that together express it.",
-  "Operands, exactly these: ownHpPct, energy, distFoe, projectileTti, coverDist, lineOfSight, dashReady, shieldReady, foeLastSeenAge, objectiveDist, timeLeft, edgeDist.",
+  "Map: one lane on a 48x16 field. Each side holds 2 towers, 1 inhibitor, 2 nexus turrets, 1 nexus in that order. Waves of 5 minions spawn every 30s from 1:00. Robots auto-attack anything in range, so spend rules on positioning, not on fire.",
+  "Operands, exactly these: ownHpPct, energy, distFoe, projectileTti, coverDist, lineOfSight, dashReady, shieldReady, foeLastSeenAge, objectiveDist, timeLeft, edgeDist, ownGold, ownDeaths, gameTime, distFoeTower, foeTowerHpPct, nearFoeMinions, nearAllyMinions, distFoeMinion, foeHpPct, buildValue, slotsFree, structLead.",
   "Operators, exactly these: gt, gte, lt, lte, eq. Value is a number; eq also takes true or false for lineOfSight, dashReady, shieldReady.",
-  "Moves, exactly these: APPROACH, RETREAT, STRAFE, KITE, CAPTURE, SEEK_COVER.",
+  "Moves, exactly these: APPROACH, RETREAT, STRAFE, KITE, CAPTURE, SEEK_COVER, PUSH, FARM, DEFEND. PUSH escorts your wave, FARM hunts last hits, DEFEND guards your threatened tower, CAPTURE sieges the nearest vulnerable enemy tower.",
+  "Buy, optional: \"buy\":\"<item>\" with one of scrap_blade, cloth_weave, worn_treads, overclock_chip, hull_patch, repair_cell, tempered_edge, bulwark_plate, turbo_treads, rapid_cycler, reinforced_hull, siege_breaker, aegis_core, phantom_drive, warlord_frame. Gate buys on ownGold and buildValue so gold piles into one plan.",
   "Combine tests with {\"all\":[...]} or {\"any\":[...]}. Example: {\"operand\":\"distFoe\",\"op\":\"lt\",\"value\":6}.",
-  "Any other operand, operator, or move rejects the whole draft.",
+  "Any other operand, operator, move, or item rejects the whole draft.",
   "Match the prompt mood: rush means high aggression,",
   "evade means high evasion, far means high preferredDistance, patient means high energyConservation.",
 ].join(" ");
@@ -161,7 +164,7 @@ export function createMetaProvider(env: MetaEnv, fetchFn: FetchFn = defaultFetch
     } catch {
       return fail(["the meta reply was not JSON"]);
     }
-    const policy = { ...(asRecord(draft) ?? {}), schemaVersion: 1, agentVersionId: req.agentVersionId } as AgentPolicy;
+    const policy = { ...(asRecord(draft) ?? {}), schemaVersion: 2, agentVersionId: req.agentVersionId } as AgentPolicy;
     const check = validatePolicy(policy);
     if (check.ok) {
       return { provider: "meta", isMock: false, policy, errors: [], repairAttempted: false, latencyMs: Date.now() - started, promptTokens: usageOf(raw) || promptTokens };

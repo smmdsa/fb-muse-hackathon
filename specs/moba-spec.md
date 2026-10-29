@@ -538,6 +538,7 @@ New operands (all numbers; null reads fail closed per `evaluate`):
 | buildValue | Total gold spent on items + combine fees |
 | slotsFree | Free item slots (6 max) |
 | structLead | Own alive structures minus foe alive structures |
+| foeAlive | Foe robot alive, boolean (A5) |
 
 ### 11.3 New move intents
 
@@ -552,13 +553,15 @@ enemy structure in MOBA mode. New intents:
 
 ### 11.4 Target selection (driver, when `fire: true`)
 
-The driver sets `aim` each tick. Priority in range + LoS:
+The driver sets `aim` each tick. Priority in range + LoS
+(A9 order):
 
-1. Enemy minion with HP below one robot shot (last-hit), nearest.
-2. Enemy robot, if in range.
+1. Enemy robot with HP below one robot shot (execute).
+2. Enemy minion with HP below one robot shot (last-hit), nearest.
 3. Nearest enemy minion in range.
-4. Nearest vulnerable enemy structure in range.
-5. Else aim along move (no target, projectile still fires).
+4. Enemy robot, if in range.
+5. Nearest vulnerable enemy structure in range.
+6. Else aim along move (no target, no fire).
 
 LoS uses covers (duel rule). Structures are always visible.
 This keeps old chips useful: `fire: true` now last-hits, duels,
@@ -574,7 +577,8 @@ the ai-engineer task; acceptance checks sit in section 12.
 
 ## 12. Balance targets and acceptance checks (S)
 
-Targets: typical match lasts 5-10 min sim time. Tier-1 never
+Targets: the reference bout (bench vs breaker, seed
+"t5-balance", per A11) lasts 10-20 min sim time. Tier-1 never
 falls before 2:30. Tower dives kill the diver (section 2.2 math).
 A full-tier-3 robot kills a naked robot in under 5 s.
 Minion-only waves stall near mid (no structure falls by 5:00
@@ -584,46 +588,46 @@ Checks per downstream task. Each check names pass/fail.
 
 T1 battle-core sim:
 
-- [ ] T1.1 Gating: scripted foe ignores t1 and hits t2. t2 HP
+- [x] T1.1 Gating: scripted foe ignores t1 and hits t2. t2 HP
   stays full. Then t1 falls and t2 takes damage. Pass = both hold.
-- [ ] T1.2 Nexus rule: with inhibitor down and both Nexus turrets
+- [x] T1.2 Nexus rule: with inhibitor down and both Nexus turrets
   up, Nexus HP stays full under fire. One turret falls, Nexus
   takes damage. Pass = both hold.
-- [ ] T1.3 Tower aggro: scripted robot A hits robot B inside tower
+- [x] T1.3 Tower aggro: scripted robot A hits robot B inside tower
   trigger. Tower switches to A within 1 tick. Pass = target flips.
-- [ ] T1.4 Heat math: naked robot tanks tier-1 from full HP.
+- [x] T1.4 Heat math: naked robot tanks tier-1 from full HP.
   Dead on the 6th hit. Pass = death tick within 6.5-7.5 s.
-- [ ] T1.5 Respawn table: kill a robot 5 times. Cooldowns read
+- [x] T1.5 Respawn table: kill a robot 5 times. Cooldowns read
   12, 18, 27, 41, 60 s. Pass = exact match.
-- [ ] T1.6 Determinism: fixed seeds x fixed policies, run twice.
+- [x] T1.6 Determinism: fixed seeds x fixed policies, run twice.
   Byte-identical replay JSON and checksum. Pass = `diff` empty.
-- [ ] T1.7 Cap tiebreak: force 1800 s with rigged structure counts.
+- [x] T1.7 Cap tiebreak: force 1800 s with rigged structure counts.
   Winner follows section 8 order. Pass = 3/3 fixtures.
-- [ ] T1.8 Buy no-op: buy tier-3 with 0 gold. Gold, items unchanged,
+- [x] T1.8 Buy no-op: buy tier-3 with 0 gold. Gold, items unchanged,
   no event. Pass = silent no-op.
 
 T2 behavior-dna and policy driver:
 
-- [ ] T2.1 v1 compat: BENCH_POLICY v1 runs a MOBA fight to the end
+- [x] T2.1 v1 compat: BENCH_POLICY v1 runs a MOBA fight to the end
   with no throw. Auto-buy owns at least 1 item by 5:00. Pass = both.
-- [ ] T2.2 Operands: each new operand reads the documented value
+- [x] T2.2 Operands: each new operand reads the documented value
   on a scripted state. Pass = 12/12 exact.
-- [ ] T2.3 Intents: PUSH never passes the minion front; FARM moves
+- [x] T2.3 Intents: PUSH never passes the minion front; FARM moves
   toward the lowest-HP enemy minion; DEFEND moves toward the
   threatened tower. Pass = 3/3 scripted probes.
-- [ ] T2.4 Last-hit aim: with a 15 HP caster and full minions in
+- [x] T2.4 Last-hit aim: with a 15 HP caster and full minions in
   range, aim picks the 15 HP caster. Pass = exact target.
-- [ ] T2.5 Buy validation: unknown item id fails `validatePolicy`.
+- [x] T2.5 Buy validation: unknown item id fails `validatePolicy`.
   Pass = error names the id.
 
 T3 api and worker:
 
-- [ ] T3.1 Match row stores v2 checksum. Replay route re-simulates
+- [x] T3.1 Match row stores v2 checksum. Replay route re-simulates
   and reports identical. Pass = `identical: true`.
-- [ ] T3.2 AC payouts unchanged: win/loss/no-contest amounts match
+- [x] T3.2 AC payouts unchanged: win/loss/no-contest amounts match
   duel code paths. Match gold never touches the wallet. Pass = diff
   of payout code is empty (or covered by existing tests).
-- [ ] T3.3 Ranked/AP settle path runs on a MOBA result. Pass = one
+- [x] T3.3 Ranked/AP settle path runs on a MOBA result. Pass = one
   ranked fixture settles with correct deltas.
 
 T4 frontend viewer:
@@ -631,23 +635,27 @@ T4 frontend viewer:
 - [ ] T4.1 `window.playServerReplay` plays a v2 replay: minions,
   structures with HP bars, gold, builds read-only. Pass = scripted
   DOM check on a fixture replay.
-- [ ] T4.2 No re-simulation: viewer imports no battle-core sim
+- [x] T4.2 No re-simulation: viewer imports no battle-core sim
   module. Pass = grep finds no step/create import in viewer code.
 - [ ] T4.3 Size: fixture replays render first frame in under 1 s
   on a Nomad baseline. Pass = timed probe.
 
-T5 balance pass:
+T5 balance pass (A11 pins):
 
-- [ ] T5.1 Bench vs bench ends in 5-10 min sim time. Pass = ticks
-  in [9000, 18000].
-- [ ] T5.2 Both tier-1 towers stand at 2:30 in bench vs bench. Pass = both alive.
-- [ ] T5.3 Replay JSON of the T5.1 fight is under 1 MB. Pass = bytes.
-- [ ] T5.4 Minion-only stall: parked robots, no structure falls by
+- [x] T5.1 Bench vs breaker ends in 10-20 min sim time with a
+  Nexus decision (no cap). Pass = A wins, ticks in [18000, 36000],
+  pin 24231.
+- [x] T5.2 Both tier-1 towers stand at 2:30 in the T5.1 bout.
+  Pass = both alive, pins a_t1 505 HP, b_t1 606 HP.
+- [x] T5.3 Replay JSON of the T5.1 fight is under 1 MB.
+  Pass = bytes, pin 787947.
+- [x] T5.4 Minion-only stall: parked robots, no structure falls by
   5:00. Pass = all struct HP full (chip damage allowed under 5%).
 
 ## 13. Out of scope
 
-No XP or levels. No siege or super minions. No minion scaling.
+No XP or levels. No siege minions. Super minions exist only
+per A10. No minion scaling.
 No second lane and no jungle camps. No wards or fog beyond cover
 LoS. No recalls or teleports. No backend shop endpoint (F11).
 No AC cost for items. No armor penetration or lethality.
@@ -686,5 +694,68 @@ The duel mode keeps all old numbers and stays playable.
   alone broke the T5.4 stall. Turret aggro shots now strike
   units only (LoL rule). Reuses the existing kinds, invents
   no number.
+- A2 (minion-vs-minion damage): minion hits on minions deal
+  x2.0 (MINION_VS_MINION_MULT = 2.0). Cause: at x1.0 each wave
+  survived past the 30 s cadence, so waves stacked and broke
+  the mid clash that section 4 specifies. New number, spec-fixed.
+- A5 (MOBA auto-attack and fallback): the driver fires each
+  tick that pickAim sees a target, even when no rule sets
+  fire. Duel-era chips with no fire rule fight instead of
+  standing still. The chip keeps full authority over move,
+  dash, shield, and buy. When no rule matches in MOBA mode
+  the robot plays the PUSH fallback (holds the wave front).
+  Duel keeps rule-gated fire, so duel replays stay
+  byte-identical. New 13th operand `foeAlive` (foe robot
+  alive, boolean). Both compilers emit `schemaVersion: 2`
+  with MOBA vocabulary: the mock pool pairs each lane rule
+  with a duel trigger so drafts fight in both sims, and the
+  meta brief teaches the lane map, PUSH/FARM/DEFEND, and buys.
+- A6 (lane routing): a blocked 1.0 probe bends the MOBA step
+  sideways (x*0.3 - y*0.95, y*0.3 + x*0.95), which walks
+  convex towers and covers around. Cause: head-on walks into
+  a tower wedge, because the contact solver pushes straight
+  back out and the robot jitters in place forever. Duel moves
+  pass through untouched. `segCircle` stays exported for it.
+- A7 (center muzzle): MOBA robot shots spawn at the robot
+  center (muzzle 0). Cause: the duel muzzle offset spawns a
+  shot past a point-blank victim, so stacked robots fire
+  forever without damage. Duel keeps its offset, so duel
+  replays stay byte-identical.
+- A8 (retreat-home): RETREAT in MOBA mode walks to the own
+  Nexus, where the section 2.1 heal tops up. Cause:
+  away-from-foe steps pin robots in corners that read safe
+  while no minion ever walks there, so the lane starves.
+  Duel keeps the legacy vector.
+- A9 (execute-first aim): section 11.4 order becomes 1. foe
+  robot with HP below one shot, 2. killable minion, 3. nearest
+  minion, 4. foe robot, 5. vulnerable structure. Cause: robots
+  that dueled every healthy hero traded kills to the tick cap,
+  so the lane farms and only skirmishes.
+- A10 (super minions): a fallen foe inhibitor promotes every
+  wave with one super minion at (nx + 1.6d, 8.0). Stats: 1000
+  HP, 30 damage, 1.0 s interval, 1.0 range, 60 gold. Supers
+  take no A2 multiplier. Cause: symmetric endgames ground to
+  the tick cap with both Nexus turrets standing; the super
+  tanks towers while the robot sieges. Section 13 carves this
+  one exception out; siege minions stay out.
+- A11 (balance re-pin): the auto-buyer buys tier-1 parts
+  first and holds a combine reserve (350 with a base part,
+  400 with a tier-2 part); repair cells buy only when gold
+  cannot afford a Scrap Blade; cell thresholds move to 20/50.
+  Nexus turret interval moves 0.8 s to 1.0 s (section 2.1).
+  MOBA replay cadence moves 9 ticks to 18 (600 ms); duel
+  keeps 9. Reference bout becomes bench vs breaker
+  (bot:breaker), seed "t5-balance", because identical optimal
+  policies trade evenly to the cap and the mirror no longer
+  paces the game. Pins: A wins tick 24231; at 2:30 both
+  tier-1 towers stand (a_t1 505 HP, b_t1 606 HP); reference
+  replay reads 787947 bytes. Section 12 records the new pins.
+- A12 (LIVE wall-clock playback): the replay route returns
+  `startedAt` (match created at) plus `now` (server ms). The
+  MOBA viewer advances fight time by wall clock from that
+  anchor, so every tab shows the same fight clock, including
+  background tabs. The viewer shows a LIVE badge at the edge
+  or `-MM:SS behind` when paused or slowed. Pause freezes
+  the anchor. The server still owns the result and frames.
 
 

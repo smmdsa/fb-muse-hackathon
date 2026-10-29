@@ -4,6 +4,7 @@ import { validatePolicy } from "@agent-wars/behavior-dna";
 import {
   BENCH_POLICY,
   BOT_PRESETS,
+  DEFAULT_BATTLE,
   DEFAULT_MOBA,
   buildValueOf,
   createBattle,
@@ -109,6 +110,12 @@ describe("T2.2 operands", () => {
     assert.equal(o.buildValue, 500);
     assert.equal(o.slotsFree, 4);
     assert.equal(o.structLead, 1);
+    assert.equal(o.foeAlive, true);
+    s.agents.B.alive = false;
+    const dead = observe(s, "A", cfg);
+    assert.equal(dead.foeAlive, false);
+    assert.equal(dead.foeHpPct, null);
+    assert.equal(dead.distFoe, null);
   });
 
   it("redefines objectiveDist and timeLeft for moba", () => {
@@ -159,8 +166,9 @@ describe("T2.3 intents", () => {
     const p = oneRule("PUSH");
     assert.deepEqual(drive(s, p, "A", cfg).move, { x: 1, y: 0 });
     s.agents.A.pos = { x: 24, y: 8 };
+    // The return leg probes into b_t1, so lane routing bends it.
     const back = drive(s, p, "A", cfg).move;
-    assert.deepEqual(back, { x: -1, y: 0 });
+    assert.deepEqual(back, { x: -0.3, y: -0.95 });
   });
 
   it("FARM seeks the killable minion, else the nearest", () => {
@@ -203,7 +211,7 @@ describe("T2.4 last-hit aim", () => {
     assert.deepEqual(drive(s, p, "A", cfg).aim, { x: 1, y: 0 });
   });
 
-  it("falls through robot, minion, structure, then move", () => {
+  it("falls through minion, hero, structure, then move, with executes first", () => {
     const cfg = mobaCfg("t2-aim-fall", false);
     const p = oneRule("APPROACH", { fire: true });
     const s = createBattle(cfg);
@@ -211,10 +219,16 @@ describe("T2.4 last-hit aim", () => {
     s.agents.B.pos = { x: 24, y: 10 };
     addMinion(s, { side: "B", pos: { x: 25, y: 8 }, hp: 200 });
     addMinion(s, { side: "B", kind: "caster", pos: { x: 26, y: 8 }, hp: 100 });
+    assert.deepEqual(drive(s, p, "A", cfg).aim, { x: 1, y: 0 });
+    s.agents.B.hp = 15;
     assert.deepEqual(drive(s, p, "A", cfg).aim, { x: 0, y: 1 });
+    s.agents.B.hp = 550;
     s.agents.B.pos = { x: 45.2, y: 8 };
     assert.deepEqual(drive(s, p, "A", cfg).aim, { x: 1, y: 0 });
     s.moba.minions = [];
+    s.agents.B.pos = { x: 24, y: 10 };
+    assert.deepEqual(drive(s, p, "A", cfg).aim, { x: 0, y: 1 });
+    s.agents.B.pos = { x: 45.2, y: 8 };
     s.agents.A.pos = { x: 22, y: 8 };
     const aimStruct = drive(s, p, "A", cfg).aim;
     assert.ok(Math.abs(aimStruct.x - 1) < 1e-12);
@@ -222,6 +236,101 @@ describe("T2.4 last-hit aim", () => {
     s.agents.A.pos = { x: 10, y: 8 };
     const last = drive(s, p, "A", cfg);
     assert.deepEqual(last.aim, last.move);
+  });
+});
+
+describe("A6 lane routing", () => {
+  it("bends a head-on walk around the tower", () => {
+    const cfg = mobaCfg("t6-bend", false);
+    const s = createBattle(cfg);
+    s.agents.A.pos = { x: 21.7, y: 8 };
+    const p = oneRule("CAPTURE");
+    assert.deepEqual(drive(s, p, "A", cfg).move, { x: 0.3, y: 0.95 });
+  });
+
+  it("walks spawn to mid past three towers without wedging", () => {
+    const cfg = mobaCfg("t6-traverse", false);
+    const s = createBattle(cfg);
+    s.agents.B.alive = false;
+    s.agents.B.hp = 0;
+    s.agents.B.respawnAt = Infinity;
+    const p = oneRule("CAPTURE");
+    const idle = { move: { x: 0, y: 0 }, aim: { x: 1, y: 0 }, fire: false, dash: false, shield: false, buy: null };
+    let state = s;
+    for (let i = 0; i < 900 && state.agents.A.pos.x < 24; i += 1) {
+      state = stepBattle(state, { A: drive(state, p, "A", cfg), B: idle }, cfg);
+    }
+    assert.ok(state.agents.A.pos.x >= 24, `reaches mid, reads ${state.agents.A.pos.x}`);
+  });
+
+  it("mirrors the bend for side B", () => {
+    const cfg = mobaCfg("t6-mirror", false);
+    const s = createBattle(cfg);
+    s.agents.B.pos = { x: 48 - 21.7, y: 8 };
+    const p = oneRule("CAPTURE");
+    assert.deepEqual(drive(s, p, "B", cfg).move, { x: -0.3, y: -0.95 });
+  });
+});
+
+describe("A5 auto-attack", () => {
+  it("fires at a visible minion even when no rule says fire", () => {
+    const cfg = mobaCfg("t5-autofire", false);
+    const s = createBattle(cfg);
+    s.agents.A.pos = { x: 24, y: 8 };
+    addMinion(s, { side: "B", pos: { x: 26, y: 8 }, hp: 200 });
+    const p = oneRule("APPROACH");
+    const out = drive(s, p, "A", cfg);
+    assert.equal(out.fire, true);
+    assert.deepEqual(out.aim, { x: 1, y: 0 });
+  });
+
+  it("holds fire with no target in range", () => {
+    const cfg = mobaCfg("t5-autofire-idle", false);
+    const s = createBattle(cfg);
+    s.agents.A.pos = { x: 10, y: 8 };
+    s.agents.B.pos = { x: 45.2, y: 8 };
+    const p = oneRule("APPROACH", { fire: true });
+    const out = drive(s, p, "A", cfg);
+    assert.equal(out.fire, false);
+    assert.deepEqual(out.aim, out.move);
+  });
+
+  it("fallback pushes the wave front instead of diving the tower", () => {
+    const cfg = mobaCfg("t5-fallback-push", false);
+    const s = createBattle(cfg);
+    s.agents.A.pos = { x: 30, y: 8 };
+    addMinion(s, { side: "A", pos: { x: 35, y: 8 } });
+    const silent = {
+      schemaVersion: 2,
+      agentVersionId: "probe",
+      dna: { aggression: 50, evasion: 50, preferredDistance: 50, energyConservation: 50 },
+      rules: [{ id: "never", when: { operand: "energy", op: "gt", value: 9999 }, move: "RETREAT" }],
+    };
+    const move = drive(s, silent, "A", cfg).move;
+    assert.ok(move.x > 0, `fallback pushes up-lane, reads ${move.x}`);
+  });
+
+  it("a duel-era draft shoots in moba and stays silent in duel", () => {
+    const cfg = mobaCfg("t5-duel-draft", false);
+    const s = createBattle(cfg);
+    s.agents.A.pos = { x: 24, y: 8 };
+    s.agents.B.pos = { x: 45.2, y: 8 };
+    addMinion(s, { side: "B", pos: { x: 26, y: 8 }, hp: 200 });
+    // shield-threat / far-approach / seek-center: the rush draft that
+    // never fired a shot in 18000 ticks before A5.
+    const draft = {
+      schemaVersion: 1,
+      agentVersionId: "probe",
+      dna: { aggression: 80, evasion: 50, preferredDistance: 50, energyConservation: 50 },
+      rules: [
+        { id: "shield-threat", when: { operand: "projectileTti", op: "lt", value: 0.4 }, move: "STRAFE", shield: true },
+        { id: "far-approach", when: { operand: "distFoe", op: "gt", value: 8 }, move: "APPROACH" },
+        { id: "seek-center", when: { operand: "objectiveDist", op: "gt", value: 6 }, move: "CAPTURE" },
+      ],
+    };
+    assert.equal(drive(s, draft, "A", cfg).fire, true);
+    const duel = createBattle({ ...DEFAULT_BATTLE, seed: "t5-duel-draft" });
+    assert.equal(drive(duel, draft, "A", DEFAULT_BATTLE).fire, false);
   });
 });
 
@@ -236,13 +345,14 @@ describe("v2 bots", () => {
     }
   });
 
-  it("gives each bot one buy rule and one push or farm rule", () => {
+  it("gives each bot one buy rule and lane rules for farm and shove", () => {
     const all = [BENCH_POLICY, ...BOT_PRESETS.map((b) => b.policy)];
     for (const policy of all) {
       const buys = policy.rules.filter((r) => r.buy !== undefined);
       assert.equal(buys.length, 1, `${policy.agentVersionId} holds ${buys.length} buy rules`);
       const lanes = policy.rules.filter((r) => r.move === "PUSH" || r.move === "FARM");
-      assert.equal(lanes.length, 1, `${policy.agentVersionId} holds ${lanes.length} lane rules`);
+      const want = policy.agentVersionId === "benchmark-v1" ? 4 : 1;
+      assert.equal(lanes.length, want, `${policy.agentVersionId} holds ${lanes.length} lane rules`);
     }
     const shadow = BOT_PRESETS[0].policy.rules.find((r) => r.buy !== undefined);
     assert.equal(shadow.buy, "cloth_weave");

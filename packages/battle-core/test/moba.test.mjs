@@ -10,6 +10,7 @@ import {
   drive,
   fightPolicies,
   isVulnerable,
+  minionGold,
   mobaWorld,
   respawnCooldown,
   stepBattle,
@@ -291,19 +292,27 @@ describe("economy", () => {
     assert.deepEqual(s.agents.A.items, []);
   });
 
-  it("auto-buy heals under 50 pct and buys parts at full hp", () => {
+  it("auto-buy forges parts first and cells only when poor and critical", () => {
     const cfg = mobaCfg("econ-4", true);
     let s = createBattle(cfg);
     s.agents.A.hp = 200;
     s.agents.A.pos = { x: 10.0, y: 8.0 };
     s = run(s, cfg, 30);
-    assert.deepEqual(s.agents.A.items, []);
-    assert.equal(s.agents.A.gold, 300);
-    assert.equal(s.agents.A.hp, 320);
+    assert.deepEqual(s.agents.A.items, ["scrap_blade"]);
+    assert.equal(s.agents.A.gold, 100);
+    assert.equal(s.agents.A.hp, 200);
     let t = createBattle(cfg);
     t = run(t, cfg, 30);
     assert.deepEqual(t.agents.A.items, ["scrap_blade"]);
     assert.equal(t.agents.A.gold, 100);
+    let u = createBattle(cfg);
+    u.agents.A.hp = 100;
+    u.agents.A.gold = 100;
+    u.agents.A.pos = { x: 10.0, y: 8.0 };
+    u = run(u, cfg, 30);
+    assert.deepEqual(u.agents.A.items, []);
+    assert.equal(u.agents.A.gold, 50);
+    assert.equal(u.agents.A.hp, 220);
   });
 
   it("last hits and kills pay gold, tower kills pay nothing", () => {
@@ -325,5 +334,57 @@ describe("economy", () => {
     assert.equal(s.moba.minions.length, 0);
     assert.equal(s.agents.A.gold, 350 + 14);
     assert.equal(s.moba.lifetimeGold.A, 14);
+  });
+});
+
+describe("A10 super minions", () => {
+  it("promotes one super per wave while the foe inhibitor is down", () => {
+    const cfg = mobaCfg("a10-super");
+    let s = createBattle(cfg);
+    const inhib = s.moba.structures.find((k) => k.id === "b_inhib");
+    inhib.alive = false;
+    inhib.hp = 0;
+    s = run(s, cfg, 1801);
+    const supersA = s.moba.minions.filter((m) => m.side === "A" && m.kind === "super");
+    const supersB = s.moba.minions.filter((m) => m.side === "B" && m.kind === "super");
+    assert.equal(supersA.length, 1);
+    assert.equal(supersA[0].hp, 1000);
+    assert.equal(supersB.length, 0);
+    assert.equal(minionGold("super"), 60);
+  });
+
+  it("a super takes single damage from minions", () => {
+    const cfg = mobaCfg("a10-tank");
+    let s = createBattle(cfg);
+    s.agents.B.pos = { x: 45.2, y: 14.0 };
+    for (const id of ["a_t1", "b_t1"]) {
+      const t = s.moba.structures.find((k) => k.id === id);
+      t.alive = false;
+      t.hp = 0;
+    }
+    s.moba.minions.push(
+      { id: 1, side: "A", kind: "super", pos: { x: 24.0, y: 8.0 }, hp: 1000, alive: true, target: null, wpIndex: 0, lastShotAt: 0 },
+      { id: 2, side: "B", kind: "melee", pos: { x: 24.8, y: 8.0 }, hp: 200, alive: true, target: null, wpIndex: 0, lastShotAt: 0 },
+    );
+    s.moba.nextMinionId = 3;
+    s = run(s, cfg, 40);
+    const tank = s.moba.minions.find((m) => m.id === 1);
+    assert.equal(Math.round(tank.hp), 1000 - 12);
+  });
+});
+
+describe("A7 point-blank muzzle", () => {
+  it("stacked robots damage each other", () => {
+    const cfg = mobaCfg("a7-stack");
+    let s = createBattle(cfg);
+    s.agents.A.pos = { x: 45.2, y: 13.0 };
+    s.agents.B.pos = { x: 45.25, y: 13.02 };
+    const spray = () => ({
+      A: { ...IDLE, aim: { x: 1, y: 0 }, fire: true },
+      B: { ...IDLE_B, aim: { x: -1, y: 0 }, fire: true },
+    });
+    s = run(s, cfg, 60, spray);
+    assert.ok(s.agents.A.hp < 550, `A takes damage, reads ${s.agents.A.hp}`);
+    assert.ok(s.agents.B.hp < 550, `B takes damage, reads ${s.agents.B.hp}`);
   });
 });

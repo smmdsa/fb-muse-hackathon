@@ -29,6 +29,7 @@ describe("meta provider", () => {
     const out = await meta.compileStrategy({ prompt: "rush them down", agentVersionId: "v9" });
     assert.equal(out.provider, "meta");
     assert.equal(out.isMock, false);
+    assert.equal(out.policy.schemaVersion, 2);
     assert.equal(out.policy.dna.aggression, 80);
     assert.equal(out.promptTokens, 120);
     assert.match(seen[0].url, /\/chat\/completions$/);
@@ -50,6 +51,9 @@ describe("meta provider", () => {
     }
     for (const token of ["gt, gte, lt, lte, eq", "APPROACH", "RETREAT", "STRAFE", "KITE", "CAPTURE", "SEEK_COVER", "rejects the whole draft"]) {
       assert.ok(system.includes(token), `system names ${token}`);
+    }
+    for (const token of ["ownGold", "nearFoeMinions", "nearAllyMinions", "distFoeTower", "foeTowerHpPct", "buildValue", "PUSH", "FARM", "DEFEND", "auto-attack", "scrap_blade", "siege_breaker", "schemaVersion\":2"]) {
+      assert.ok(system.includes(token), `system names moba token ${token}`);
     }
   });
 

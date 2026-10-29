@@ -37,7 +37,8 @@ export type Operand =
   | "foeHpPct"
   | "buildValue"
   | "slotsFree"
-  | "structLead";
+  | "structLead"
+  | "foeAlive";
 
 export type NumOp = "gt" | "gte" | "lt" | "lte";
 
@@ -100,6 +101,7 @@ export type Observation = {
   buildValue?: number;
   slotsFree?: number;
   structLead?: number;
+  foeAlive: boolean;
 };
 
 export type Intents = {

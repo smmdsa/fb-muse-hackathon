@@ -1,9 +1,9 @@
 // Policy driver. Compiled DNA steers one robot for one tick.
 
-import { evaluate } from "@agent-wars/behavior-dna";
+import { FALLBACK_RULE_ID, evaluate } from "@agent-wars/behavior-dna";
 import type { AgentPolicy, Observation } from "@agent-wars/behavior-dna";
 import { BASE_ITEMS, MAX_SLOTS, RECIPE_BY_ID } from "./items.ts";
-import { DEFAULT_MOBA, LANE_Y, MINION_RADIUS, ROBOT_RANGE, STRUCTURES, isVulnerable, robotAD } from "./moba.ts";
+import { DEFAULT_MOBA, LANE_Y, MINION_RADIUS, ROBOT_RANGE, STRUCTURES, isVulnerable, robotAD, segCircle } from "./moba.ts";
 import { checksum, createBattle, DEFAULT_BATTLE, stepBattle } from "./simulation.ts";
 import { segmentHitsBox } from "./world.ts";
 import type { AgentAction, AgentId, BattleConfig, BattleState, MinionState, MobaEvent, StructureState, Vec2 } from "./types.ts";
@@ -128,7 +128,11 @@ export type ReplayV2 = {
   events: MobaEvent[];
 };
 
-const REPLAY_EVERY = 9;
+// Replay cadences. Duel keeps 9 ticks so legacy replays stay
+// byte-identical. MOBA writes every 18 ticks: the 600 ms cadence
+// keeps reference fights under 1 MB, and the viewer glides.
+const REPLAY_EVERY_V1 = 9;
+const REPLAY_EVERY_V2 = 18;
 
 function snap(state: BattleState): ReplayFrame {
   const a = state.agents.A;
@@ -165,7 +169,7 @@ export function buildReplay(
     for (const [side, was, is] of [["A", before.ahp, state.agents.A.hp], ["B", before.bhp, state.agents.B.hp]] as const) {
       if (is < was) events.push({ t: state.tick, side, type: is <= 0 ? "ko" : "hit" });
     }
-    if (state.tick % REPLAY_EVERY === 0 || state.over) frames.push(snap(state));
+    if (state.tick % REPLAY_EVERY_V1 === 0 || state.over) frames.push(snap(state));
   }
   return {
     seed,
@@ -246,7 +250,7 @@ export function buildMobaReplay(
       cfg,
     );
     guard += 1;
-    if (state.tick % REPLAY_EVERY === 0 || state.over) {
+    if (state.tick % REPLAY_EVERY_V2 === 0 || state.over) {
       index += 1;
       frames.push(take(index));
     }
@@ -307,15 +311,15 @@ export function buildValueOf(items: string[]): number {
 }
 
 // The reference brain for training-grade fights. Both servers use this copy.
-// Balance pass (spec 11-12): park at spawn until 1:29, drift to mid
-// without firing until 2:30, then escort the wave, duel up close,
-// and siege the nearest tower when the lane is empty. Auto-buy takes
-// the first Scrap Blade. While hurt and pre-Tempered the policy dives
-// and names Tempered Edge each tick. The no-op buys hold repair gold
-// until the 350 combine fee lands. Every new rule fails closed in duel
-// mode (distFoeTower reads null there), so duel replays stay
-// byte-identical. Measured bench mirror: A wins at tick 15964;
-// tier-1 towers stand at 2:30 with 1194/1157 HP.
+// Balance pass (spec 11-12, amendments A5-A7): hold until the first
+// wave marches, then escort it. Losing duels break off, won duels
+// chase, and kills convert: shove with the wave while the foe is
+// down, hold the nearest tower with no wave to escort. Siege needs
+// health; weak robots fall back to the wave front instead of diving.
+// Tempered Edge rushes when gold allows. Every MOBA_ONLY rule fails
+// closed in duel mode (distFoeTower reads null there), and the three
+// shared rules below never changed, so duel replays stay
+// byte-identical.
 const MOBA_ONLY: AgentPolicy["rules"][number]["when"] = {
   operand: "distFoeTower",
   op: "gte",
@@ -327,12 +331,20 @@ export const BENCH_POLICY: AgentPolicy = {
   agentVersionId: "benchmark-v1",
   dna: { aggression: 55, evasion: 55, preferredDistance: 45, energyConservation: 50 },
   rules: [
-    { id: "b-park", when: { all: [MOBA_ONLY, { operand: "gameTime", op: "lt", value: 89 }] }, move: "RETREAT" },
-    { id: "b-drift", when: { all: [MOBA_ONLY, { operand: "gameTime", op: "gte", value: 89 }, { operand: "gameTime", op: "lt", value: 150 }] }, move: "KITE" },
-    { id: "b-save", when: { all: [MOBA_ONLY, { operand: "ownHpPct", op: "lt", value: 50 }, { operand: "buildValue", op: "lt", value: 600 }] }, move: "CAPTURE", fire: true, buy: "tempered_edge" },
+    { id: "b-park", when: { all: [MOBA_ONLY, { operand: "gameTime", op: "lt", value: 75 }] }, move: "RETREAT" },
+    { id: "b-weak", when: { all: [MOBA_ONLY, { operand: "gameTime", op: "gte", value: 300 }, { operand: "ownHpPct", op: "lt", value: 30 }] }, move: "RETREAT" },
+    { id: "b-end", when: { all: [MOBA_ONLY, { operand: "buildValue", op: "gte", value: 1500 }] }, move: "CAPTURE", fire: true },
+    { id: "b-losing", when: { all: [MOBA_ONLY, { operand: "gameTime", op: "gte", value: 300 }, { operand: "ownHpPct", op: "lt", value: 55 }, { operand: "foeHpPct", op: "gte", value: 60 }] }, move: "RETREAT" },
+    { id: "b-chase", when: { all: [MOBA_ONLY, { operand: "foeHpPct", op: "lt", value: 35 }, { operand: "distFoeTower", op: "gte", value: 8 }] }, move: "APPROACH", fire: true },
+    { id: "b-buy", when: { all: [MOBA_ONLY, { operand: "ownGold", op: "gte", value: 350 }, { operand: "buildValue", op: "lt", value: 600 }] }, move: "PUSH", fire: true, buy: "tempered_edge" },
     { id: "b-farm", when: { operand: "nearFoeMinions", op: "gte", value: 1 }, move: "PUSH", fire: true },
+    { id: "b-shove", when: { all: [MOBA_ONLY, { operand: "foeAlive", op: "eq", value: false }, { operand: "nearAllyMinions", op: "gte", value: 1 }, { operand: "ownHpPct", op: "gte", value: 30 }] }, move: "PUSH", fire: true },
+    { id: "b-holdfarm", when: { all: [MOBA_ONLY, { operand: "foeAlive", op: "eq", value: false }, { operand: "ownHpPct", op: "gte", value: 30 }] }, move: "FARM", fire: true },
+    { id: "b-recover", when: { all: [MOBA_ONLY, { operand: "foeAlive", op: "eq", value: false }] }, move: "RETREAT" },
+    { id: "b-dry", when: { all: [MOBA_ONLY, { operand: "gameTime", op: "gte", value: 300 }, { operand: "distFoe", op: "lt", value: 6 }, { operand: "nearFoeMinions", op: "lt", value: 1 }, { operand: "nearAllyMinions", op: "lt", value: 1 }] }, move: "RETREAT" },
+    { id: "b-dueltower", when: { all: [MOBA_ONLY, { operand: "gameTime", op: "gte", value: 300 }, { operand: "distFoe", op: "lt", value: 6 }, { operand: "distFoeTower", op: "lt", value: 5 }, { operand: "nearAllyMinions", op: "lt", value: 1 }] }, move: "RETREAT" },
     { id: "b-close", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true },
-    { id: "b-siege", when: MOBA_ONLY, move: "CAPTURE", fire: true },
+    { id: "b-siege", when: { all: [MOBA_ONLY, { operand: "ownHpPct", op: "gte", value: 40 }, { operand: "nearAllyMinions", op: "gte", value: 1 }] }, move: "CAPTURE", fire: true },
     { id: "b-far", when: { operand: "distFoe", op: "gte", value: 6 }, move: "APPROACH" },
   ],
 };
@@ -427,11 +439,11 @@ export function observe(
   }
   const items = a.items ?? [];
   let ownAlive = 0;
-  let foeAlive = 0;
+  let foeLive = 0;
   for (const s of state.moba?.structures ?? []) {
     if (!s.alive) continue;
     if (s.side === me) ownAlive += 1;
-    else foeAlive += 1;
+    else foeLive += 1;
   }
   return {
     ownHpPct: (a.hp / cfg.agent.maxHp) * 100,
@@ -457,12 +469,44 @@ export function observe(
     foeHpPct: los ? (f.hp / cfg.agent.maxHp) * 100 : null,
     buildValue: buildValueOf(items),
     slotsFree: MAX_SLOTS - items.length,
-    structLead: ownAlive - foeAlive,
+    structLead: ownAlive - foeLive,
+    foeAlive: f.alive,
   };
 }
 
 function foeOf(me: AgentId): AgentId {
   return me === "A" ? "B" : "A";
+}
+
+// Probe length ahead of the robot for lane routing.
+const ROUTE_PROBE = 1.0;
+
+// The check returns true when the probe segment touches an alive
+// structure or a cover. Dead structures never block.
+function routeBlocked(state: BattleState, me: AgentId, move: Vec2, cfg: BattleConfig): boolean {
+  const a = state.agents[me];
+  const x2 = a.pos.x + move.x * ROUTE_PROBE;
+  const y2 = a.pos.y + move.y * ROUTE_PROBE;
+  for (const s of state.moba?.structures ?? []) {
+    if (!s.alive) continue;
+    const rr = s.radius + cfg.agent.radius;
+    if (Math.hypot(a.pos.x - s.pos.x, a.pos.y - s.pos.y) < rr) return true;
+    if (segCircle(a.pos.x, a.pos.y, x2, y2, s.pos.x, s.pos.y, rr) !== null) return true;
+  }
+  for (const box of cfg.world.covers) {
+    if (segmentHitsBox(a.pos.x, a.pos.y, x2, y2, box)) return true;
+  }
+  return false;
+}
+
+// Lane routing. A head-on walk into a tower wedges: the contact
+// solver pushes straight back out, so the robot jitters in place
+// forever. A blocked probe bends the step sideways instead, and the
+// same bend every tick walks the wall around convex obstacles. One
+// formula serves both sides, which mirrors A and B on the map.
+function routeMove(state: BattleState, me: AgentId, move: Vec2, cfg: BattleConfig): Vec2 {
+  if (!routeBlocked(state, me, move, cfg)) return move;
+  return { x: move.x * 0.3 - move.y * 0.95, y: move.y * 0.3 + move.x * 0.95 };
 }
 
 // The helper pushes up the lane. It stops at the wave front.
@@ -558,7 +602,10 @@ function defendMove(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 {
 
 // The helper aims by last-hit priority. It returns null with no
 // target. Range subtracts target radius. Covers block sight, but
-// structures stay visible. Ties keep ascending id order.
+// structures stay visible. Ties keep ascending id order. Executes
+// come first, then farm, then the healthy foe: robots that dueled
+// every healthy hero traded kills to the tick cap, so the lane
+// farms and only skirmishes dry waves.
 function pickAim(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 | null {
   const moba = state.moba;
   if (!moba) return null;
@@ -573,6 +620,8 @@ function pickAim(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 | nul
     return true;
   };
   const shot = robotAD(a.items ?? []);
+  const f = state.agents[enemy];
+  if (f.alive && f.hp <= shot && inRange(f.pos, cfg.agent.radius) && sees(f.pos)) return { ...f.pos };
   let killable: MinionState | null = null;
   let killD = Infinity;
   let near: MinionState | null = null;
@@ -591,9 +640,8 @@ function pickAim(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 | nul
     }
   }
   if (killable) return { ...killable.pos };
-  const f = state.agents[enemy];
-  if (f.alive && inRange(f.pos, cfg.agent.radius) && sees(f.pos)) return { ...f.pos };
   if (near) return { ...near.pos };
+  if (f.alive && inRange(f.pos, cfg.agent.radius) && sees(f.pos)) return { ...f.pos };
   let struct: StructureState | null = null;
   let structD = Infinity;
   for (const s of moba.structures) {
@@ -632,7 +680,16 @@ export function drive(
       move = obs.lineOfSight ? { ...toFoe } : dir(a.pos, center);
       break;
     case "RETREAT":
-      move = { x: -toFoe.x, y: -toFoe.y };
+      // In MOBA mode retreat walks home to the own nexus, where the
+      // heal tops up. Away-from-foe steps pin robots in corners: the
+      // far corner reads safe while no minion ever walks there, so
+      // the lane starves. Duel keeps the legacy vector.
+      if (cfg.mode === "moba" && state.moba) {
+        const home = state.moba.structures.find((s) => s.side === me && s.kind === "nexus");
+        move = dir(a.pos, home ? home.pos : center);
+      } else {
+        move = { x: -toFoe.x, y: -toFoe.y };
+      }
       break;
     case "KITE": {
       const blend = obs.distFoe !== null && obs.distFoe < 6 ? -0.7 : 0.4;
@@ -669,17 +726,40 @@ export function drive(
       break;
     }
   }
+  // A chipless tick still plays the lane. When no rule matches in
+  // MOBA mode the robot holds the wave front instead of diving the
+  // nearest tower, and auto-attack below works the trigger.
+  if (cfg.mode === "moba" && state.moba && want.ruleId === FALLBACK_RULE_ID) {
+    move = pushMove(state, me, cfg);
+  }
+  // Lane routing bends MOBA steps around towers. Duel moves pass
+  // through untouched, so duel replays stay byte-identical.
+  if (cfg.mode === "moba" && state.moba) {
+    move = routeMove(state, me, move, cfg);
+  }
+  // Amendment A5: MOBA robots auto-attack. A rule-silent robot still
+  // shoots whatever pickAim sees in range, so duel-era drafts with no
+  // fire rule fight instead of standing still. The chip keeps full
+  // authority over movement, dash, shield, and buys. Duel keeps
+  // rule-gated fire, so duel replays stay byte-identical.
   let aim: Vec2;
-  if (cfg.mode === "moba" && state.moba && want.fire) {
+  let fire = want.fire;
+  if (cfg.mode === "moba" && state.moba) {
     const target = pickAim(state, me, cfg);
-    aim = target ? dir(a.pos, target) : move;
+    if (target) {
+      aim = dir(a.pos, target);
+      fire = true;
+    } else {
+      aim = move;
+      fire = false;
+    }
   } else {
     aim = obs.lineOfSight ? { ...toFoe } : move;
   }
   return {
     move,
     aim,
-    fire: want.fire,
+    fire,
     dash: want.dash,
     shield: want.shield,
     buy: want.buy ?? null,
