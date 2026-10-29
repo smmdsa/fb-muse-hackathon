@@ -880,6 +880,7 @@ function mobaSideOf(id) {
 }
 
 function mobaStructPos(id) {
+  if (moba && moba.structurePositions && moba.structurePositions[id]) return { ...moba.structurePositions[id] };
   const p = MOBA_POS[mobaKey(id)];
   const x = mobaSideOf(id) === "A" ? p.x : MW - p.x;
   return { x, y: p.y };
@@ -946,6 +947,7 @@ function playMobaReplay(replay, meta) {
   const frames = replay.frames || [];
   const lastTick = frames.length ? frames[frames.length - 1].t : 0;
   moba = {
+    structurePositions: replay.structurePositions || null,
     frames,
     events: (replay.events || []).slice().sort((x, y) => x.t - y.t),
     evIdx: 0,
@@ -1228,7 +1230,17 @@ function mobaReveal(until, silent) {
     if (silent) continue;
     const clock = mobaClock(e.t);
     const name = (s) => mobaName(s);
-    if (e.type === "wave") note("t" + e.t + " wave spawns for " + name(e.side));
+    if (e.type === "overseer-spawn") mobaFeed(clock + "  THE OVERSEER has arrived", "econ");
+    else if (e.type === "overseer-hit") {
+      const o = moba.curr && moba.curr.overseer;
+      const robot = moba.curr && (e.side === "A" ? moba.curr.a : moba.curr.b);
+      if (o && robot) {
+        moba.tracers.push({ x1: robot.x, y1: robot.y, x2: o.x, y2: o.y, side: e.side, age: 0 });
+        sparks.push({ x: o.x, y: o.y, age: 0, text: "", color: "#ffc36b", side: e.side });
+      }
+    }
+    else if (e.type === "overseer-defeated") mobaFeed(clock + "  " + name(e.side) + " defeated THE OVERSEER · +20% attack for 1:30", "kill");
+    else if (e.type === "wave") note("t" + e.t + " wave spawns for " + name(e.side));
     else if (e.type === "buy") {
       note("t" + e.t + " " + name(e.side) + " buys " + e.item + " (" + e.gold + "g left)");
       mobaFeed(clock + "  " + name(e.side) + " buys " + (MOBA_ITEM_NAME[e.item] || e.item) + " (" + e.gold + "g left)", "econ");
@@ -1484,6 +1496,21 @@ function drawMoba(t) {
   ctx.lineTo(ox + 46 * s, oy + MOBA_LANE_Y * s);
   ctx.stroke();
   ctx.setLineDash([]);
+  // Subtle lane markers add spatial rhythm without obscuring entities.
+  ctx.save(); ctx.lineWidth = 1;
+  for (const x of [6, 12, 18, 24, 30, 36, 42]) {
+    const mid = Math.abs(x - 24) < 0.1;
+    ctx.strokeStyle = mid ? "#e3b35d55" : "#6d87a633";
+    ctx.beginPath();
+    ctx.moveTo(ox + x * s, oy + 5.55 * s); ctx.lineTo(ox + x * s, oy + 5.8 * s);
+    ctx.moveTo(ox + x * s, oy + 10.2 * s); ctx.lineTo(ox + x * s, oy + 10.45 * s);
+    ctx.stroke();
+  }
+  if (f.overseer) {
+    ctx.fillStyle = "#d6a6540c";
+    ctx.beginPath(); ctx.arc(ox + mobaX(f.overseer.x) * s, oy + f.overseer.y * s, 2 * s, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
   ctx.strokeStyle = "#05070f";
   ctx.strokeRect(ox, oy, MW * s, MH * s);
   ctx.fillStyle = "#1a2450";
@@ -1493,6 +1520,37 @@ function drawMoba(t) {
     ctx.strokeRect(ox + c.x1 * s, oy + c.y1 * s, (c.x2 - c.x1) * s, (c.y2 - c.y1) * s);
   }
   const hpById = mobaHpById();
+  // Show only the hostile tower circles that currently threaten a live robot.
+  for (const id of moba.order) {
+    const kind = mobaKindOf(id);
+    if (kind !== "tower" && kind !== "nexus_turret") continue;
+    if ((hpById[id] || 0) <= 0) continue;
+    const tower = mobaStructPos(id);
+    const foe = mobaSideOf(id) === "A" ? f.b : f.a;
+    if (!foe.alive || Math.hypot(foe.x - tower.x, foe.y - tower.y) - 0.35 > MOBA_TOWER_RANGE) continue;
+    ctx.save();
+    ctx.strokeStyle = mobaC(mobaSideOf(id)) + "70";
+    ctx.lineWidth = 1.5; ctx.setLineDash([4, 7]);
+    ctx.beginPath(); ctx.arc(ox + mobaX(tower.x) * s, oy + tower.y * s, MOBA_TOWER_RANGE * s, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+  const o = f.overseer;
+  if (o) {
+    const x = ox + mobaX(o.x) * s, y = oy + o.y * s;
+    ctx.save();
+    ctx.strokeStyle = o.alive ? "#e3b35db0" : "#e3b35d45";
+    ctx.setLineDash([3, 5]); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(x, y, 1.45 * s, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    if (o.alive) {
+      ctx.fillStyle = "#3a263b"; ctx.beginPath(); ctx.arc(x, y, 0.85 * s, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ffc36b"; ctx.beginPath(); ctx.arc(x, y, 0.28 * s, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#2b2029"; ctx.fillRect(x - s, y - 1.25 * s, 2 * s, 3);
+      ctx.fillStyle = "#ffc36b"; ctx.fillRect(x - s, y - 1.25 * s, 2 * s * Math.max(0, o.hp / o.maxHp), 3);
+    }
+    ctx.textAlign = "center"; ctx.font = `${Math.max(9, s * 0.34)}px sans-serif`; ctx.fillStyle = "#e6c48b";
+    ctx.fillText(o.alive ? "OVERSEER" : `OVERSEER ${mobaClock(Math.max(0, o.spawnTick - f.t))}`, x, y + 1.8 * s);
+    ctx.restore();
+  }
   for (const id of moba.order) mobaStructure(id, hpById, s, ox, oy);
   // Minions glide by id. New spawns start at their live spot.
   const prevMin = new Map();
@@ -1508,6 +1566,15 @@ function drawMoba(t) {
   const flipX = mobaFlip() ? -1 : 1;
   mobaUnit({ x: mobaX(ax), y: ay, alive: f.a.alive, shield: (f.a.shield || 0) > 0 }, mobaC("A"), { x: moba.faceA.x * flipX, y: moba.faceA.y }, s, ox, oy);
   mobaUnit({ x: mobaX(bx), y: by, alive: f.b.alive, shield: (f.b.shield || 0) > 0 }, mobaC("B"), { x: moba.faceB.x * flipX, y: moba.faceB.y }, s, ox, oy);
+  if (o) for (const [side, robot] of [["A", f.a], ["B", f.b]]) {
+    const remaining = (o.buffUntil[side] || 0) - f.t;
+    if (remaining <= 0 || !robot.alive) continue;
+    const x = ox + mobaX(robot.x) * s, y = oy + robot.y * s;
+    ctx.save(); ctx.strokeStyle = "#ffc36bba"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, 0.7 * s, 0, Math.PI * 2); ctx.stroke();
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffd48b"; ctx.font = `${Math.max(9, s * 0.32)}px sans-serif`;
+    ctx.fillText(`+20% ${mobaClock(remaining)}`, x, y - s); ctx.restore();
+  }
   mobaTracers(s, ox, oy);
   mobaBolts(s, ox, oy);
   drawMobaSparks(s, ox, oy);

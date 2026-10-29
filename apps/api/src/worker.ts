@@ -7,7 +7,7 @@ import { addEntry, createEvent, lock, register as registerEntry, reportGame, see
 import type { EventPhase } from "@agent-wars/tournaments";
 import type { Championship } from "@agent-wars/tournaments";
 import { CATALOG } from "@agent-wars/economy";
-import { BENCH_POLICY, BOT_PRESETS, buildReplay, DEFAULT_MOBA, fightPolicies, pickBot } from "@agent-wars/battle-core";
+import { BENCH_POLICY, BOT_PRESETS, buildReplay, DEFAULT_MOBA, ARENA_MOBA, fightPolicies, pickBot } from "@agent-wars/battle-core";
 import { MAX_DEFENSE_PER_DAY, recordDefense } from "@agent-wars/autobattle";
 import { pickOpponent } from "@agent-wars/matchmaker";
 import type { Candidate, History } from "@agent-wars/matchmaker";
@@ -133,7 +133,7 @@ async function leaderboard(env: WorkerEnv, seasonId: string): Promise<Response> 
 
 // New fights run MOBA. Old rows without a mode read as duel.
 function matchMode(row: Record<string, unknown>): "duel" | "moba" {
-  return row.mode === "moba" ? "moba" : "duel";
+  return row.mode === "moba" || row.mode === "moba-v2" ? "moba" : "duel";
 }
 
 // Replay re-simulates a stored match and compares checksums.
@@ -161,7 +161,7 @@ async function replay(env: WorkerEnv, id: string): Promise<Response> {
   }
   // The row names its sim. MOBA rows re-simulate as MOBA and
   // serve v2 replays. Duel rows keep the v1 path untouched.
-  const cfg = matchMode(match) === "moba" ? DEFAULT_MOBA : undefined;
+  const cfg = matchMode(match) === "moba" ? (match.mode === "moba-v2" ? ARENA_MOBA : DEFAULT_MOBA) : undefined;
   const again = fightPolicies(pa, pb, match.seed as string, cfg);
   const replay = buildReplay(pa, pb, match.seed as string, cfg);
   const agentCard = async (ver: Record<string, unknown> | null, versionId: string) => {
@@ -537,7 +537,7 @@ async function runCasualD1(
     foeLabel = bot.id;
     foePolicy = bot.policy;
   }
-  const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, foePolicy, input.seed, DEFAULT_MOBA);
+  const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, foePolicy, input.seed, ARENA_MOBA);
   const id = input.key ?? mintId("m");
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   const plan = await planPay(env, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
@@ -546,7 +546,7 @@ async function runCasualD1(
     : null;
   const writes: unknown[] = [
     env.DB.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'moba')",
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'moba-v2')",
     ).bind(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, plan.credited, planB?.credited ?? 0, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
     ...plan.stmts,
     ...(planB ? planB.stmts : []),
@@ -659,7 +659,7 @@ async function settleRankedD1(
     JSON.parse(a.policy_json as string) as AgentPolicy,
     JSON.parse(b.policy_json as string) as AgentPolicy,
     input.seed,
-    DEFAULT_MOBA,
+    ARENA_MOBA,
   );
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   const ledger = createLedger("local-s1");
@@ -691,7 +691,7 @@ async function settleRankedD1(
     ...planA.stmts,
     ...planB.stmts,
     env.DB.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'moba')",
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'moba-v2')",
     ).bind(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, planA.credited, planB.credited, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
   );
   try {
@@ -779,7 +779,8 @@ async function settledResultD1(env: WorkerEnv, row: Record<string, unknown>): Pr
 async function withMatchD1(env: WorkerEnv, ticket: Record<string, unknown>): Promise<Record<string, unknown>> {
   const out = { ...ticket };
   if (ticket.match_id) {
-    out.match = (await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(ticket.match_id as string).first<Record<string, unknown>>()) ?? undefined;
+    const match = await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(ticket.match_id as string).first<Record<string, unknown>>();
+    out.match = match ? { ...match, rulesetVersion: match.mode === "moba-v2" ? 2 : 1, mode: matchMode(match) } : undefined;
   }
   return out;
 }
@@ -1164,10 +1165,10 @@ export default {
       if (!owner || owner.leader_id !== me.id) return json({ error: "version not found for this leader" }, 404);
       const v = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(versionId).first<Record<string, unknown>>();
       if (!v) return json({ error: "unknown version" }, 404);
-      const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, BENCH_POLICY, seed, DEFAULT_MOBA);
+      const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, BENCH_POLICY, seed, ARENA_MOBA);
       const id = mintId("m");
       await env.DB.prepare(
-        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'moba')",
+        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'moba-v2')",
       ).bind(id, seed, versionId, "benchmark-v1", out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })).run();
       return json({ matchId: id, ...out, mode: "moba" }, 201);
     }

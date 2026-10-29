@@ -25,6 +25,7 @@ const MOVES: MoveIntent[] = [
   "FARM",
   "DEFEND",
   "WAIT",
+  "CONTEST_OVERSEER",
 ];
 
 const OPERANDS: Operand[] = [
@@ -56,6 +57,7 @@ const OPERANDS: Operand[] = [
   "inFoeTowerRange", "foeTowerTargetsMe", "foeTowerTargetsAllyMinion", "allyMinionsUnderFoeTower",
   "nearAllyMinionHp", "nearFoeMinionHp", "killableFoeMinionsInRange",
   "nextWaveSeconds", "distOwnBase", "ownStructureThreatened",
+  "overseerAlive", "overseerHpPct", "overseerDist", "overseerSpawnSeconds", "ownOverseerBuffSeconds", "foeOverseerBuffSeconds",
 ];
 
 // Buyable item ids. This list mirrors battle-core items.ts.
@@ -152,7 +154,7 @@ function checkRule(rule: BehaviorRule, errors: string[], seen: Set<string>): voi
       errors.push(`rule ${tag} buy names unknown item ${String(rule.buy)}`);
     }
   }
-  if (rule.target !== undefined && !["AUTO", "FOE", "MINION", "STRUCTURE", "NONE", "LAST_HIT"].includes(rule.target)) {
+  if (rule.target !== undefined && !["AUTO", "FOE", "MINION", "STRUCTURE", "NONE", "LAST_HIT", "OVERSEER"].includes(rule.target)) {
     errors.push(`rule ${tag} names an unknown target`);
   }
   const known = new Set(["id", "when", "move", "fire", "dash", "shield", "buy", "target"]);

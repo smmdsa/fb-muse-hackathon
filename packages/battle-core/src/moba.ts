@@ -85,6 +85,14 @@ export const DEFAULT_MOBA: BattleConfig = {
   autoBuy: true,
 };
 
+// Version 1 remains frozen for old match receipts and replays.
+export const ARENA_MOBA: BattleConfig = { ...DEFAULT_MOBA, rulesetVersion: 2 };
+export const OVERSEER_FIRST_TICK = 6 * 60 * 30;
+export const OVERSEER_RESPAWN_TICKS = 3 * 60 * 30;
+export const OVERSEER_BUFF_TICKS = 90 * 30;
+export const OVERSEER_MAX_HP = 500;
+export const OVERSEER_RADIUS = 0.9;
+
 // Fixed structure order. Towers fire in this order.
 export const STRUCTURES: StructureId[] = [
   "a_t1", "a_t2", "a_inhib", "a_nt_top", "a_nt_bot", "a_nexus",
@@ -132,11 +140,12 @@ export function structureInterval(id: StructureId): number {
 }
 
 // The helper builds the 12 structures in fixed order.
-export function createStructures(): StructureState[] {
+export function createStructures(rulesetVersion = 1): StructureState[] {
   return STRUCTURES.map((id) => {
     const side: AgentId = id.startsWith("a_") ? "A" : "B";
     const def = STRUCTURE_DEFS[defKey(id)];
-    const p = STRUCTURE_POS[posKey(id)];
+    const base = STRUCTURE_POS[posKey(id)];
+    const p = rulesetVersion === 2 ? ({ ...base, x: ({ t1: 19, t2: 12, inhib: 8.5, nt_top: 5, nt_bot: 5, nexus: 2 } as Record<string, number>)[posKey(id)] }) : base;
     return {
       id,
       side,
@@ -155,10 +164,11 @@ export function createStructures(): StructureState[] {
   });
 }
 
-export function createMobaState(): MobaState {
+export function createMobaState(rulesetVersion = 1): MobaState {
   return {
     minions: [],
-    structures: createStructures(),
+    structures: createStructures(rulesetVersion),
+    ...(rulesetVersion === 2 ? { overseer: { x: 24, y: 3, hp: 0, maxHp: OVERSEER_MAX_HP, alive: false, spawnTick: OVERSEER_FIRST_TICK, lastAttackTick: 0, buffUntil: { A: 0, B: 0 } } } : {}),
     nextMinionId: 1,
     lifetimeGold: { A: 0, B: 0 },
     log: [],
@@ -380,6 +390,7 @@ type Ctx = {
   agents: Record<AgentId, AgentState>;
   moba: MobaState;
   killers: Map<string, Killer>;
+  overseerHits: Set<AgentId>;
 };
 
 function recordHit(
@@ -736,7 +747,7 @@ export function stepMobaBattle(
   cfg: BattleConfig = DEFAULT_MOBA,
 ): BattleState {
   if (state.over) return state;
-  const src = state.moba ?? createMobaState();
+  const src = state.moba ?? createMobaState(cfg.rulesetVersion ?? 1);
   const dt = 1 / cfg.world.tickHz;
   const time = state.time + dt;
   const tick = state.tick + 1;
@@ -751,10 +762,17 @@ export function stepMobaBattle(
     lifetimeGold: { ...src.lifetimeGold },
     log: [...src.log],
     dmg: src.dmg.filter((e) => time - e.t < HEAT_LOSE_SECS),
+    ...(src.overseer ? { overseer: { ...src.overseer, buffUntil: { ...src.overseer.buffUntil } } } : {}),
   };
-  const ctx: Ctx = { time, tick, cfg, agents, moba, killers: new Map() };
+  const ctx: Ctx = { time, tick, cfg, agents, moba, killers: new Map(), overseerHits: new Set() };
 
   // Phase 1: clock, waves, respawns, buys, auto-buy, combines.
+  if (moba.overseer && !moba.overseer.alive && tick >= moba.overseer.spawnTick) {
+    moba.overseer.alive = true;
+    moba.overseer.hp = moba.overseer.maxHp;
+    moba.overseer.lastAttackTick = tick;
+    moba.log.push({ t: tick, type: "overseer-spawn" });
+  }
   if (tick >= WAVE_FIRST_TICK && (tick - WAVE_FIRST_TICK) % WAVE_EVERY_TICKS === 0) {
     spawnWave(moba, time, tick);
   }
@@ -880,6 +898,16 @@ export function stepMobaBattle(
     }
   }
 
+  // The guardian retaliates once per second against robots in its arena.
+  // Both sides are hit equally when they enter together.
+  const guardian = moba.overseer;
+  if (guardian?.alive && tick - guardian.lastAttackTick >= cfg.world.tickHz) {
+    const targets = (["A", "B"] as AgentId[]).map(id => agents[id]).filter(a => a.alive && !spawnImmune(a, time) && Math.hypot(a.pos.x - guardian.x, a.pos.y - guardian.y) <= 5);
+    if (targets.length) {
+      guardian.lastAttackTick = tick;
+      for (const a of targets) if (time > a.shieldUntil) a.hp -= 20 * armorMult(robotArmor(a.items ?? []));
+    }
+  }
   // Phase 3: attacks. Robots, towers, caster minions, melee minions.
   let projectiles = state.projectiles.map((p) => ({
     ...p,
@@ -907,7 +935,7 @@ export function stepMobaBattle(
         prev: { x: sx, y: sy },
         vel: { x: a.aim.x * PROJECTILE_SPEED, y: a.aim.y * PROJECTILE_SPEED },
         alive: true,
-        dmg: robotAD(a.items ?? []),
+        dmg: robotAD(a.items ?? []) * (moba.overseer && tick < moba.overseer.buffUntil[id] ? 1.2 : 1),
         srcTower: null,
         srcMinion: null,
       });
@@ -1011,6 +1039,14 @@ export function stepMobaBattle(
     collideMobaProjectile(ctx, p);
   }
   projectiles = projectiles.filter((p) => p.alive);
+  if (moba.overseer?.alive && moba.overseer.hp <= 0) {
+    moba.overseer.alive = false;
+    moba.overseer.spawnTick = tick + OVERSEER_RESPAWN_TICKS;
+    for (const side of ["A", "B"] as AgentId[]) if (ctx.overseerHits.has(side)) {
+      moba.overseer.buffUntil[side] = tick + OVERSEER_BUFF_TICKS;
+      moba.log.push({ t: tick, type: "overseer-defeated", side });
+    }
+  }
 
   // Phase 5: deaths in ascending entity order. Gold and credit apply.
   const order: { key: string; robot: AgentState | null; minion: MinionState | null }[] = [
@@ -1103,6 +1139,7 @@ function collideMobaProjectile(ctx: Ctx, p: { id: number; owner: AgentId; prev: 
   let hitRobot = false;
   let hitMinion: MinionState | null = null;
   let hitStruct: StructureState | null = null;
+  let hitOverseer = false;
   const robot = ctx.agents[enemy];
   if (robot.alive && !spawnImmune(robot, ctx.time)) {
     const t = segCircle(p.prev.x, p.prev.y, p.pos.x, p.pos.y, robot.pos.x, robot.pos.y, ctx.cfg.agent.radius);
@@ -1137,8 +1174,19 @@ function collideMobaProjectile(ctx: Ctx, p: { id: number; owner: AgentId; prev: 
       hitStruct = s;
     }
   }
+  const overseer = ctx.moba.overseer;
+  if (kind === "robot" && overseer?.alive) {
+    const t = segCircle(p.prev.x, p.prev.y, p.pos.x, p.pos.y, overseer.x, overseer.y, OVERSEER_RADIUS);
+    if (t !== null && t < bestT) { bestT = t; hitOverseer = true; hitRobot = false; hitMinion = null; hitStruct = null; }
+  }
   if (bestT === Infinity) return;
   p.alive = false;
+  if (hitOverseer && overseer) {
+    overseer.hp = Math.max(0, overseer.hp - raw);
+    ctx.moba.log.push({ t: ctx.tick, type: "overseer-hit", side: p.owner, damage: raw });
+    ctx.overseerHits.add(p.owner);
+    return;
+  }
   if (hitRobot) {
     if (ctx.time <= robot.shieldUntil) return;
     const before = robot.hp;
@@ -1213,5 +1261,10 @@ export function mobaStateKey(s: BattleState): string {
     parts.push(`${p.id}:${f(p.pos.x)},${f(p.pos.y)}:${p.dmg ?? 10}`);
   }
   parts.push(`gold${m.lifetimeGold.A},${m.lifetimeGold.B}`);
+  if (m.overseer) {
+    const o = m.overseer;
+    parts.push(`overseer:${f(o.x)},${f(o.y)}:${o.alive ? 1 : 0}:${o.hp}:${o.spawnTick}:${o.lastAttackTick}:${o.buffUntil.A}:${o.buffUntil.B}`);
+    parts.push(`positions:${m.structures.map(st => `${st.id}:${f(st.pos.x)},${f(st.pos.y)}`).join(";")}`);
+  }
   return parts.join("|");
 }
