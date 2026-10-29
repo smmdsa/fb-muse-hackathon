@@ -226,7 +226,7 @@ function paintVersion(d, v) {
     const table = document.createElement("table");
     table.className = "chips";
     const top = document.createElement("tr");
-    for (const h of ["chip", "when", "move", "fire", "triggers"]) {
+    for (const h of ["rule", "when", "move", "target", "dash", "shield", "buy", "triggers"]) {
       const th = document.createElement("th");
       th.textContent = h;
       top.appendChild(th);
@@ -234,7 +234,7 @@ function paintVersion(d, v) {
     table.appendChild(top);
     for (const c of v.chips) {
       const tr = document.createElement("tr");
-      for (const cell of [c.id, shortWhen(c.when), c.move, c.fire ? "yes" : "no", String(c.triggers)]) {
+      for (const cell of [c.id, shortWhen(c.when), c.move, c.target || "AUTO", c.dash ? "yes" : "no", c.shield ? "yes" : "no", c.buy || "—", String(c.triggers)]) {
         const td = document.createElement("td");
         td.textContent = cell;
         tr.appendChild(td);

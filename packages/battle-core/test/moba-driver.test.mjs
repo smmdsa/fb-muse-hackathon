@@ -358,3 +358,53 @@ describe("v2 bots", () => {
     assert.equal(shadow.buy, "cloth_weave");
   });
 });
+
+describe("chip-controlled targeting", () => {
+  it("prioritizes the enemy hero over an available minion", () => {
+    const cfg = mobaCfg("hero-priority", false);
+    const s = createBattle(cfg);
+    s.agents.A.pos = { x: 24, y: 8 };
+    s.agents.B.pos = { x: 24, y: 10 };
+    addMinion(s, { pos: { x: 25, y: 8 } });
+    const policy = oneRule("APPROACH", { target: "FOE" });
+    assert.equal(validatePolicy(policy).ok, true);
+    assert.deepEqual(drive(s, policy, "A", cfg).aim, { x: 0, y: 1 });
+  });
+
+  it("holds fire when ordered and does not fall back to another target", () => {
+    const cfg = mobaCfg("hold-fire", false);
+    const s = createBattle(cfg);
+    s.agents.A.pos = { x: 24, y: 8 };
+    s.agents.B.pos = { x: 45, y: 8 };
+    addMinion(s, { pos: { x: 25, y: 8 } });
+    assert.equal(drive(s, oneRule("PUSH", { target: "NONE" }), "A", cfg).fire, false);
+    assert.equal(drive(s, oneRule("PUSH", { target: "FOE" }), "A", cfg).fire, false);
+  });
+
+  it("rejects unknown target classes", () => {
+    assert.equal(validatePolicy(oneRule("PUSH", { target: "ANYTHING" })).ok, false);
+  });
+});
+
+describe("chip targeting in simulation", () => {
+  it("damages the instructed hero instead of a nearby minion", () => {
+    const cfg = mobaCfg("target-in-sim", false);
+    let s = createBattle(cfg);
+    s.agents.A.pos = { x: 24, y: 8 };
+    s.agents.B.pos = { x: 24, y: 10 };
+    const id = addMinion(s, { pos: { x: 25, y: 8 }, hp: 200 });
+    const p = oneRule("STRAFE", { target: "FOE" });
+    const idle = { move: { x: 0, y: 0 }, aim: { x: 1, y: 0 }, fire: false, dash: false, shield: false };
+    for (let i = 0; i < 12; i++) s = stepBattle(s, { A: drive(s, p, "A", cfg), B: idle }, cfg);
+    assert.ok(s.agents.B.hp < cfg.agent.maxHp);
+    assert.equal(s.moba.minions.find((m) => m.id === id).hp, 200);
+  });
+
+  it("respects strict minion targeting when only the enemy hero is in range", () => {
+    const cfg = mobaCfg("target-minion-only", false);
+    const s = createBattle(cfg);
+    s.agents.A.pos = { x: 24, y: 8 };
+    s.agents.B.pos = { x: 24, y: 10 };
+    assert.equal(drive(s, oneRule("PUSH", { target: "MINION" }), "A", cfg).fire, false);
+  });
+});

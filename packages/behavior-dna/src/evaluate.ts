@@ -34,6 +34,7 @@ function toIntents(rule: BehaviorRule): Intents {
     shield: rule.shield === true,
     buy: rule.buy ?? null,
     ruleId: rule.id,
+    ...(rule.target === undefined ? {} : { target: rule.target }),
   };
 }
 

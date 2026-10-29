@@ -606,7 +606,7 @@ function defendMove(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 {
 // come first, then farm, then the healthy foe: robots that dueled
 // every healthy hero traded kills to the tick cap, so the lane
 // farms and only skirmishes dry waves.
-function pickAim(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 | null {
+function pickAim(state: BattleState, me: AgentId, cfg: BattleConfig, target: "AUTO" | "FOE" | "MINION" | "STRUCTURE" | "NONE" = "AUTO"): Vec2 | null {
   const moba = state.moba;
   if (!moba) return null;
   const a = state.agents[me];
@@ -621,7 +621,10 @@ function pickAim(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 | nul
   };
   const shot = robotAD(a.items ?? []);
   const f = state.agents[enemy];
-  if (f.alive && f.hp <= shot && inRange(f.pos, cfg.agent.radius) && sees(f.pos)) return { ...f.pos };
+  if (target === "NONE") return null;
+  const foeVisible = f.alive && inRange(f.pos, cfg.agent.radius) && sees(f.pos);
+  if (target === "FOE") return foeVisible ? { ...f.pos } : null;
+  if (target === "AUTO" && foeVisible && f.hp <= shot) return { ...f.pos };
   let killable: MinionState | null = null;
   let killD = Infinity;
   let near: MinionState | null = null;
@@ -639,9 +642,12 @@ function pickAim(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 | nul
       killD = d;
     }
   }
-  if (killable) return { ...killable.pos };
-  if (near) return { ...near.pos };
-  if (f.alive && inRange(f.pos, cfg.agent.radius) && sees(f.pos)) return { ...f.pos };
+  if (target === "AUTO" || target === "MINION") {
+    if (killable) return { ...killable.pos };
+    if (near) return { ...near.pos };
+    if (target === "MINION") return null;
+    if (foeVisible) return { ...f.pos };
+  }
   let struct: StructureState | null = null;
   let structD = Infinity;
   for (const s of moba.structures) {
@@ -745,7 +751,7 @@ export function drive(
   let aim: Vec2;
   let fire = want.fire;
   if (cfg.mode === "moba" && state.moba) {
-    const target = pickAim(state, me, cfg);
+    const target = pickAim(state, me, cfg, want.target);
     if (target) {
       aim = dir(a.pos, target);
       fire = true;

@@ -28,14 +28,16 @@ const COMPILE_SYSTEM = [
   "Shape: {\"schemaVersion\":2,\"agentVersionId\":\"<id>\",",
   "\"dna\":{\"aggression\":0-100,\"evasion\":0-100,\"preferredDistance\":0-100,\"energyConservation\":0-100},",
   "\"rules\":[{\"id\":\"<slug>\",\"when\":{...},\"move\":\"<MOVE>\",",
-  "\"fire\":true|false,\"shield\":true|false,\"dash\":true|false,\"buy\":\"<item>\"}]}.",
+  "\"fire\":true|false,\"shield\":true|false,\"dash\":true|false,\"target\":\"<TARGET>\",\"buy\":\"<item>\"}]}.",
   "Send 2 to 6 rules. Keep every trait an integer 0-100.",
   "The brief can run paragraphs long. Read it whole, distill the overall battle plan, then mint rules that together express it.",
-  "Map: one lane on a 48x16 field. Each side holds 2 towers, 1 inhibitor, 2 nexus turrets, 1 nexus in that order. Waves of 5 minions spawn every 30s from 1:00. Robots auto-attack anything in range, so spend rules on positioning, not on fire.",
-  "Operands, exactly these: ownHpPct, energy, distFoe, projectileTti, coverDist, lineOfSight, dashReady, shieldReady, foeLastSeenAge, objectiveDist, timeLeft, edgeDist, ownGold, ownDeaths, gameTime, distFoeTower, foeTowerHpPct, nearFoeMinions, nearAllyMinions, distFoeMinion, foeHpPct, buildValue, slotsFree, structLead.",
-  "Operators, exactly these: gt, gte, lt, lte, eq. Value is a number; eq also takes true or false for lineOfSight, dashReady, shieldReady.",
+  "Map: one lane on a 48x16 field. Each side holds 2 towers, 1 inhibitor, 2 nexus turrets, 1 nexus in that order. Waves of 5 minions spawn every 30s from 1:00. Each tick the first matching rule wins; put emergency and specific rules before general rules. Unmatched rules fall back to pushing and automatic targeting.",
+  "Operands, exactly these: ownHpPct, energy, distFoe, projectileTti, coverDist, lineOfSight, dashReady, shieldReady, foeLastSeenAge, objectiveDist, timeLeft, edgeDist, ownGold, ownDeaths, gameTime, distFoeTower, foeTowerHpPct, nearFoeMinions, nearAllyMinions, distFoeMinion, foeHpPct, buildValue, slotsFree, structLead, foeAlive.",
+  "Operators, exactly these: gt, gte, lt, lte, eq. Value is a number; eq also takes true or false for lineOfSight, dashReady, shieldReady, foeAlive. foeLastSeenAge is not implemented: do not use it.",
   "Moves, exactly these: APPROACH, RETREAT, STRAFE, KITE, CAPTURE, SEEK_COVER, PUSH, FARM, DEFEND. PUSH escorts your wave, FARM hunts last hits, DEFEND guards your threatened tower, CAPTURE sieges the nearest vulnerable enemy tower.",
-  "Buy, optional: \"buy\":\"<item>\" with one of scrap_blade, cloth_weave, worn_treads, overclock_chip, hull_patch, repair_cell, tempered_edge, bulwark_plate, turbo_treads, rapid_cycler, reinforced_hull, siege_breaker, aegis_core, phantom_drive, warlord_frame. Gate buys on ownGold and buildValue so gold piles into one plan.",
+  "Target, optional: AUTO uses the default auto-attack targeting; FOE shoots only the enemy robot; MINION shoots only enemy minions; STRUCTURE shoots only a vulnerable enemy structure; NONE holds fire. These are strict choices: if the specified target is unavailable or out of range, no shot is fired. If omitted AUTO applies. In MOBA fire does not override target. Use target to express explicit combat instructions, and never invent actions the engine cannot perform.",
+  "The DNA traits are descriptive and do not change MOBA behavior; express every requested behavior in rules. Do not claim unsupported behaviors.",
+  "Buy, optional: \"buy\":\"<item>\" with one of scrap_blade, cloth_weave, worn_treads, overclock_chip, hull_patch, repair_cell, tempered_edge, bulwark_plate, turbo_treads, rapid_cycler, reinforced_hull, siege_breaker, aegis_core, phantom_drive, warlord_frame. Gate buys on ownGold and buildValue. The arena also auto-buys when no buy is requested and auto-combines items; a chip cannot disable these systems.",
   "Combine tests with {\"all\":[...]} or {\"any\":[...]}. Example: {\"operand\":\"distFoe\",\"op\":\"lt\",\"value\":6}.",
   "Any other operand, operator, move, or item rejects the whole draft.",
   "Match the prompt mood: rush means high aggression,",
@@ -168,6 +170,9 @@ export function createMetaProvider(env: MetaEnv, fetchFn: FetchFn = defaultFetch
     const check = validatePolicy(policy);
     if (check.ok) {
       return { provider: "meta", isMock: false, policy, errors: [], repairAttempted: false, latencyMs: Date.now() - started, promptTokens: usageOf(raw) || promptTokens };
+    }
+    if (!Array.isArray(policy.rules)) {
+      return { provider: "meta", isMock: false, policy: null, errors: check.errors, repairAttempted: false, latencyMs: Date.now() - started, promptTokens: usageOf(raw) || promptTokens };
     }
     const fixed = repairOnce(policy);
     const recheck = validatePolicy(fixed);
