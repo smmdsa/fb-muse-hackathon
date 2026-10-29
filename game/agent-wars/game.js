@@ -785,6 +785,14 @@ const MOBA_MELEE_RANGE = 1.0;
 const MOBA_BOLT_SPEED = 14;
 const MOBA_COLOR = { A: "#37e0ff", B: "#ff5d7a" };
 
+// Perspective. The local side always renders left and cyan. A side-B
+// viewer mirrors x and swaps every side-keyed read. Duel never flips.
+const mobaFlip = () => Boolean(moba && moba.flip);
+const mobaX = (x) => (mobaFlip() ? MW - x : x);
+const mobaDS = (side) => (mobaFlip() ? (side === "A" ? "B" : "A") : side);
+const mobaC = (side) => MOBA_COLOR[mobaDS(side)];
+const mobaName = (side) => (mobaDS(side) === "A" ? "Cyan" : "Crimson");
+
 const MOBA_COVERS = [
   { x1: 19.5, y1: 3.0, x2: 21.5, y2: 5.0 },
   { x1: 26.5, y1: 3.0, x2: 28.5, y2: 5.0 },
@@ -968,6 +976,7 @@ function playMobaReplay(replay, meta) {
     duration: lastTick * TICK,
     startedAt: (meta && meta.startedAt) || 0,
     offset: (meta && meta.serverNow) ? meta.serverNow - Date.now() : 0,
+    flip: (meta && meta.perspective) === "B",
   };
   replayAlpha = 0;
   shots = [];
@@ -1010,6 +1019,7 @@ function playMobaReplay(replay, meta) {
   pauseBtn.disabled = false;
   pauseBtn.textContent = "Pause";
   mobaReveal(0);
+  mobaNames();
   mobaSyncHud();
   drawMoba(1);
   syncMoba();
@@ -1192,13 +1202,13 @@ function mobaOnFrame(p, f) {
   moba.maxA = Math.max(moba.maxA, f.a.hp);
   moba.maxB = Math.max(moba.maxB, f.b.hp);
   // Robot deaths burst at the death site.
-  if (p.a.alive && !f.a.alive) sparks.push({ x: f.a.x, y: f.a.y, age: 0, text: "KO", color: MOBA_COLOR.B });
-  if (p.b.alive && !f.b.alive) sparks.push({ x: f.b.x, y: f.b.y, age: 0, text: "KO", color: MOBA_COLOR.A });
+  if (p.a.alive && !f.a.alive) sparks.push({ x: f.a.x, y: f.a.y, age: 0, text: "KO", color: MOBA_COLOR.B, side: "B" });
+  if (p.b.alive && !f.b.alive) sparks.push({ x: f.b.x, y: f.b.y, age: 0, text: "KO", color: MOBA_COLOR.A, side: "A" });
   // Vanished minions died: pop a spark at the last known spot.
   const now = new Map();
   for (const mn of f.minions || []) now.set(mn.id, mn);
   for (const [id, last] of moba.minLast) {
-    if (!now.has(id)) sparks.push({ x: last.x, y: last.y, age: 0, text: "x", color: MOBA_COLOR[last.side] });
+    if (!now.has(id)) sparks.push({ x: last.x, y: last.y, age: 0, text: "x", color: MOBA_COLOR[last.side], side: last.side });
   }
   moba.minLast = new Map();
   for (const mn of f.minions || []) moba.minLast.set(mn.id, { x: mn.x, y: mn.y, side: mn.side });
@@ -1213,7 +1223,7 @@ function mobaReveal(until, silent) {
     moba.evIdx += 1;
     if (silent) continue;
     const clock = mobaClock(e.t);
-    const name = (s) => (s === "A" ? "Cyan" : "Crimson");
+    const name = (s) => mobaName(s);
     if (e.type === "wave") note("t" + e.t + " wave spawns for " + name(e.side));
     else if (e.type === "buy") {
       note("t" + e.t + " " + name(e.side) + " buys " + e.item + " (" + e.gold + "g left)");
@@ -1239,24 +1249,54 @@ function mobaReveal(until, silent) {
 function mobaSyncHud() {
   const f = moba.curr;
   if (!f) return;
+  const fa = mobaFlip() ? f.b : f.a;
+  const fb = mobaFlip() ? f.a : f.b;
   const set = (id, text) => {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
   };
-  set("gold-a", (f.a.gold || 0) + "g");
-  set("gold-b", (f.b.gold || 0) + "g");
+  set("gold-a", (fa.gold || 0) + "g");
+  set("gold-b", (fb.gold || 0) + "g");
   const ra = document.getElementById("respawn-a");
   if (ra) {
-    ra.hidden = f.a.alive;
-    if (!f.a.alive) ra.textContent = "respawn " + Math.ceil((f.a.respawn || 0) * TICK) + "s";
+    ra.hidden = fa.alive;
+    if (!fa.alive) ra.textContent = "respawn " + Math.ceil((fa.respawn || 0) * TICK) + "s";
   }
   const rb = document.getElementById("respawn-b");
   if (rb) {
-    rb.hidden = f.b.alive;
-    if (!f.b.alive) rb.textContent = "respawn " + Math.ceil((f.b.respawn || 0) * TICK) + "s";
+    rb.hidden = fb.alive;
+    if (!fb.alive) rb.textContent = "respawn " + Math.ceil((fb.respawn || 0) * TICK) + "s";
   }
-  mobaBuildPanel("builds-a", moba.buildsA);
-  mobaBuildPanel("builds-b", moba.buildsB);
+  mobaBuildPanel("builds-a", mobaFlip() ? moba.buildsB : moba.buildsA);
+  mobaBuildPanel("builds-b", mobaFlip() ? moba.buildsA : moba.buildsB);
+}
+
+// Score panels follow perspective: local agent left, foe right.
+// Names and portraits arrive in meta from the replay response.
+function mobaNames() {
+  const m = (moba && moba.meta) || {};
+  const names = m.names || {};
+  const ports = m.portraits || {};
+  const local = mobaFlip() ? "b" : "a";
+  const foe = mobaFlip() ? "a" : "b";
+  const set = (id, text) => {
+    const el = document.getElementById(id);
+    if (el && text) el.textContent = text;
+  };
+  set("score-a-name", names[local]);
+  set("score-b-name", names[foe]);
+  const img = (id, url) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (url) {
+      el.src = url;
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
+  };
+  img("score-a-img", ports[local]);
+  img("score-b-img", ports[foe]);
 }
 
 function mobaBuildPanel(id, items) {
@@ -1310,12 +1350,12 @@ function mobaSpawnBolts(p, f) {
       continue;
     }
     if (atk.kind === "slash") {
-      sparks.push({ x: v.x, y: v.y, age: 0, text: "x", color: atk.color });
+      sparks.push({ x: v.x, y: v.y, age: 0, text: "x", color: atk.color, side: atk.side });
       continue;
     }
     moba.bolts.push({ x: atk.x, y: atk.y, px: atk.x, py: atk.y, tx: v.x, ty: v.y, side: atk.side, kind: atk.kind });
     moba.tracers.push({ x1: atk.x, y1: atk.y, x2: v.x, y2: v.y, side: atk.side, age: 0 });
-    sparks.push({ x: atk.x, y: atk.y, age: 0, text: "", color: atk.color });
+    sparks.push({ x: atk.x, y: atk.y, age: 0, text: "", color: atk.color, side: atk.side });
     if (moba.bolts.length > 60) moba.bolts.splice(0, moba.bolts.length - 60);
     if (moba.tracers.length > 60) moba.tracers.splice(0, moba.tracers.length - 60);
   }
@@ -1363,7 +1403,7 @@ function mobaFly(dt) {
     const d = Math.hypot(dx, dy);
     const step = MOBA_BOLT_SPEED * dt;
     if (d <= step + 0.05) {
-      sparks.push({ x: b.tx, y: b.ty, age: 0, text: "", color: MOBA_COLOR[b.side] });
+      sparks.push({ x: b.tx, y: b.ty, age: 0, text: "", color: MOBA_COLOR[b.side], side: b.side });
       continue;
     }
     b.x += (dx / d) * step;
@@ -1432,14 +1472,15 @@ function drawMoba(t) {
   for (const mn of p.minions || []) prevMin.set(mn.id, mn);
   for (const mn of f.minions || []) {
     const was = prevMin.get(mn.id) || mn;
-    mobaMinion({ x: glide(was.x, mn.x), y: glide(was.y, mn.y), side: mn.side, kind: mn.kind, hp: mn.hp }, s, ox, oy);
+    mobaMinion({ x: mobaX(glide(was.x, mn.x)), y: glide(was.y, mn.y), side: mn.side, kind: mn.kind, hp: mn.hp }, s, ox, oy);
   }
   const ax = f.a.alive ? glide(p.a.x, f.a.x) : f.a.x;
   const ay = f.a.alive ? glide(p.a.y, f.a.y) : f.a.y;
   const bx = f.b.alive ? glide(p.b.x, f.b.x) : f.b.x;
   const by = f.b.alive ? glide(p.b.y, f.b.y) : f.b.y;
-  mobaUnit({ x: ax, y: ay, alive: f.a.alive, shield: (f.a.shield || 0) > 0 }, MOBA_COLOR.A, moba.faceA, s, ox, oy);
-  mobaUnit({ x: bx, y: by, alive: f.b.alive, shield: (f.b.shield || 0) > 0 }, MOBA_COLOR.B, moba.faceB, s, ox, oy);
+  const flipX = mobaFlip() ? -1 : 1;
+  mobaUnit({ x: mobaX(ax), y: ay, alive: f.a.alive, shield: (f.a.shield || 0) > 0 }, mobaC("A"), { x: moba.faceA.x * flipX, y: moba.faceA.y }, s, ox, oy);
+  mobaUnit({ x: mobaX(bx), y: by, alive: f.b.alive, shield: (f.b.shield || 0) > 0 }, mobaC("B"), { x: moba.faceB.x * flipX, y: moba.faceB.y }, s, ox, oy);
   mobaTracers(s, ox, oy);
   mobaBolts(s, ox, oy);
   drawMobaSparks(s, ox, oy);
@@ -1449,7 +1490,8 @@ function drawMoba(t) {
 function mobaStructure(id, hpById, s, ox, oy) {
   const pos = mobaStructPos(id);
   const side = mobaSideOf(id);
-  const color = MOBA_COLOR[side];
+  const color = mobaC(side);
+  pos.x = mobaX(pos.x);
   const hp = hpById[id] || 0;
   const max = MOBA_MAXHP[mobaKey(id)] || 1;
   const r = (MOBA_RADIUS[mobaKey(id)] || 0.6) * s;
@@ -1520,7 +1562,7 @@ function mobaStructure(id, hpById, s, ox, oy) {
 }
 
 function mobaMinion(mn, s, ox, oy) {
-  const color = MOBA_COLOR[mn.side];
+  const color = mobaC(mn.side);
   const px = ox + mn.x * s;
   const py = oy + mn.y * s;
   const big = mn.kind === "super";
@@ -1623,20 +1665,22 @@ function mobaTracers(s, ox, oy) {
     tr.age += 1;
     if (tr.age > 14) continue;
     keep.push(tr);
-    const color = MOBA_COLOR[tr.side];
+    const color = mobaC(tr.side);
+    const x1 = mobaX(tr.x1);
+    const x2 = mobaX(tr.x2);
     ctx.save();
     ctx.globalAlpha = 0.75 * (1 - tr.age / 14);
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(ox + tr.x1 * s, oy + tr.y1 * s);
-    ctx.lineTo(ox + tr.x2 * s, oy + tr.y2 * s);
+    ctx.moveTo(ox + x1 * s, oy + tr.y1 * s);
+    ctx.lineTo(ox + x2 * s, oy + tr.y2 * s);
     ctx.stroke();
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(ox + tr.x1 * s, oy + tr.y1 * s);
-    ctx.lineTo(ox + tr.x2 * s, oy + tr.y2 * s);
+    ctx.moveTo(ox + x1 * s, oy + tr.y1 * s);
+    ctx.lineTo(ox + x2 * s, oy + tr.y2 * s);
     ctx.stroke();
     ctx.restore();
   }
@@ -1649,27 +1693,29 @@ function mobaBolts(s, ox, oy) {
   const size = { tower: 6, robot: 4.2, caster: 3.2 };
   ctx.save();
   for (const b of moba.bolts) {
-    const color = MOBA_COLOR[b.side];
+    const color = mobaC(b.side);
     const r = size[b.kind] || 3;
+    const bx = mobaX(b.x);
+    const px = mobaX(b.px);
     ctx.strokeStyle = color;
     ctx.globalAlpha = 0.85;
     ctx.lineWidth = r;
     ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(ox + b.px * s, oy + b.py * s);
-    ctx.lineTo(ox + b.x * s, oy + b.y * s);
+    ctx.moveTo(ox + px * s, oy + b.py * s);
+    ctx.lineTo(ox + bx * s, oy + b.y * s);
     ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.shadowColor = color;
     ctx.shadowBlur = 12;
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
-    ctx.arc(ox + b.x * s, oy + b.y * s, r, 0, Math.PI * 2);
+    ctx.arc(ox + bx * s, oy + b.y * s, r, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.arc(ox + b.x * s, oy + b.y * s, r * 0.45, 0, Math.PI * 2);
+    ctx.arc(ox + bx * s, oy + b.y * s, r * 0.45, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
@@ -1682,15 +1728,16 @@ function drawMobaSparks(s, ox, oy) {
     if (p.age > 24) continue;
     keep.push(p);
     const k = 1 - p.age / 24;
+    const sx = mobaX(p.x);
     ctx.globalAlpha = k;
     if (p.text) {
       ctx.fillStyle = "#ffffff";
       ctx.font = "600 13px 'Chakra Petch', sans-serif";
-      ctx.fillText(p.text, ox + p.x * s + 8, oy + p.y * s - p.age);
+      ctx.fillText(p.text, ox + sx * s + 8, oy + p.y * s - p.age);
     }
-    ctx.fillStyle = p.color;
+    ctx.fillStyle = p.side ? mobaC(p.side) : p.color;
     const r = 5 * k + 1;
-    ctx.fillRect(ox + p.x * s - r / 2, oy + p.y * s - r / 2 - p.age / 2, r, r);
+    ctx.fillRect(ox + sx * s - r / 2, oy + p.y * s - r / 2 - p.age / 2, r, r);
     ctx.globalAlpha = 1;
   }
   sparks = keep;
@@ -1701,7 +1748,7 @@ function mobaBeam(s, ox, oy) {
   if (moba.beamLeft > 0) alpha = Math.min(1, moba.beamLeft / 2.5);
   else if (moba.nexusDead && over) alpha = 0.45;
   if (!moba.beam || alpha <= 0) return;
-  const px = ox + moba.beam.x * s;
+  const px = ox + mobaX(moba.beam.x) * s;
   const py = oy + moba.beam.y * s;
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -1711,7 +1758,7 @@ function mobaBeam(s, ox, oy) {
   grad.addColorStop(1, "#ffffff00");
   ctx.fillStyle = grad;
   ctx.fillRect(px - 14, 0, 28, canvas.height);
-  ctx.strokeStyle = MOBA_COLOR[moba.beam.side];
+  ctx.strokeStyle = mobaC(moba.beam.side);
   ctx.lineWidth = 3;
   const rr = (2.5 - moba.beamLeft) * 40 + 10;
   ctx.beginPath();
@@ -1729,11 +1776,15 @@ function mobaBeam(s, ox, oy) {
 
 function syncMoba() {
   const f = moba.curr;
+  const fa = mobaFlip() ? f.b : f.a;
+  const fb = mobaFlip() ? f.a : f.b;
+  const ma = mobaFlip() ? moba.maxB : moba.maxA;
+  const mb = mobaFlip() ? moba.maxA : moba.maxB;
   pillTick.textContent = "tick " + f.t;
-  hpA.style.width = Math.max(0, Math.min(100, (f.a.hp / moba.maxA) * 100)) + "%";
-  hpB.style.width = Math.max(0, Math.min(100, (f.b.hp / moba.maxB) * 100)) + "%";
-  enA.style.width = Math.max(0, Math.min(100, f.a.en)) + "%";
-  enB.style.width = Math.max(0, Math.min(100, f.b.en)) + "%";
+  hpA.style.width = Math.max(0, Math.min(100, (fa.hp / ma) * 100)) + "%";
+  hpB.style.width = Math.max(0, Math.min(100, (fb.hp / mb) * 100)) + "%";
+  enA.style.width = Math.max(0, Math.min(100, fa.en)) + "%";
+  enB.style.width = Math.max(0, Math.min(100, fb.en)) + "%";
   const clock = document.getElementById("arena-clock");
   if (clock) clock.textContent = mobaClock(f.t);
   const compact = document.getElementById("diag-compact");
@@ -1743,7 +1794,7 @@ function syncMoba() {
 function finishMoba() {
   const m = moba.meta || {};
   winner = m.winner || null;
-  const name = winner === "A" ? "Cyan" : winner === "B" ? "Crimson" : null;
+  const name = winner === "A" || winner === "B" ? mobaName(winner) : null;
   const fell = moba.events.some((e) => e.type === "structure" && mobaKey(e.id) === "nexus");
   endTitle.textContent = winner === "DRAW" || !name ? "Draw" : name + " wins";
   const ticks = m.ticks ?? tick;
@@ -1751,7 +1802,7 @@ function finishMoba() {
   endStats.textContent = ticks + " ticks · " + mobaClock(ticks) + " · " + how;
   const econ = document.getElementById("end-econ");
   if (econ) econ.textContent = m.econ ? String(m.econ) : "";
-  pillWinner.textContent = "winner: " + (winner || "DRAW");
+  pillWinner.textContent = "winner: " + (winner === "A" || winner === "B" ? mobaDS(winner) : "DRAW");
   pillState.textContent = "done";
   const live = document.getElementById("moba-live");
   if (live) live.hidden = true;
@@ -1778,7 +1829,7 @@ function mobaRecap() {
     if (e.type === "buy" && e.item === "repair_cell" && (e.side === "A" || e.side === "B")) repairs[e.side] += 1;
   }
   el.innerHTML = "";
-  for (const side of ["A", "B"]) {
+  for (const side of mobaFlip() ? ["B", "A"] : ["A", "B"]) {
     let spent = (MOBA_ITEM_TOTAL.repair_cell || 0) * repairs[side];
     for (const item of builds[side]) spent += MOBA_ITEM_TOTAL[item] || 0;
     const earned = Math.max(0, gold[side] + spent - MOBA_START_GOLD);
@@ -1787,8 +1838,9 @@ function mobaRecap() {
     const head = document.createElement("p");
     head.className = "recap-head";
     const who = document.createElement("span");
-    who.className = "name " + (side === "A" ? "tag-a" : "tag-b");
-    who.textContent = side === "A" ? "CYAN" : "CRIMSON";
+    const local = mobaDS(side) === "A";
+    who.className = "name " + (local ? "tag-a" : "tag-b");
+    who.textContent = local ? "CYAN" : "CRIMSON";
     head.appendChild(who);
     head.appendChild(document.createTextNode(
       " · " + kills[side] + (kills[side] === 1 ? " kill" : " kills") +

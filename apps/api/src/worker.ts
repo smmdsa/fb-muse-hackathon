@@ -153,7 +153,17 @@ async function replay(env: WorkerEnv, id: string): Promise<Response> {
   const cfg = matchMode(match) === "moba" ? DEFAULT_MOBA : undefined;
   const again = fightPolicies(pa, pb, match.seed as string, cfg);
   const replay = buildReplay(pa, pb, match.seed as string, cfg);
-  return json({ stored: match, recomputed: { winner: again.winner, ticks: again.ticks, checksum: again.checksum }, replay, identical: again.checksum === match.checksum, startedAt: match.created_at, now: Date.now() });
+  const agentCard = async (ver: Record<string, unknown> | null, versionId: string) => {
+    if (!ver) {
+      if (versionId === "benchmark-v1") return { name: "BENCHMARK", portrait_url: null };
+      if (versionId.startsWith("bot:")) return { name: versionId.slice(4).toUpperCase(), portrait_url: null };
+      return null;
+    }
+    const row = await env.DB.prepare("SELECT name, portrait_url FROM agents WHERE id = ?").bind(ver.agent_id).first<Record<string, unknown>>();
+    return row ? { name: row.name, portrait_url: row.portrait_url } : null;
+  };
+  const agents = { a: await agentCard(a, match.a_version as string), b: await agentCard(b, match.b_version as string) };
+  return json({ stored: match, recomputed: { winner: again.winner, ticks: again.ticks, checksum: again.checksum }, replay, identical: again.checksum === match.checksum, startedAt: match.created_at, now: Date.now(), agents });
 }
 
 // One settlement writes as one batch. Reads stay ahead; every write below

@@ -138,6 +138,32 @@ function econFor(match, myVersion) {
 }
 
 // One play per settle. The replay must match the stored checksum.
+function localSideOf(match, myVersion) {
+  if (match.b_version === myVersion) return "B";
+  return "A";
+}
+
+function agentDisplayName(card, fallback) {
+  const n = card && card.name ? String(card.name) : fallback;
+  return n.toUpperCase().slice(0, 12);
+}
+
+function perspectiveMeta(match, data, myVersion) {
+  const agents = (data && data.agents) || {};
+  const portraits = {};
+  const names = {};
+  for (const k of ["a", "b"]) {
+    const card = agents[k] || null;
+    names[k] = agentDisplayName(card, k === "a" ? "CYAN" : "CRIMSON");
+    portraits[k] = card && card.portrait_url ? card.portrait_url : null;
+  }
+  return {
+    perspective: localSideOf(match, myVersion),
+    names,
+    portraits,
+  };
+}
+
 async function playSettled(match) {
   if (!match || !match.id) return;
   const r = await arenaCall("GET", `/v1/matches/${match.id}/replay`);
@@ -157,6 +183,7 @@ async function playSettled(match) {
       econ: econFor(match, arenaVersion),
       startedAt: r.data.startedAt || 0,
       serverNow: r.data.now || 0,
+      ...perspectiveMeta(match, r.data, arenaVersion),
     });
   }
 }
@@ -343,6 +370,7 @@ arenaBoot();
       ticks: stored.ticks,
       checksumOk: ok,
       econ,
+      ...perspectiveMeta(stored, r.data, arenaVersion),
     });
   }
 })();
