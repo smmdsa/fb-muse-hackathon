@@ -105,14 +105,14 @@
 <p class="sub forge-status" id="hero-art-status" hidden></p>
 <div class="row" id="breed-row" hidden>
 <label for="hero-name-in">Name</label>
-<input id="hero-name-in" name="hero-name-in" value="" maxlength="60" placeholder="Wasp" />
+<input id="hero-name-in" data-factory-control name="hero-name-in" value="" maxlength="60" placeholder="Wasp" />
 <label for="hero-concept-in">Concept</label>
-<input id="hero-concept-in" name="hero-concept-in" value="" maxlength="280" placeholder="fast striker, kites at range" />
-<button id="breed-btn" class="btn-primary" type="button">Breed hero</button>
+<input id="hero-concept-in" data-factory-control name="hero-concept-in" value="" maxlength="280" placeholder="fast striker, kites at range" />
+<button id="breed-btn" data-factory-control class="btn-primary" type="button">Breed hero</button>
 </div>
 <p class="sub" id="breed-hint">Try: “scarred veteran, rust-red plates” or “sleek scout, azure visor”.</p>
 <p class="sub" id="breed-msg" hidden>Breeding paints the portrait in the house style. No image key on the server means a faceless hero.</p>
-<button id="retry-btn" class="btn-ghost" type="button" hidden>Retry portrait</button>
+<button id="retry-btn" data-factory-control class="btn-ghost" type="button" hidden>Retry portrait</button>
 <div class="forge-cta">
 <div class="next-actions" id="hero-next" hidden>
 <a class="btn-primary" id="hero-next-link" href="./chip.html">Program first chip</a>
@@ -144,6 +144,7 @@
 </div>
 <script src="./ui.js"></script>
 <script src="./tour.js"></script>
+<script src="./factory-cooldown.js"></script>
 <script src="./profile.js"></script>
 </body>
 </html>

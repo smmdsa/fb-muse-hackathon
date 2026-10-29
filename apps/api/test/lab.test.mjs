@@ -81,6 +81,7 @@ describe("long briefs", () => {
   });
 
   it("compiles exactly at the cap and rejects past it", async () => {
+    store.db.prepare("UPDATE ai_cooldowns SET next_allowed_at = 0").run();
     const at = await call("POST", `/v1/agents/${prompter.agentId}/policies/compile`, { prompt: "x".repeat(2000) }, prompter.token);
     assert.equal(at.status, 201);
     const over = await call("POST", `/v1/agents/${prompter.agentId}/policies/compile`, { prompt: "x".repeat(2001) }, prompter.token);

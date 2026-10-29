@@ -9,10 +9,10 @@ import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wa
 import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, battleConfigFor, board, buyItem, cancelTicket, compileAndPublish, claimFtue, createAgent, createTournament, dashboard, deleteVersion, energyFor, energyView, equipItem, evolutionLab, forceDeleteVersion, ftueStatus, getLeader, getTournament, getVersion, installVersion, listTournaments, matchMode, MAX_PROMPT, openTicket, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, renameVersion, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
+import { hasKey } from "@agent-wars/ai-provider";
 
 // Per-route sliding windows. Memory-only; a restart clears history.
 const authHits = new Map<string, number[]>();
-const compileHits = new Map<string, number[]>();
 const queueHits = new Map<string, number[]>();
 const trainHits = new Map<string, number[]>();
 const labHits = new Map<string, number[]>();
@@ -25,6 +25,19 @@ function limited(res: ServerResponse, log: Map<string, number[]>, key: string, w
 }
 
 type Ctx = { store: Store };
+
+function cooldownStatus(ctx: Ctx, leader: string, now = Date.now()) {
+  const row = ctx.store.db.prepare("SELECT next_allowed_at FROM ai_cooldowns WHERE leader_id = ?").get(leader) as { next_allowed_at: number } | undefined;
+  const nextAllowedAt = row?.next_allowed_at ?? 0;
+  return { nextAllowedAt, retryAfterSeconds: Math.max(0, Math.ceil((nextAllowedAt - now) / 1000)) };
+}
+function reserveAi(ctx: Ctx, res: ServerResponse, leader: string): boolean {
+  const now = Date.now();
+  const row = ctx.store.db.prepare("INSERT INTO ai_cooldowns (leader_id, next_allowed_at) VALUES (?, ?) ON CONFLICT(leader_id) DO UPDATE SET next_allowed_at = excluded.next_allowed_at WHERE ai_cooldowns.next_allowed_at <= ? RETURNING next_allowed_at").get(leader, now + 300_000, now);
+  if (row) return true;
+  send(res, 429, { error: "The AI factory is recharging. Your next build will be ready soon.", ...cooldownStatus(ctx, leader, now) });
+  return false;
+}
 
 function send(res: ServerResponse, code: number, body: unknown): void {
   const text = JSON.stringify(body);
@@ -157,6 +170,10 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         send(res, 401, { error: "bearer token is required: call POST /v1/auth/session first" });
         return;
       }
+      if (req.method === "GET" && url.pathname === "/v1/ai/cooldown") {
+        send(res, 200, cooldownStatus(ctx, me.id as string));
+        return;
+      }
       if (req.method === "GET" && url.pathname === "/v1/me") {
         const auto = autobattleTick(ctx.store, me.id as string);
         const agent = ctx.store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(me.id as string);
@@ -191,6 +208,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         }
         const name = typeof body.name === "string" ? body.name.slice(0, 60) : "";
         const concept = typeof body.concept === "string" ? body.concept.slice(0, 280) : "";
+        if (hasKey("portrait", process.env) && !reserveAi(ctx, res, me.id as string)) return;
         const bred = await createAgent(ctx.store, process.env, { leaderId: me.id as string, name, concept });
         send(res, 201, { agentId: bred.agentId, portraitUrl: bred.portraitUrl, portraitStatus: bred.portraitStatus, error: bred.error });
         return;
@@ -198,6 +216,9 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
       const retryMatch = req.method === "POST" && /^\/v1\/agents\/[^/]+\/portrait\/retry$/.test(url.pathname);
       if (retryMatch) {
         const agentId = url.pathname.split("/")[3];
+        const target = ctx.store.db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as Record<string, unknown> | undefined;
+        if (!target || target.leader_id !== me.id) { send(res, 404, { error: "agent not found for this leader" }); return; }
+        if (target.portrait_status !== "ready" && hasKey("portrait", process.env) && !reserveAi(ctx, res, me.id as string)) return;
         try {
           send(res, 200, await retryPortrait(ctx.store, process.env, { agentId, leaderId: me.id as string }));
         } catch (err) {
@@ -217,7 +238,6 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
       }
       const compileMatch = req.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/compile$/.test(url.pathname);
       if (compileMatch) {
-        if (limited(res, compileHits, me.id as string, 60_000, 6)) return;
         const agentId = url.pathname.split("/")[3];
         const agent = ctx.store.db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as Record<string, unknown> | null;
         if (!agent || agent.leader_id !== me.id) {
@@ -225,7 +245,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           return;
         }
         const prompt = typeof body.prompt === "string" ? body.prompt : "";
-        if (!prompt) {
+        if (!prompt.trim()) {
           send(res, 400, { error: "prompt is required" });
           return;
         }
@@ -233,6 +253,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           send(res, 400, { error: `prompt must stay under ${MAX_PROMPT} characters` });
           return;
         }
+        if (!reserveAi(ctx, res, me.id as string)) return;
         const out = await compileAndPublish(ctx.store, process.env, { agentId, prompt });
         if (!out.versionId) {
           send(res, 422, { error: "draft failed validation", errors: out.errors, provider: out.provider, isMock: out.isMock, tokens: out.tokens, latencyMs: out.latencyMs });
@@ -323,6 +344,9 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
       const analysisMatch = req.method === "POST" && /^\/v1\/battles\/[^/]+\/analysis$/.test(url.pathname);
       if (analysisMatch) {
         if (limited(res, analysisHits, me.id as string, 60_000, 10)) return;
+        const match = ctx.store.db.prepare("SELECT id FROM matches WHERE id = ?").get(decodeURIComponent(url.pathname.split("/")[3]));
+        if (!match) { send(res, 404, { error: "unknown match" }); return; }
+        if (hasKey("compile", process.env) && !reserveAi(ctx, res, me.id as string)) return;
         try {
           send(res, 200, await analyzeBattle(ctx.store, process.env, { matchId: decodeURIComponent(url.pathname.split("/")[3]) }));
         } catch (err) {
@@ -331,6 +355,10 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         return;
       }
       if (req.method === "POST" && url.pathname === "/v1/lab/ab") {
+        if (hasKey("compile", process.env)) {
+          send(res, 503, { error: "Evolution Lab is paused while the factory cooldown is active. Compare saved chips in a future update." });
+          return;
+        }
         if (limited(res, labHits, me.id as string, 60_000, 6)) return;
         const agentId = typeof body.agentId === "string" ? body.agentId : "";
         const promptA = typeof body.promptA === "string" ? body.promptA : "";

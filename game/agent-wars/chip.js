@@ -13,11 +13,13 @@ function headers() {
 }
 
 async function call(method, path, body) {
-  const res = await fetch(path, {
+  window.factoryCooldown?.start(method, path);
+  let res;
+  try { res = await fetch(path, {
     method,
     headers: headers(),
     body: body ? JSON.stringify(body) : undefined,
-  });
+  }); } finally { await window.factoryCooldown?.finish(method, path); }
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
 }
@@ -337,6 +339,9 @@ async function boot() {
     return;
   }
   agentId = me.data.agent.id;
+  window.factoryAgentReady = true;
+  $("compile-btn").disabled = false;
+  window.factoryCooldown?.render();
   show($("train-card"), true);
   show($("lab-card"), true);
   await refresh();
