@@ -1,6 +1,6 @@
 # Revisión de la arena MOBA — 2026-10-29
 
-Base revisada: `63569a00f404f381ccdf2f5e2650061293527ec8` en `feat/agent-wars-s1`. Investigación de código; no incluye playtest ni cambios de motor.
+Base revisada: `main` en `291a0eb1670c72120059b3cac9ed49046ef5c6f6`. El commit `63569a00f404f381ccdf2f5e2650061293527ec8` revisado tiene exactamente el mismo árbol de archivos. Investigación de código; no incluye playtest ni cambios de motor.
 
 ## Estado
 
