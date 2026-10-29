@@ -19,7 +19,6 @@ import { checkLimit } from "./ids.ts";
 const authHits = new Map<string, number[]>();
 const queueHits = new Map<string, number[]>();
 const trainHits = new Map<string, number[]>();
-const labHits = new Map<string, number[]>();
 const analysisHits = new Map<string, number[]>();
 
 function limited(log: Map<string, number[]>, key: string, windowMs: number, max: number): boolean {
@@ -1194,65 +1193,6 @@ export default {
       };
       const explanation = await explainerFromEnv(env).explainBattle(telemetry);
       return json({ ...telemetry, explanation }, 200);
-    }
-    if (request.method === "POST" && url.pathname === "/v1/lab/ab") {
-      if (hasKey("compile", env)) return json({ error: "Evolution Lab is paused while the factory cooldown is active. Compare saved chips in a future update." }, 503);
-      if (limited(labHits, me.id as string, 60_000, 6)) return json({ error: "rate limited, retry later" }, 429);
-      const body = await readBody(request);
-      if (body === null) return json({ error: "bad json" }, 400);
-      const agentId = typeof body.agentId === "string" ? body.agentId : "";
-      const promptA = typeof body.promptA === "string" ? body.promptA : "";
-      const promptB = typeof body.promptB === "string" ? body.promptB : "";
-      const bouts = Math.min(20, Math.max(4, Math.floor(typeof body.bouts === "number" ? body.bouts : 10)));
-      if (!agentId || !promptA || !promptB) return json({ error: "agentId, promptA, and promptB are required" }, 400);
-      if (promptA.trim().length > MAX_PROMPT || promptB.trim().length > MAX_PROMPT) {
-        return json({ error: `each prompt must stay under ${MAX_PROMPT} characters` }, 400);
-      }
-      const agent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
-      if (!agent || agent.leader_id !== me.id) return json({ error: "agent not found for this leader" }, 404);
-      const runId = mintId("lab");
-      const drafts: string[] = [];
-      for (const prompt of [promptA.trim(), promptB.trim()]) {
-        const versionId = mintId("v");
-        const compiled = await providerFromEnv(env).compileStrategy({ prompt, agentVersionId: versionId });
-        if (!compiled.policy) return json({ error: `draft failed: ${compiled.errors.join("; ")}` }, 422);
-        const sha = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(compiled.policy)));
-        const hex = [...new Uint8Array(sha)].map((x) => x.toString(16).padStart(2, "0")).join("");
-        await env.DB.prepare(
-          "INSERT INTO versions (id, agent_id, policy_json, sha, created_at, provider, is_mock, tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ).bind(versionId, agentId, JSON.stringify(compiled.policy), hex, Date.now(), compiled.provider, compiled.isMock ? 1 : 0, compiled.promptTokens, compiled.latencyMs).run();
-        drafts.push(versionId);
-      }
-      const policies: AgentPolicy[] = [];
-      for (const draft of drafts) {
-        const v = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(draft).first<Record<string, unknown>>();
-        policies.push(JSON.parse((v as Record<string, unknown>).policy_json as string) as AgentPolicy);
-      }
-      let winsA = 0;
-      let winsB = 0;
-      let drawsA = 0;
-      let drawsB = 0;
-      const now = Date.now();
-      // The lab keeps the duel sim. Its bouts stay small and fast.
-      for (let i = 0; i < bouts; i += 1) {
-        const outA = fightPolicies(policies[0], BENCH_POLICY, `${runId}-a-${i}`);
-        await env.DB.prepare(
-          "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'duel')",
-        ).bind(`${runId}-a-${i}`, `${runId}-a-${i}`, drafts[0], "benchmark-v1", outA.winner, outA.ticks, outA.checksum, now, JSON.stringify({ a: outA.chipsA, b: outA.chipsB })).run();
-        if (outA.winner === "A") winsA += 1;
-        else if (outA.winner === "DRAW") drawsA += 1;
-        const outB = fightPolicies(policies[1], BENCH_POLICY, `${runId}-b-${i}`);
-        await env.DB.prepare(
-          "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'duel')",
-        ).bind(`${runId}-b-${i}`, `${runId}-b-${i}`, drafts[1], "benchmark-v1", outB.winner, outB.ticks, outB.checksum, now, JSON.stringify({ a: outB.chipsA, b: outB.chipsB })).run();
-        if (outB.winner === "A") winsB += 1;
-        else if (outB.winner === "DRAW") drawsB += 1;
-      }
-      const decisive = winsA + winsB;
-      let verdict = "too close to call";
-      if (bouts < 10) verdict = "sample too small — run 10 or more bouts before trusting the gap";
-      else if (decisive > 0 && Math.max(winsA, winsB) / decisive >= 0.7) verdict = winsA > winsB ? "A leads" : "B leads";
-      return json({ runId, versionA: drafts[0], versionB: drafts[1], bouts, winsA, winsB, drawsA, drawsB, verdict }, 201);
     }
     if (request.method === "POST" && url.pathname === "/v1/matches/ranked") {
       const body = await readBody(request);

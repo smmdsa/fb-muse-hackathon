@@ -80,6 +80,16 @@ function valueOf(operand: Leaf["operand"], obs: Observation): number | boolean |
     case "slotsFree": return obs.slotsFree ?? null;
     case "structLead": return obs.structLead ?? null;
     case "foeAlive": return obs.foeAlive;
+    case "inFoeTowerRange": return obs.inFoeTowerRange ?? null;
+    case "foeTowerTargetsMe": return obs.foeTowerTargetsMe ?? null;
+    case "foeTowerTargetsAllyMinion": return obs.foeTowerTargetsAllyMinion ?? null;
+    case "allyMinionsUnderFoeTower": return obs.allyMinionsUnderFoeTower ?? null;
+    case "nearAllyMinionHp": return obs.nearAllyMinionHp ?? null;
+    case "nearFoeMinionHp": return obs.nearFoeMinionHp ?? null;
+    case "killableFoeMinionsInRange": return obs.killableFoeMinionsInRange ?? null;
+    case "nextWaveSeconds": return obs.nextWaveSeconds ?? null;
+    case "distOwnBase": return obs.distOwnBase ?? null;
+    case "ownStructureThreatened": return obs.ownStructureThreatened ?? null;
   }
 }
 

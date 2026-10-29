@@ -6,7 +6,7 @@ import { timingSafeEqual } from "node:crypto";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, battleConfigFor, board, buyItem, cancelTicket, compileAndPublish, claimFtue, createAgent, createTournament, dashboard, deleteVersion, energyFor, energyView, equipItem, evolutionLab, forceDeleteVersion, ftueStatus, getLeader, getTournament, getVersion, installVersion, listTournaments, matchMode, MAX_PROMPT, openTicket, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, renameVersion, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
+import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, battleConfigFor, board, buyItem, cancelTicket, compileAndPublish, claimFtue, createAgent, createTournament, dashboard, deleteVersion, energyFor, energyView, equipItem, forceDeleteVersion, ftueStatus, getLeader, getTournament, getVersion, installVersion, listTournaments, matchMode, MAX_PROMPT, openTicket, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, renameVersion, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 import { hasKey } from "@agent-wars/ai-provider";
@@ -15,7 +15,6 @@ import { hasKey } from "@agent-wars/ai-provider";
 const authHits = new Map<string, number[]>();
 const queueHits = new Map<string, number[]>();
 const trainHits = new Map<string, number[]>();
-const labHits = new Map<string, number[]>();
 const analysisHits = new Map<string, number[]>();
 
 function limited(res: ServerResponse, log: Map<string, number[]>, key: string, windowMs: number, max: number): boolean {
@@ -351,28 +350,6 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           send(res, 200, await analyzeBattle(ctx.store, process.env, { matchId: decodeURIComponent(url.pathname.split("/")[3]) }));
         } catch (err) {
           send(res, 404, { error: (err as Error).message });
-        }
-        return;
-      }
-      if (req.method === "POST" && url.pathname === "/v1/lab/ab") {
-        if (hasKey("compile", process.env)) {
-          send(res, 503, { error: "Evolution Lab is paused while the factory cooldown is active. Compare saved chips in a future update." });
-          return;
-        }
-        if (limited(res, labHits, me.id as string, 60_000, 6)) return;
-        const agentId = typeof body.agentId === "string" ? body.agentId : "";
-        const promptA = typeof body.promptA === "string" ? body.promptA : "";
-        const promptB = typeof body.promptB === "string" ? body.promptB : "";
-        const bouts = typeof body.bouts === "number" ? body.bouts : 10;
-        if (!agentId || !promptA || !promptB) {
-          send(res, 400, { error: "agentId, promptA, and promptB are required" });
-          return;
-        }
-        try {
-          send(res, 201, await evolutionLab(ctx.store, process.env, { leaderId: me.id as string, agentId, promptA, promptB, bouts }));
-        } catch (err) {
-          const msg = (err as Error).message;
-          send(res, /not found|required/.test(msg) ? 404 : 422, { error: msg });
         }
         return;
       }

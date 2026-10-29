@@ -257,11 +257,6 @@ describe("worker writes", () => {
     assert.equal(an.json.checksum, bout.json.checksum);
     assert.ok(an.json.explanation.text.includes(bout.json.checksum));
     assert.equal(an.json.explanation.grounded, true);
-    const lab = await call("POST", "/v1/lab/ab", { agentId: aa.json.agentId, promptA: "rush them down up close", promptB: "hold the center patiently", bouts: 10 }, sa.json.token);
-    assert.equal(lab.status, 201);
-    assert.equal(lab.json.bouts, 10);
-    assert.equal(lab.json.winsA + lab.json.drawsA <= 10, true);
-    assert.ok(["A leads", "B leads", "too close to call"].includes(lab.json.verdict));
     const ghostAn = await call("POST", "/v1/battles/ghost/analysis", {}, sa.json.token);
     assert.equal(ghostAn.status, 404);
     const ADMIN = { "x-admin-key": "test-admin" };
@@ -296,8 +291,6 @@ describe("worker writes", () => {
     assert.equal(jump.status, 422);
     const over = await call("POST", `/v1/agents/${aa.json.agentId}/policies/compile`, { prompt: "x".repeat(2001) }, sa.json.token);
     assert.equal(over.status, 400);
-    const overLab = await call("POST", "/v1/lab/ab", { agentId: aa.json.agentId, promptA: "x".repeat(2001), promptB: "ok brief" }, sa.json.token);
-    assert.equal(overLab.status, 400);
     db.prepare("UPDATE ai_cooldowns SET next_allowed_at = 0").run();
     const spare = await call("POST", `/v1/agents/${aa.json.agentId}/policies/compile`, { prompt: "hold the center patiently" }, sa.json.token);
     assert.equal(spare.status, 201);

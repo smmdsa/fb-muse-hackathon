@@ -44,7 +44,7 @@
     render();
   }
   function aiPath(method, path) {
-    return method === 'POST' && (path === '/v1/agents' || path === '/v1/lab/ab' || /\/policies\/compile$|\/portrait\/retry$|\/analysis$/.test(path));
+    return method === 'POST' && (path === '/v1/agents' || /\/policies\/compile$|\/portrait\/retry$|\/analysis$/.test(path));
   }
   window.factoryCooldown = {
     start(method, path) { if (aiPath(method, path)) { busy = true; render(); } },
