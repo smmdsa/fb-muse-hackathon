@@ -67,7 +67,7 @@ const AI_COOLDOWN_MS = 300_000;
 async function cooldownStatus(env: WorkerEnv, leader: string, now = Date.now()) {
   const row = await env.DB.prepare("SELECT next_allowed_at FROM ai_cooldowns WHERE leader_id = ?").bind(leader).first<{ next_allowed_at: number }>();
   const nextAllowedAt = row?.next_allowed_at ?? 0;
-  return { nextAllowedAt, retryAfterSeconds: Math.max(0, Math.ceil((nextAllowedAt - now) / 1000)) };
+  return { nextAllowedAt, retryAfterSeconds: Math.max(0, Math.ceil((nextAllowedAt - now) / 1000)), now };
 }
 async function reserveAi(env: WorkerEnv, leader: string): Promise<Response | null> {
   const now = Date.now();

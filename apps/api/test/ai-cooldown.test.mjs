@@ -27,6 +27,7 @@ describe("AI factory cooldown", () => {
     assert.equal(second.status, 429);
     const body = await second.json();
     assert.ok(body.retryAfterSeconds >= 299 && body.retryAfterSeconds <= 300);
+    assert.equal(typeof body.now, "number");
     const status = await entry.fetch(req("/v1/ai/cooldown"), env);
     assert.ok((await status.json()).retryAfterSeconds > 0);
   });
