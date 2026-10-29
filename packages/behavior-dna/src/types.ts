@@ -10,10 +10,10 @@ export type MoveIntent =
   | "PUSH"
   | "FARM"
   | "DEFEND"
-  | "WAIT";
+  | "WAIT" | "CONTEST_OVERSEER";
 
 export type AbilityIntent = "AIM" | "FIRE" | "DASH" | "SHIELD";
-export type TargetIntent = "AUTO" | "FOE" | "MINION" | "STRUCTURE" | "NONE" | "LAST_HIT";
+export type TargetIntent = "AUTO" | "FOE" | "MINION" | "STRUCTURE" | "NONE" | "LAST_HIT" | "OVERSEER";
 
 export type Operand =
   | "ownHpPct"
@@ -50,7 +50,7 @@ export type Operand =
   | "killableFoeMinionsInRange"
   | "nextWaveSeconds"
   | "distOwnBase"
-  | "ownStructureThreatened";
+  | "ownStructureThreatened" | "overseerAlive" | "overseerHpPct" | "overseerDist" | "overseerSpawnSeconds" | "ownOverseerBuffSeconds" | "foeOverseerBuffSeconds";
 
 export type NumOp = "gt" | "gte" | "lt" | "lte";
 
@@ -125,6 +125,12 @@ export type Observation = {
   nextWaveSeconds?: number;
   distOwnBase?: number | null;
   ownStructureThreatened?: boolean;
+  overseerAlive?: boolean;
+  overseerHpPct?: number | null;
+  overseerDist?: number;
+  overseerSpawnSeconds?: number;
+  ownOverseerBuffSeconds?: number;
+  foeOverseerBuffSeconds?: number;
 };
 
 export type Intents = {

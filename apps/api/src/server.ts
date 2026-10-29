@@ -546,7 +546,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         }
         // The row names its sim. MOBA rows re-simulate as MOBA and
         // serve v2 replays. Duel rows keep the v1 path untouched.
-        const cfg = battleConfigFor(matchMode(match));
+        const cfg = battleConfigFor(matchMode(match), match.mode);
         const again = fightPolicies(a.policy, pb, match.seed as string, cfg);
         const replay = buildReplay(a.policy, pb, match.seed as string, cfg);
         const agentCard = (ver: { agentId: string } | null, versionId: string) => {

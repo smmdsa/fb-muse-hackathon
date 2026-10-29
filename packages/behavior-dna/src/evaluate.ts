@@ -90,6 +90,12 @@ function valueOf(operand: Leaf["operand"], obs: Observation): number | boolean |
     case "nextWaveSeconds": return obs.nextWaveSeconds ?? null;
     case "distOwnBase": return obs.distOwnBase ?? null;
     case "ownStructureThreatened": return obs.ownStructureThreatened ?? null;
+    case "overseerAlive": return obs.overseerAlive ?? null;
+    case "overseerHpPct": return obs.overseerHpPct ?? null;
+    case "overseerDist": return obs.overseerDist ?? null;
+    case "overseerSpawnSeconds": return obs.overseerSpawnSeconds ?? null;
+    case "ownOverseerBuffSeconds": return obs.ownOverseerBuffSeconds ?? null;
+    case "foeOverseerBuffSeconds": return obs.foeOverseerBuffSeconds ?? null;
   }
 }
 

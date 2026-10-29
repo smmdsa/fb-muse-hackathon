@@ -90,6 +90,7 @@ export type BattleConfig = {
   agent: AgentConfig;
   mode?: BattleMode;
   autoBuy?: boolean;
+  rulesetVersion?: 1 | 2;
 };
 
 export type BattleState = {
@@ -154,7 +155,16 @@ export type MobaEvent =
   | { t: number; type: "combine"; side: AgentId; item: string }
   | { t: number; type: "kill"; side: AgentId }
   | { t: number; type: "respawn"; side: AgentId }
-  | { t: number; type: "structure"; side: AgentId; id: StructureId };
+  | { t: number; type: "structure"; side: AgentId; id: StructureId }
+  | { t: number; type: "overseer-spawn" }
+  | { t: number; type: "overseer-hit"; side: AgentId; damage: number }
+  | { t: number; type: "overseer-defeated"; side: AgentId };
+
+export type OverseerState = {
+  x: number; y: number; hp: number; maxHp: number; alive: boolean;
+  spawnTick: number; lastAttackTick: number;
+  buffUntil: Record<AgentId, number>;
+};
 
 export type DamageEvent = {
   t: number;
@@ -167,6 +177,7 @@ export type DamageEvent = {
 };
 
 export type MobaState = {
+  overseer?: OverseerState;
   minions: MinionState[];
   structures: StructureState[];
   nextMinionId: number;
