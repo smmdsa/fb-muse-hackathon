@@ -1016,6 +1016,10 @@ function playMobaReplay(replay, meta) {
   const unit = document.getElementById("arena-clock-unit");
   if (unit) unit.textContent = "";
   note("MOBA replay loads: " + frames.length + " frames at " + replaySpeed + "x");
+  if (moba.curr && moba.curr.t < 1800) {
+    mobaFeed("First minions spawn at 1:00", "");
+    note("First wave spawns at 1:00");
+  }
   pauseBtn.disabled = false;
   pauseBtn.textContent = "Pause";
   mobaReveal(0);
@@ -1246,6 +1250,22 @@ function mobaReveal(until, silent) {
   }
 }
 
+// Kills and deaths read live from kill events up to the current
+// frame. No counters, so seeks and join-live stay exact.
+function mobaKD() {
+  const k = { A: 0, B: 0 };
+  const d = { A: 0, B: 0 };
+  const until = moba.curr ? moba.curr.t : 0;
+  for (const e of moba.events) {
+    if (e.t > until) break;
+    if (e.type !== "kill") continue;
+    if (e.side !== "A" && e.side !== "B") continue;
+    d[e.side] += 1;
+    k[e.side === "A" ? "B" : "A"] += 1;
+  }
+  return { k, d };
+}
+
 function mobaSyncHud() {
   const f = moba.curr;
   if (!f) return;
@@ -1257,6 +1277,13 @@ function mobaSyncHud() {
   };
   set("gold-a", (fa.gold || 0) + "g");
   set("gold-b", (fb.gold || 0) + "g");
+  const kd = mobaKD();
+  const ka = mobaFlip() ? kd.k.B : kd.k.A;
+  const da = mobaFlip() ? kd.d.B : kd.d.A;
+  const kb = mobaFlip() ? kd.k.A : kd.k.B;
+  const db = mobaFlip() ? kd.d.A : kd.d.B;
+  set("kd-a", "K " + ka + " · D " + da);
+  set("kd-b", "K " + kb + " · D " + db);
   const ra = document.getElementById("respawn-a");
   if (ra) {
     ra.hidden = fa.alive;
@@ -1794,9 +1821,12 @@ function syncMoba() {
 function finishMoba() {
   const m = moba.meta || {};
   winner = m.winner || null;
-  const name = winner === "A" || winner === "B" ? mobaName(winner) : null;
+  const wnames = (moba.meta && moba.meta.names) || {};
+  const wname = winner === "A" || winner === "B"
+    ? (wnames[winner.toLowerCase()] || mobaName(winner))
+    : null;
   const fell = moba.events.some((e) => e.type === "structure" && mobaKey(e.id) === "nexus");
-  endTitle.textContent = winner === "DRAW" || !name ? "Draw" : name + " wins";
+  endTitle.textContent = winner === "DRAW" || !wname ? "Draw" : wname + " wins";
   const ticks = m.ticks ?? tick;
   const how = fell ? "Nexus destroyed" : "time cap tiebreak";
   endStats.textContent = ticks + " ticks · " + mobaClock(ticks) + " · " + how;
@@ -1829,6 +1859,7 @@ function mobaRecap() {
     if (e.type === "buy" && e.item === "repair_cell" && (e.side === "A" || e.side === "B")) repairs[e.side] += 1;
   }
   el.innerHTML = "";
+  const rnames = (moba.meta && moba.meta.names) || {};
   for (const side of mobaFlip() ? ["B", "A"] : ["A", "B"]) {
     let spent = (MOBA_ITEM_TOTAL.repair_cell || 0) * repairs[side];
     for (const item of builds[side]) spent += MOBA_ITEM_TOTAL[item] || 0;
@@ -1840,7 +1871,7 @@ function mobaRecap() {
     const who = document.createElement("span");
     const local = mobaDS(side) === "A";
     who.className = "name " + (local ? "tag-a" : "tag-b");
-    who.textContent = local ? "CYAN" : "CRIMSON";
+    who.textContent = rnames[side.toLowerCase()] || (local ? "CYAN" : "CRIMSON");
     head.appendChild(who);
     head.appendChild(document.createTextNode(
       " · " + kills[side] + (kills[side] === 1 ? " kill" : " kills") +
@@ -1849,7 +1880,7 @@ function mobaRecap() {
     row.appendChild(head);
     const icons = document.createElement("div");
     icons.className = "builds recap-icons";
-    icons.setAttribute("aria-label", (side === "A" ? "Cyan" : "Crimson") + " final build");
+    icons.setAttribute("aria-label", who.textContent + " final build");
     for (const item of builds[side]) {
       const img = document.createElement("img");
       img.src = mobaIcon(item);
