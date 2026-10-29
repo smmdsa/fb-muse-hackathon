@@ -34,6 +34,7 @@ function toIntents(rule: BehaviorRule): Intents {
     shield: rule.shield === true,
     buy: rule.buy ?? null,
     ruleId: rule.id,
+    ...(rule.target === undefined ? {} : { target: rule.target }),
   };
 }
 
@@ -79,6 +80,22 @@ function valueOf(operand: Leaf["operand"], obs: Observation): number | boolean |
     case "slotsFree": return obs.slotsFree ?? null;
     case "structLead": return obs.structLead ?? null;
     case "foeAlive": return obs.foeAlive;
+    case "inFoeTowerRange": return obs.inFoeTowerRange ?? null;
+    case "foeTowerTargetsMe": return obs.foeTowerTargetsMe ?? null;
+    case "foeTowerTargetsAllyMinion": return obs.foeTowerTargetsAllyMinion ?? null;
+    case "allyMinionsUnderFoeTower": return obs.allyMinionsUnderFoeTower ?? null;
+    case "nearAllyMinionHp": return obs.nearAllyMinionHp ?? null;
+    case "nearFoeMinionHp": return obs.nearFoeMinionHp ?? null;
+    case "killableFoeMinionsInRange": return obs.killableFoeMinionsInRange ?? null;
+    case "nextWaveSeconds": return obs.nextWaveSeconds ?? null;
+    case "distOwnBase": return obs.distOwnBase ?? null;
+    case "ownStructureThreatened": return obs.ownStructureThreatened ?? null;
+    case "overseerAlive": return obs.overseerAlive ?? null;
+    case "overseerHpPct": return obs.overseerHpPct ?? null;
+    case "overseerDist": return obs.overseerDist ?? null;
+    case "overseerSpawnSeconds": return obs.overseerSpawnSeconds ?? null;
+    case "ownOverseerBuffSeconds": return obs.ownOverseerBuffSeconds ?? null;
+    case "foeOverseerBuffSeconds": return obs.foeOverseerBuffSeconds ?? null;
   }
 }
 

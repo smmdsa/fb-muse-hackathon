@@ -9,9 +9,11 @@ export type MoveIntent =
   | "CAPTURE"
   | "PUSH"
   | "FARM"
-  | "DEFEND";
+  | "DEFEND"
+  | "WAIT" | "CONTEST_OVERSEER";
 
 export type AbilityIntent = "AIM" | "FIRE" | "DASH" | "SHIELD";
+export type TargetIntent = "AUTO" | "FOE" | "MINION" | "STRUCTURE" | "NONE" | "LAST_HIT" | "OVERSEER";
 
 export type Operand =
   | "ownHpPct"
@@ -38,7 +40,17 @@ export type Operand =
   | "buildValue"
   | "slotsFree"
   | "structLead"
-  | "foeAlive";
+  | "foeAlive"
+  | "inFoeTowerRange"
+  | "foeTowerTargetsMe"
+  | "foeTowerTargetsAllyMinion"
+  | "allyMinionsUnderFoeTower"
+  | "nearAllyMinionHp"
+  | "nearFoeMinionHp"
+  | "killableFoeMinionsInRange"
+  | "nextWaveSeconds"
+  | "distOwnBase"
+  | "ownStructureThreatened" | "overseerAlive" | "overseerHpPct" | "overseerDist" | "overseerSpawnSeconds" | "ownOverseerBuffSeconds" | "foeOverseerBuffSeconds";
 
 export type NumOp = "gt" | "gte" | "lt" | "lte";
 
@@ -60,6 +72,7 @@ export type BehaviorRule = {
   dash?: boolean;
   shield?: boolean;
   buy?: string;
+  target?: TargetIntent;
 };
 
 export type DnaTraits = {
@@ -102,6 +115,22 @@ export type Observation = {
   slotsFree?: number;
   structLead?: number;
   foeAlive: boolean;
+  inFoeTowerRange?: boolean;
+  foeTowerTargetsMe?: boolean;
+  foeTowerTargetsAllyMinion?: boolean;
+  allyMinionsUnderFoeTower?: number;
+  nearAllyMinionHp?: number;
+  nearFoeMinionHp?: number;
+  killableFoeMinionsInRange?: number;
+  nextWaveSeconds?: number;
+  distOwnBase?: number | null;
+  ownStructureThreatened?: boolean;
+  overseerAlive?: boolean;
+  overseerHpPct?: number | null;
+  overseerDist?: number;
+  overseerSpawnSeconds?: number;
+  ownOverseerBuffSeconds?: number;
+  foeOverseerBuffSeconds?: number;
 };
 
 export type Intents = {
@@ -111,4 +140,5 @@ export type Intents = {
   shield: boolean;
   buy: string | null;
   ruleId: string;
+  target?: TargetIntent;
 };

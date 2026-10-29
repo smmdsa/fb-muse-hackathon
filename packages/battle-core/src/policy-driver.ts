@@ -1,9 +1,9 @@
 // Policy driver. Compiled DNA steers one robot for one tick.
 
 import { FALLBACK_RULE_ID, evaluate } from "@agent-wars/behavior-dna";
-import type { AgentPolicy, Observation } from "@agent-wars/behavior-dna";
+import type { AgentPolicy, Observation, TargetIntent } from "@agent-wars/behavior-dna";
 import { BASE_ITEMS, MAX_SLOTS, RECIPE_BY_ID } from "./items.ts";
-import { DEFAULT_MOBA, LANE_Y, MINION_RADIUS, ROBOT_RANGE, STRUCTURES, isVulnerable, robotAD, segCircle } from "./moba.ts";
+import { DEFAULT_MOBA, LANE_Y, MINION_RADIUS, ROBOT_RANGE, TOWER_RANGE, OVERSEER_RADIUS, WAVE_FIRST_TICK, WAVE_EVERY_TICKS, STRUCTURES, armorMult, isVulnerable, robotAD, segCircle } from "./moba.ts";
 import { checksum, createBattle, DEFAULT_BATTLE, stepBattle } from "./simulation.ts";
 import { segmentHitsBox } from "./world.ts";
 import type { AgentAction, AgentId, BattleConfig, BattleState, MinionState, MobaEvent, StructureState, Vec2 } from "./types.ts";
@@ -113,6 +113,7 @@ export type ReplayV2Frame = {
   minions: ReplayV2Minion[];
   structs: number[] | null;
   builds: { a: string[]; b: string[] } | null;
+  overseer?: { x: number; y: number; hp: number; maxHp: number; alive: boolean; spawnTick: number; buffUntil: { A: number; B: number } };
 };
 
 export type ReplayV2 = {
@@ -124,6 +125,8 @@ export type ReplayV2 = {
   timeSec: number;
   checksum: string;
   structures: string[];
+  structurePositions?: Record<string, Vec2>;
+  rulesetVersion?: number;
   frames: ReplayV2Frame[];
   events: MobaEvent[];
 };
@@ -209,7 +212,9 @@ function snapMoba(
   const minions = (state.moba?.minions ?? [])
     .filter((m) => m.alive)
     .map((m) => ({ id: m.id, side: m.side, kind: m.kind, x: r2(m.pos.x), y: r2(m.pos.y), hp: Math.floor(m.hp) }));
-  return { t: state.tick, a: read("A"), b: read("B"), minions, structs, builds };
+  const o = state.moba?.overseer;
+  return { t: state.tick, a: read("A"), b: read("B"), minions, structs, builds,
+    ...(o ? { overseer: { x: o.x, y: o.y, hp: o.hp, maxHp: o.maxHp, alive: o.alive, spawnTick: o.spawnTick, buffUntil: { ...o.buffUntil } } } : {}) };
 }
 
 // The builder records a versioned MOBA replay. Same seed, same bytes.
@@ -264,6 +269,7 @@ export function buildMobaReplay(
     timeSec: r2(state.time),
     checksum: checksum(state),
     structures: [...STRUCTURES],
+    ...(cfg.rulesetVersion === 2 ? { rulesetVersion: 2, structurePositions: Object.fromEntries((state.moba?.structures ?? []).map(s => [s.id, { ...s.pos }])) } : {}),
     frames,
     events: [...(state.moba?.log ?? [])],
   };
@@ -427,17 +433,34 @@ export function observe(
   let nearFoe = 0;
   let nearAlly = 0;
   let distFoeMinion: number | null = null;
+  let allyHp = 0;
+  let foeHp = 0;
+  let killableInRange = 0;
   for (const m of state.moba?.minions ?? []) {
     if (!m.alive) continue;
     const d = Math.hypot(m.pos.x - a.pos.x, m.pos.y - a.pos.y);
     if (m.side === foeSide) {
-      if (d <= 6.0) nearFoe += 1;
+      if (d <= 6.0) { nearFoe += 1; foeHp += m.hp; }
+      const ad = robotAD(a.items ?? []) * (state.moba?.overseer && state.tick + 1 < state.moba.overseer.buffUntil[me] ? 1.2 : 1);
+      if (d - MINION_RADIUS <= ROBOT_RANGE && m.hp <= ad * (cfg.rulesetVersion === 2 ? 1 : armorMult(30)) &&
+          !cfg.world.covers.some(box => segmentHitsBox(a.pos.x, a.pos.y, m.pos.x, m.pos.y, box))) killableInRange += 1;
       if (distFoeMinion === null || d < distFoeMinion) distFoeMinion = d;
     } else if (d <= 6.0) {
-      nearAlly += 1;
+      nearAlly += 1; allyHp += m.hp;
     }
   }
   const items = a.items ?? [];
+  const structures = state.moba?.structures ?? [];
+  const foeTowers = structures.filter(s => s.side === foeSide && s.alive && (s.kind === "tower" || s.kind === "nexus_turret"));
+  const nearestTower = foeTowers.reduce<StructureState | null>((best, s) => !best || Math.hypot(s.pos.x - a.pos.x, s.pos.y - a.pos.y) < Math.hypot(best.pos.x - a.pos.x, best.pos.y - a.pos.y) ? s : best, null);
+  const inFoeTowerRange = foeTowers.some(s => Math.hypot(s.pos.x - a.pos.x, s.pos.y - a.pos.y) - cfg.agent.radius <= TOWER_RANGE);
+  const foeTowerTargetsMe = foeTowers.some(s => s.target?.kind === "robot" && s.target.side === me);
+  const towerTarget = nearestTower?.target;
+  const foeTowerTargetsAllyMinion = towerTarget?.kind === "minion" && (state.moba?.minions ?? []).some(m => m.id === towerTarget.id && m.alive && m.side === me);
+  const allyMinionsUnderFoeTower = nearestTower ? (state.moba?.minions ?? []).filter(m => m.alive && m.side === me && Math.hypot(m.pos.x - nearestTower.pos.x, m.pos.y - nearestTower.pos.y) - MINION_RADIUS <= TOWER_RANGE).length : 0;
+  const ownStructureThreatened = structures.some(s => s.side === me && s.alive && (state.moba?.minions ?? []).some(m => m.alive && m.side === foeSide && Math.hypot(m.pos.x - s.pos.x, m.pos.y - s.pos.y) <= 6));
+  const home = structures.find(s => s.side === me && s.kind === "nexus");
+  const nextWaveTick = state.tick < WAVE_FIRST_TICK ? WAVE_FIRST_TICK : WAVE_FIRST_TICK + (Math.floor((state.tick - WAVE_FIRST_TICK) / WAVE_EVERY_TICKS) + 1) * WAVE_EVERY_TICKS;
   let ownAlive = 0;
   let foeLive = 0;
   for (const s of state.moba?.structures ?? []) {
@@ -471,6 +494,22 @@ export function observe(
     slotsFree: MAX_SLOTS - items.length,
     structLead: ownAlive - foeLive,
     foeAlive: f.alive,
+    ...(state.moba?.overseer ? {
+      overseerAlive: state.moba.overseer.alive,
+      overseerHpPct: state.moba.overseer.alive ? state.moba.overseer.hp / state.moba.overseer.maxHp * 100 : null,
+      overseerDist: Math.hypot(state.moba.overseer.x - a.pos.x, state.moba.overseer.y - a.pos.y),
+      overseerSpawnSeconds: state.moba.overseer.alive ? 0 : Math.max(0, (state.moba.overseer.spawnTick - state.tick) / cfg.world.tickHz),
+      ownOverseerBuffSeconds: Math.max(0, (state.moba.overseer.buffUntil[me] - state.tick) / cfg.world.tickHz),
+      foeOverseerBuffSeconds: Math.max(0, (state.moba.overseer.buffUntil[foeId] - state.tick) / cfg.world.tickHz),
+    } : {}),
+    ...(moba && state.moba ? {
+      inFoeTowerRange, foeTowerTargetsMe, foeTowerTargetsAllyMinion, allyMinionsUnderFoeTower,
+      nearAllyMinionHp: allyHp, nearFoeMinionHp: foeHp,
+      killableFoeMinionsInRange: killableInRange,
+      nextWaveSeconds: Math.max(0, (nextWaveTick - state.tick) / cfg.world.tickHz),
+      distOwnBase: home ? Math.hypot(home.pos.x - a.pos.x, home.pos.y - a.pos.y) : null,
+      ownStructureThreatened,
+    } : {}),
   };
 }
 
@@ -537,7 +576,7 @@ function farmMove(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 {
   const center = { x: cfg.world.width / 2, y: cfg.world.height / 2 };
   if (cfg.mode !== "moba" || !state.moba) return dir(a.pos, center);
   const enemy = foeOf(me);
-  const shot = robotAD(a.items ?? []);
+  const shot = robotAD(a.items ?? []) * (state.moba?.overseer && state.tick + 1 < state.moba.overseer.buffUntil[me] ? 1.2 : 1);
   let killable: MinionState | null = null;
   let killD = Infinity;
   let near: MinionState | null = null;
@@ -606,7 +645,7 @@ function defendMove(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 {
 // come first, then farm, then the healthy foe: robots that dueled
 // every healthy hero traded kills to the tick cap, so the lane
 // farms and only skirmishes dry waves.
-function pickAim(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 | null {
+function pickAim(state: BattleState, me: AgentId, cfg: BattleConfig, target: TargetIntent = "AUTO"): Vec2 | null {
   const moba = state.moba;
   if (!moba) return null;
   const a = state.agents[me];
@@ -619,9 +658,17 @@ function pickAim(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 | nul
     }
     return true;
   };
-  const shot = robotAD(a.items ?? []);
+  const shot = robotAD(a.items ?? []) * (moba.overseer && state.tick + 1 < moba.overseer.buffUntil[me] ? 1.2 : 1);
   const f = state.agents[enemy];
-  if (f.alive && f.hp <= shot && inRange(f.pos, cfg.agent.radius) && sees(f.pos)) return { ...f.pos };
+  if (target === "NONE") return null;
+  if (target === "OVERSEER") {
+    const o = moba.overseer;
+    const pos = o ? { x: o.x, y: o.y } : null;
+    return o?.alive && pos && inRange(pos, OVERSEER_RADIUS) && sees(pos) ? pos : null;
+  }
+  const foeVisible = f.alive && inRange(f.pos, cfg.agent.radius) && sees(f.pos);
+  if (target === "FOE") return foeVisible ? { ...f.pos } : null;
+  if (target === "AUTO" && foeVisible && f.hp <= shot) return { ...f.pos };
   let killable: MinionState | null = null;
   let killD = Infinity;
   let near: MinionState | null = null;
@@ -639,9 +686,17 @@ function pickAim(state: BattleState, me: AgentId, cfg: BattleConfig): Vec2 | nul
       killD = d;
     }
   }
-  if (killable) return { ...killable.pos };
-  if (near) return { ...near.pos };
-  if (f.alive && inRange(f.pos, cfg.agent.radius) && sees(f.pos)) return { ...f.pos };
+  if (target === "LAST_HIT") {
+    const lastHit = moba.minions.filter(m => m.side === enemy && m.alive && inRange(m.pos, MINION_RADIUS) && sees(m.pos) && m.hp <= shot * (cfg.rulesetVersion === 2 ? 1 : armorMult(30)))
+      .sort((left, right) => Math.hypot(left.pos.x - a.pos.x, left.pos.y - a.pos.y) - Math.hypot(right.pos.x - a.pos.x, right.pos.y - a.pos.y) || left.id - right.id)[0];
+    return lastHit ? { ...lastHit.pos } : null;
+  }
+  if (target === "AUTO" || target === "MINION") {
+    if (killable) return { ...killable.pos };
+    if (near) return { ...near.pos };
+    if (target === "MINION") return null;
+    if (foeVisible) return { ...f.pos };
+  }
   let struct: StructureState | null = null;
   let structD = Infinity;
   for (const s of moba.structures) {
@@ -676,6 +731,14 @@ export function drive(
   const flip = (state.tick >> 6) % 2 === 1 ? -1 : 1;
   let move: Vec2;
   switch (want.move) {
+    case "CONTEST_OVERSEER": {
+      const o = state.moba?.overseer;
+      move = o?.alive && Math.hypot(o.x - a.pos.x, o.y - a.pos.y) > ROBOT_RANGE + OVERSEER_RADIUS - 0.5 ? dir(a.pos, o) : { x: 0, y: 0 };
+      break;
+    }
+    case "WAIT":
+      move = { x: 0, y: 0 };
+      break;
     case "APPROACH":
       move = obs.lineOfSight ? { ...toFoe } : dir(a.pos, center);
       break;
@@ -745,7 +808,7 @@ export function drive(
   let aim: Vec2;
   let fire = want.fire;
   if (cfg.mode === "moba" && state.moba) {
-    const target = pickAim(state, me, cfg);
+    const target = pickAim(state, me, cfg, want.target);
     if (target) {
       aim = dir(a.pos, target);
       fire = true;

@@ -44,7 +44,7 @@ describe("moba fights and replays", () => {
     assert.ok(r.json.checksum);
     assert.ok(typeof r.json.chipsA === "object");
     const row = store.db.prepare("SELECT * FROM matches WHERE id = ?").get(r.json.matchId);
-    assert.equal(row.mode, "moba");
+    assert.equal(row.mode, "moba-v2");
     keys.trainId = r.json.matchId;
   });
 
@@ -109,7 +109,7 @@ describe("moba fights and replays", () => {
     assert.equal(r.json.deltaA, want.deltaA);
     assert.equal(r.json.deltaB, want.deltaB);
     const row = store.db.prepare("SELECT * FROM matches WHERE id = ?").get("moba-r1");
-    assert.equal(row.mode, "moba");
+    assert.equal(row.mode, "moba-v2");
     assert.equal(row.delta_a, want.deltaA);
     assert.equal(row.delta_b, want.deltaB);
     const afterA = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(la.id);
@@ -198,7 +198,7 @@ describe("moba worker mirror", () => {
 
   before(() => {
     db = new DatabaseSync(":memory:");
-    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0010_reports", "0011_version_labels", "0012_match_mode"]) {
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0010_reports", "0011_version_labels", "0012_match_mode", "0013_ai_cooldowns"]) {
       db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
     }
     db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("wl-a", "walpha", "wt-a");
@@ -226,7 +226,7 @@ describe("moba worker mirror", () => {
     assert.equal(t.status, 201);
     assert.equal(t.json.mode, "moba");
     const row = db.prepare("SELECT mode FROM matches WHERE id = ?").get(t.json.matchId);
-    assert.equal(row.mode, "moba");
+    assert.equal(row.mode, "moba-v2");
     const replay = await wcall("GET", `/v1/matches/${t.json.matchId}/replay`, null, "wt-a");
     assert.equal(replay.status, 200);
     assert.equal(replay.json.identical, true);
@@ -241,7 +241,7 @@ describe("moba worker mirror", () => {
     assert.equal(r.json.mode, "moba");
     assert.equal(r.json.deltaA + r.json.deltaB, 0);
     const row = db.prepare("SELECT * FROM matches WHERE id = ?").get("wm-r1");
-    assert.equal(row.mode, "moba");
+    assert.equal(row.mode, "moba-v2");
     assert.equal(row.rated, 1);
     const replay = await wcall("GET", "/v1/matches/wm-r1/replay", null, "wt-a");
     assert.equal(replay.status, 200);
@@ -259,4 +259,10 @@ describe("moba worker mirror", () => {
     assert.equal(replay.json.identical, true);
     assert.equal("version" in replay.json.replay, false);
   });
+});
+
+it("selects the historical map for old records and the Overseer rules for new records", async () => {
+  const { battleConfigFor, matchMode } = await import('../src/flow.ts');
+  assert.equal(battleConfigFor(matchMode({mode:'moba'}), 'moba').rulesetVersion ?? 1, 1);
+  assert.equal(battleConfigFor(matchMode({mode:'moba-v2'}), 'moba-v2').rulesetVersion, 2);
 });

@@ -73,7 +73,7 @@ export function createBattle(cfg: BattleConfig = DEFAULT_BATTLE): BattleState {
       nextProjectileId: 1,
       over: false,
       winner: null,
-      moba: createMobaState(),
+      moba: createMobaState(cfg.rulesetVersion ?? 1),
     };
   }
   return {

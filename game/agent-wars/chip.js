@@ -13,11 +13,13 @@ function headers() {
 }
 
 async function call(method, path, body) {
-  const res = await fetch(path, {
+  window.factoryCooldown?.start(method, path);
+  let res;
+  try { res = await fetch(path, {
     method,
     headers: headers(),
     body: body ? JSON.stringify(body) : undefined,
-  });
+  }); } finally { await window.factoryCooldown?.finish(method, path); }
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
 }
@@ -226,7 +228,7 @@ function paintVersion(d, v) {
     const table = document.createElement("table");
     table.className = "chips";
     const top = document.createElement("tr");
-    for (const h of ["chip", "when", "move", "fire", "triggers"]) {
+    for (const h of ["rule", "when", "move", "target", "dash", "shield", "buy", "triggers"]) {
       const th = document.createElement("th");
       th.textContent = h;
       top.appendChild(th);
@@ -234,7 +236,7 @@ function paintVersion(d, v) {
     table.appendChild(top);
     for (const c of v.chips) {
       const tr = document.createElement("tr");
-      for (const cell of [c.id, shortWhen(c.when), c.move, c.fire ? "yes" : "no", String(c.triggers)]) {
+      for (const cell of [c.id, shortWhen(c.when), c.move, c.target || "AUTO", c.dash ? "yes" : "no", c.shield ? "yes" : "no", c.buy || "—", String(c.triggers)]) {
         const td = document.createElement("td");
         td.textContent = cell;
         tr.appendChild(td);
@@ -246,45 +248,11 @@ function paintVersion(d, v) {
 }
 
 // Counters keep long briefs honest. The cap is 2000, the habit is detail.
-for (const [box, count] of [["prompt", "prompt-count"], ["prompt-a", "prompt-a-count"], ["prompt-b", "prompt-b-count"]]) {
+for (const [box, count] of [["prompt", "prompt-count"]]) {
   $(box).addEventListener("input", () => {
     $(count).textContent = String($(box).value.length);
   });
 }
-
-$("lab-btn").addEventListener("click", async () => {
-  if (!agentId) return;
-  const promptA = $("prompt-a").value.trim();
-  const promptB = $("prompt-b").value.trim();
-  const bouts = Math.min(20, Math.max(4, parseInt($("lab-bouts").value, 10) || 10));
-  if (!promptA || !promptB) {
-    $("lab-msg").textContent = "Two prompts are required.";
-    return;
-  }
-  $("lab-msg").textContent = "Running bouts…";
-  $("lab-btn").disabled = true;
-  const r = await call("POST", "/v1/lab/ab", { agentId, promptA, promptB, bouts });
-  $("lab-btn").disabled = false;
-  if (r.status !== 201) {
-    $("lab-msg").textContent = `Lab failed: ${r.data.error || r.status}.`;
-    return;
-  }
-  const d = r.data;
-  $("lab-msg").textContent = `A ${d.winsA}W ${d.drawsA}D vs benchmark · B ${d.winsB}W ${d.drawsB}D · ${d.verdict}.`;
-  const box = $("lab-out");
-  box.textContent = "";
-  for (const [label, version] of [["Install A", d.versionA], ["Install B", d.versionB]]) {
-    const btn = document.createElement("button");
-    btn.className = "btn-ghost";
-    btn.type = "button";
-    btn.textContent = label;
-    btn.addEventListener("click", async () => {
-      await call("POST", `/v1/agents/${agentId}/policies/install`, { versionId: version });
-      await refresh();
-    });
-    box.appendChild(btn);
-  }
-});
 
 $("compile-btn").addEventListener("click", async () => {
   const prompt = $("prompt").value.trim();
@@ -337,8 +305,10 @@ async function boot() {
     return;
   }
   agentId = me.data.agent.id;
+  window.factoryAgentReady = true;
+  $("compile-btn").disabled = false;
+  window.factoryCooldown?.render();
   show($("train-card"), true);
-  show($("lab-card"), true);
   await refresh();
 }
 

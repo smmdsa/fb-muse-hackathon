@@ -7,7 +7,7 @@ import { addEntry, createEvent, lock, register as registerEntry, reportGame, see
 import type { EventPhase } from "@agent-wars/tournaments";
 import type { Championship } from "@agent-wars/tournaments";
 import { CATALOG } from "@agent-wars/economy";
-import { BENCH_POLICY, BOT_PRESETS, buildReplay, DEFAULT_MOBA, fightPolicies, pickBot } from "@agent-wars/battle-core";
+import { BENCH_POLICY, BOT_PRESETS, buildReplay, DEFAULT_MOBA, ARENA_MOBA, fightPolicies, pickBot } from "@agent-wars/battle-core";
 import { MAX_DEFENSE_PER_DAY, recordDefense } from "@agent-wars/autobattle";
 import { pickOpponent } from "@agent-wars/matchmaker";
 import type { Candidate, History } from "@agent-wars/matchmaker";
@@ -17,10 +17,8 @@ import { checkLimit } from "./ids.ts";
 
 // Per-route sliding windows. Memory-only per isolate.
 const authHits = new Map<string, number[]>();
-const compileHits = new Map<string, number[]>();
 const queueHits = new Map<string, number[]>();
 const trainHits = new Map<string, number[]>();
-const labHits = new Map<string, number[]>();
 const analysisHits = new Map<string, number[]>();
 
 function limited(log: Map<string, number[]>, key: string, windowMs: number, max: number): boolean {
@@ -63,6 +61,19 @@ function json(body: unknown, code = 200): Response {
       "access-control-allow-headers": "authorization, content-type",
     },
   });
+}
+
+const AI_COOLDOWN_MS = 300_000;
+async function cooldownStatus(env: WorkerEnv, leader: string, now = Date.now()) {
+  const row = await env.DB.prepare("SELECT next_allowed_at FROM ai_cooldowns WHERE leader_id = ?").bind(leader).first<{ next_allowed_at: number }>();
+  const nextAllowedAt = row?.next_allowed_at ?? 0;
+  return { nextAllowedAt, retryAfterSeconds: Math.max(0, Math.ceil((nextAllowedAt - now) / 1000)) };
+}
+async function reserveAi(env: WorkerEnv, leader: string): Promise<Response | null> {
+  const now = Date.now();
+  const row = await env.DB.prepare("INSERT INTO ai_cooldowns (leader_id, next_allowed_at) VALUES (?, ?) ON CONFLICT(leader_id) DO UPDATE SET next_allowed_at = excluded.next_allowed_at WHERE ai_cooldowns.next_allowed_at <= ? RETURNING next_allowed_at").bind(leader, now + AI_COOLDOWN_MS, now).first<{ next_allowed_at: number }>();
+  if (row) return null;
+  return json({ error: "The AI factory is recharging. Your next build will be ready soon.", ...await cooldownStatus(env, leader, now) }, 429);
 }
 
 let counter = 0;
@@ -122,7 +133,7 @@ async function leaderboard(env: WorkerEnv, seasonId: string): Promise<Response> 
 
 // New fights run MOBA. Old rows without a mode read as duel.
 function matchMode(row: Record<string, unknown>): "duel" | "moba" {
-  return row.mode === "moba" ? "moba" : "duel";
+  return row.mode === "moba" || row.mode === "moba-v2" ? "moba" : "duel";
 }
 
 // Replay re-simulates a stored match and compares checksums.
@@ -150,7 +161,7 @@ async function replay(env: WorkerEnv, id: string): Promise<Response> {
   }
   // The row names its sim. MOBA rows re-simulate as MOBA and
   // serve v2 replays. Duel rows keep the v1 path untouched.
-  const cfg = matchMode(match) === "moba" ? DEFAULT_MOBA : undefined;
+  const cfg = matchMode(match) === "moba" ? (match.mode === "moba-v2" ? ARENA_MOBA : DEFAULT_MOBA) : undefined;
   const again = fightPolicies(pa, pb, match.seed as string, cfg);
   const replay = buildReplay(pa, pb, match.seed as string, cfg);
   const agentCard = async (ver: Record<string, unknown> | null, versionId: string) => {
@@ -418,7 +429,7 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
       createdAt: v.created_at,
       corrupt: false,
       label: (v.label as string) ?? null,
-      chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, when: r.when ?? null, triggers: triggers[r.id] ?? 0 })),
+      chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, target: r.target ?? "AUTO", dash: r.dash === true, shield: r.shield === true, buy: r.buy ?? null, when: r.when ?? null, triggers: triggers[r.id] ?? 0 })),
       dna: policy.dna,
       fights: fights.length,
       wins,
@@ -526,7 +537,7 @@ async function runCasualD1(
     foeLabel = bot.id;
     foePolicy = bot.policy;
   }
-  const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, foePolicy, input.seed, DEFAULT_MOBA);
+  const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, foePolicy, input.seed, ARENA_MOBA);
   const id = input.key ?? mintId("m");
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   const plan = await planPay(env, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
@@ -535,7 +546,7 @@ async function runCasualD1(
     : null;
   const writes: unknown[] = [
     env.DB.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'moba')",
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'moba-v2')",
     ).bind(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, plan.credited, planB?.credited ?? 0, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
     ...plan.stmts,
     ...(planB ? planB.stmts : []),
@@ -648,7 +659,7 @@ async function settleRankedD1(
     JSON.parse(a.policy_json as string) as AgentPolicy,
     JSON.parse(b.policy_json as string) as AgentPolicy,
     input.seed,
-    DEFAULT_MOBA,
+    ARENA_MOBA,
   );
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   const ledger = createLedger("local-s1");
@@ -680,7 +691,7 @@ async function settleRankedD1(
     ...planA.stmts,
     ...planB.stmts,
     env.DB.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'moba')",
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'moba-v2')",
     ).bind(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, planA.credited, planB.credited, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
   );
   try {
@@ -768,7 +779,8 @@ async function settledResultD1(env: WorkerEnv, row: Record<string, unknown>): Pr
 async function withMatchD1(env: WorkerEnv, ticket: Record<string, unknown>): Promise<Record<string, unknown>> {
   const out = { ...ticket };
   if (ticket.match_id) {
-    out.match = (await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(ticket.match_id as string).first<Record<string, unknown>>()) ?? undefined;
+    const match = await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(ticket.match_id as string).first<Record<string, unknown>>();
+    out.match = match ? { ...match, rulesetVersion: match.mode === "moba-v2" ? 2 : 1, mode: matchMode(match) } : undefined;
   }
   return out;
 }
@@ -922,6 +934,7 @@ export default {
     }
     const me = await bearer(request, env);
     if (!me) return json({ error: "bearer token is required: call POST /v1/auth/session first" }, 401);
+    if (request.method === "GET" && url.pathname === "/v1/ai/cooldown") return json(await cooldownStatus(env, me.id as string));
     if (request.method === "GET" && url.pathname === "/v1/me") {
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(me.id as string).first<Record<string, unknown>>();
       const auto = await autoTickD1(env, me.id as string, Date.now());
@@ -956,6 +969,8 @@ export default {
       let portraitStatus = "faceless";
       let breedError: string | null = "portraits need META_IMAGE_KEY; set the secret first";
       if (hasKey("portrait", env)) {
+         const cooling = await reserveAi(env, me.id as string);
+         if (cooling) return cooling;
         try {
           const art = await portraitFromEnv(env).generatePortrait({
             prompt: portraitPromptFor(`${name || "arena robot"}: ${concept || "arena fighter"}`),
@@ -991,6 +1006,8 @@ export default {
       let portraitStatus = "faceless";
       let retryError: string | null = "portraits need META_IMAGE_KEY; set the secret first";
       if (hasKey("portrait", env)) {
+         const cooling = await reserveAi(env, me.id as string);
+         if (cooling) return cooling;
         try {
           const art = await portraitFromEnv(env).generatePortrait({
             prompt: portraitPromptFor(`${(target.name as string) || "arena robot"}: ${(target.concept as string) || "arena fighter"}`),
@@ -1021,7 +1038,6 @@ export default {
     }
     const compileMatch = request.method === "POST" && /^\/v1\/agents\/[^/]+\/policies\/compile$/.test(url.pathname);
     if (compileMatch) {
-      if (limited(compileHits, me.id as string, 60_000, 6)) return json({ error: "rate limited, retry later" }, 429);
       try {
       const agentId = url.pathname.split("/")[3];
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
@@ -1029,8 +1045,10 @@ export default {
       const body = await readBody(request);
       if (body === null) return json({ error: "bad json" }, 400);
       const prompt = typeof body.prompt === "string" ? body.prompt : "";
-      if (!prompt) return json({ error: "prompt is required" }, 400);
+       if (!prompt.trim()) return json({ error: "prompt is required" }, 400);
       if (prompt.trim().length > MAX_PROMPT) return json({ error: `prompt must stay under ${MAX_PROMPT} characters` }, 400);
+       const cooling = await reserveAi(env, me.id as string);
+       if (cooling) return cooling;
       const versionId = mintId("v");
       const compiled = await providerFromEnv(env).compileStrategy({ prompt: prompt.trim(), agentVersionId: versionId });
       const spent = { tokens: compiled.promptTokens, latencyMs: compiled.latencyMs };
@@ -1147,10 +1165,10 @@ export default {
       if (!owner || owner.leader_id !== me.id) return json({ error: "version not found for this leader" }, 404);
       const v = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(versionId).first<Record<string, unknown>>();
       if (!v) return json({ error: "unknown version" }, 404);
-      const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, BENCH_POLICY, seed, DEFAULT_MOBA);
+      const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, BENCH_POLICY, seed, ARENA_MOBA);
       const id = mintId("m");
       await env.DB.prepare(
-        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'moba')",
+        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'moba-v2')",
       ).bind(id, seed, versionId, "benchmark-v1", out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })).run();
       return json({ matchId: id, ...out, mode: "moba" }, 201);
     }
@@ -1159,6 +1177,10 @@ export default {
       if (limited(analysisHits, me.id as string, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);
       const row = await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(decodeURIComponent(analysisMatch[0].split("/")[3])).first<Record<string, unknown>>();
       if (!row) return json({ error: "unknown match" }, 404);
+      if (hasKey("compile", env)) {
+        const cooling = await reserveAi(env, me.id as string);
+        if (cooling) return cooling;
+      }
       const chips = JSON.parse((row.chips_json as string) ?? '{"a":{},"b":{}}') as { a: Record<string, number>; b: Record<string, number> };
       const telemetry = {
         matchId: row.id as string,
@@ -1172,64 +1194,6 @@ export default {
       };
       const explanation = await explainerFromEnv(env).explainBattle(telemetry);
       return json({ ...telemetry, explanation }, 200);
-    }
-    if (request.method === "POST" && url.pathname === "/v1/lab/ab") {
-      if (limited(labHits, me.id as string, 60_000, 6)) return json({ error: "rate limited, retry later" }, 429);
-      const body = await readBody(request);
-      if (body === null) return json({ error: "bad json" }, 400);
-      const agentId = typeof body.agentId === "string" ? body.agentId : "";
-      const promptA = typeof body.promptA === "string" ? body.promptA : "";
-      const promptB = typeof body.promptB === "string" ? body.promptB : "";
-      const bouts = Math.min(20, Math.max(4, Math.floor(typeof body.bouts === "number" ? body.bouts : 10)));
-      if (!agentId || !promptA || !promptB) return json({ error: "agentId, promptA, and promptB are required" }, 400);
-      if (promptA.trim().length > MAX_PROMPT || promptB.trim().length > MAX_PROMPT) {
-        return json({ error: `each prompt must stay under ${MAX_PROMPT} characters` }, 400);
-      }
-      const agent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(agentId).first<Record<string, unknown>>();
-      if (!agent || agent.leader_id !== me.id) return json({ error: "agent not found for this leader" }, 404);
-      const runId = mintId("lab");
-      const drafts: string[] = [];
-      for (const prompt of [promptA.trim(), promptB.trim()]) {
-        const versionId = mintId("v");
-        const compiled = await providerFromEnv(env).compileStrategy({ prompt, agentVersionId: versionId });
-        if (!compiled.policy) return json({ error: `draft failed: ${compiled.errors.join("; ")}` }, 422);
-        const sha = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(compiled.policy)));
-        const hex = [...new Uint8Array(sha)].map((x) => x.toString(16).padStart(2, "0")).join("");
-        await env.DB.prepare(
-          "INSERT INTO versions (id, agent_id, policy_json, sha, created_at, provider, is_mock, tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ).bind(versionId, agentId, JSON.stringify(compiled.policy), hex, Date.now(), compiled.provider, compiled.isMock ? 1 : 0, compiled.promptTokens, compiled.latencyMs).run();
-        drafts.push(versionId);
-      }
-      const policies: AgentPolicy[] = [];
-      for (const draft of drafts) {
-        const v = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(draft).first<Record<string, unknown>>();
-        policies.push(JSON.parse((v as Record<string, unknown>).policy_json as string) as AgentPolicy);
-      }
-      let winsA = 0;
-      let winsB = 0;
-      let drawsA = 0;
-      let drawsB = 0;
-      const now = Date.now();
-      // The lab keeps the duel sim. Its bouts stay small and fast.
-      for (let i = 0; i < bouts; i += 1) {
-        const outA = fightPolicies(policies[0], BENCH_POLICY, `${runId}-a-${i}`);
-        await env.DB.prepare(
-          "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'duel')",
-        ).bind(`${runId}-a-${i}`, `${runId}-a-${i}`, drafts[0], "benchmark-v1", outA.winner, outA.ticks, outA.checksum, now, JSON.stringify({ a: outA.chipsA, b: outA.chipsB })).run();
-        if (outA.winner === "A") winsA += 1;
-        else if (outA.winner === "DRAW") drawsA += 1;
-        const outB = fightPolicies(policies[1], BENCH_POLICY, `${runId}-b-${i}`);
-        await env.DB.prepare(
-          "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'duel')",
-        ).bind(`${runId}-b-${i}`, `${runId}-b-${i}`, drafts[1], "benchmark-v1", outB.winner, outB.ticks, outB.checksum, now, JSON.stringify({ a: outB.chipsA, b: outB.chipsB })).run();
-        if (outB.winner === "A") winsB += 1;
-        else if (outB.winner === "DRAW") drawsB += 1;
-      }
-      const decisive = winsA + winsB;
-      let verdict = "too close to call";
-      if (bouts < 10) verdict = "sample too small — run 10 or more bouts before trusting the gap";
-      else if (decisive > 0 && Math.max(winsA, winsB) / decisive >= 0.7) verdict = winsA > winsB ? "A leads" : "B leads";
-      return json({ runId, versionA: drafts[0], versionB: drafts[1], bouts, winsA, winsB, drawsA, drawsB, verdict }, 201);
     }
     if (request.method === "POST" && url.pathname === "/v1/matches/ranked") {
       const body = await readBody(request);

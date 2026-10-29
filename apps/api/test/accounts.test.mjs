@@ -75,6 +75,7 @@ describe("accounts", () => {
   });
 
   it("retries a failed portrait without breeding a second hero", async () => {
+    keys.store.db.prepare("UPDATE ai_cooldowns SET next_allowed_at = 0").run();
     process.env.META_IMAGE_KEY = "test-image-key";
     const realFetch = globalThis.fetch;
     let calls = 0;

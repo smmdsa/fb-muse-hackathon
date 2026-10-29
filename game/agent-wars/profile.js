@@ -18,11 +18,13 @@ function headers() {
 }
 
 async function call(method, path, body) {
-  const res = await fetch(path, {
+  window.factoryCooldown?.start(method, path);
+  let res;
+  try { res = await fetch(path, {
     method,
     headers: headers(),
     body: body ? JSON.stringify(body) : undefined,
-  });
+  }); } finally { await window.factoryCooldown?.finish(method, path); }
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
 }
@@ -314,6 +316,7 @@ function renderPips(box, have, max) {
     const p = document.createElement("span");
     p.className = i < lit ? "pip on" : "pip";
     box.appendChild(p);
+    window.factoryCooldown?.render();
   }
 }
 
@@ -374,6 +377,7 @@ async function renderSeasons() {
     const top = (s.rows || []).slice(0, 3).map((x) => `#${x.rank} ${x.ap} AP`).join(", ");
     p.textContent = `${s.seasonId} closed ${new Date(s.closedAt).toLocaleDateString()} — ${top}`;
     box.appendChild(p);
+    window.factoryCooldown?.render();
   }
   show($("season-card"), true);
 }
@@ -402,6 +406,7 @@ async function renderAuto() {
     a.textContent = "replay";
     p.appendChild(a);
     box.appendChild(p);
+    window.factoryCooldown?.render();
   }
   show($("auto-card"), true);
 }
@@ -427,13 +432,11 @@ function renderHist(d) {
     a.textContent = "replay";
     p.appendChild(a);
     const why = document.createElement("button");
-    why.className = "btn-ghost";
+    why.className = "btn-ghost factory-analysis";
     why.type = "button";
     why.textContent = "Why";
     why.addEventListener("click", async () => {
-      why.disabled = true;
       const r = await call("POST", `/v1/battles/${h.matchId}/analysis`);
-      why.disabled = false;
       const old = p.querySelector(".why-text");
       if (old) old.remove();
       const span = document.createElement("span");
@@ -443,6 +446,7 @@ function renderHist(d) {
     });
     p.appendChild(why);
     box.appendChild(p);
+    window.factoryCooldown?.render();
   }
   show($("hist-card"), true);
 }

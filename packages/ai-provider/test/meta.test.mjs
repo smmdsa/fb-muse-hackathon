@@ -151,3 +151,58 @@ describe("meta provider", () => {
     }
   });
 });
+
+describe("prompt-to-chip targeting contract", () => {
+  it("teaches Muse the same target controls the engine can execute", async () => {
+    let system;
+    const fetchFn = async (_url, init) => {
+      system = JSON.parse(init.body).messages[0].content;
+      return chatOk(POLICY_TEXT)();
+    };
+    await createMetaProvider({ META_SPARK_KEY: "key" }, fetchFn).compileStrategy({ prompt: "focus enemy heroes", agentVersionId: "v1" });
+    for (const token of ["target", "FOE", "MINION", "STRUCTURE", "NONE", "first matching rule", "foeAlive"]) {
+      assert.ok(system.includes(token), `missing ${token}`);
+    }
+    assert.ok(!system.includes("Robots auto-attack anything in range"));
+  });
+});
+
+describe("malformed Muse responses", () => {
+  it("returns validation errors rather than throwing for a missing rule list", async () => {
+    const reply = JSON.stringify({ dna: { aggression: 50, evasion: 50, preferredDistance: 50, energyConservation: 50 } });
+    const result = await createMetaProvider({ META_SPARK_KEY: "key" }, chatOk(reply)).compileStrategy({ prompt: "be careful", agentVersionId: "v1" });
+    assert.equal(result.policy, null);
+    assert.ok(result.errors.some((error) => error.includes("rules")));
+  });
+});
+
+describe("compiled strategy in the MOBA engine", () => {
+  it("keeps Muse's ordered target choices through validation and execution", async () => {
+    const { createBattle, drive, DEFAULT_MOBA } = await import("../../battle-core/src/index.ts");
+    const draft = { schemaVersion: 2, agentVersionId: "v1", dna: { aggression: 50, evasion: 50, preferredDistance: 50, energyConservation: 50 }, rules: [
+      { id: "low-health-hold", when: { operand: "ownHpPct", op: "lt", value: 30 }, move: "RETREAT", target: "NONE" },
+      { id: "focus-hero", when: { operand: "foeAlive", op: "eq", value: true }, move: "APPROACH", target: "FOE" },
+    ] };
+    const result = await createMetaProvider({ META_SPARK_KEY: "key" }, chatOk(JSON.stringify(draft))).compileStrategy({ prompt: "retreat without shooting when weak, otherwise target the enemy robot", agentVersionId: "v1" });
+    assert.ok(result.policy, result.errors.join(", "));
+    const s = createBattle(DEFAULT_MOBA);
+    s.agents.A.pos = { x: 24, y: 8 };
+    s.agents.B.pos = { x: 24, y: 10 };
+    const attack = drive(s, result.policy, "A", DEFAULT_MOBA);
+    assert.equal(attack.fire, true);
+    assert.deepEqual(attack.aim, { x: 0, y: 1 });
+    s.agents.A.hp = 100;
+    const retreat = drive(s, result.policy, "A", DEFAULT_MOBA);
+    assert.equal(retreat.fire, false);
+    assert.ok(retreat.move.x < 0);
+  });
+});
+
+describe("tactical compiler contract", () => {
+  it("teaches Muse the real tower and wave sensors and actions", async () => {
+    let brief = '';
+    const fetchFn = async (_url, init) => { brief = JSON.parse(init.body).messages[0].content; return chatOk(POLICY_TEXT)(); };
+    await createMetaProvider({ META_SPARK_KEY: 'test' }, fetchFn).compileStrategy({ prompt: 'wait until minions tank the tower', agentVersionId: 'v1' });
+    for (const key of ['foeTowerTargetsAllyMinion', 'foeTowerTargetsMe', 'inFoeTowerRange', 'nearAllyMinionHp', 'nearFoeMinionHp', 'killableFoeMinionsInRange', 'nextWaveSeconds', 'distOwnBase', 'ownStructureThreatened', 'WAIT', 'LAST_HIT']) assert.ok(brief.includes(key), key);
+  });
+});

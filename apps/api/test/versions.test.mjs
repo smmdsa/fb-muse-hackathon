@@ -17,6 +17,8 @@ describe("version management", () => {
     const s = await call("POST", "/v1/auth/session", { handle: "keeper" });
     const g = await call("POST", "/v1/agents", {}, s.json.token);
     const v1 = await call("POST", `/v1/agents/${g.json.agentId}/policies/compile`, { prompt: "rush them down up close" }, s.json.token);
+    // Simulate the five-minute factory window passing.
+    store.db.prepare("UPDATE ai_cooldowns SET next_allowed_at = 0").run();
     const v2 = await call("POST", `/v1/agents/${g.json.agentId}/policies/compile`, { prompt: "hold the center patiently" }, s.json.token);
     await call("POST", `/v1/agents/${g.json.agentId}/policies/install`, { versionId: v1.json.versionId }, s.json.token);
     me = { token: s.json.token, agentId: g.json.agentId, v1: v1.json.versionId, v2: v2.json.versionId };
@@ -50,6 +52,8 @@ describe("version management", () => {
     assert.match(active.json.error, /active/);
     const bout = await call("POST", "/v1/matches/training", { versionId: me.v1, seed: "keep-1" }, me.token);
     assert.equal(bout.status, 201);
+    // Simulate the five-minute factory window passing.
+    store.db.prepare("UPDATE ai_cooldowns SET next_allowed_at = 0").run();
     const v3 = await call("POST", `/v1/agents/${me.agentId}/policies/compile`, { prompt: "evade and stay far away" }, me.token);
     await call("POST", `/v1/agents/${me.agentId}/policies/install`, { versionId: v3.json.versionId }, me.token);
     const fought = await call("DELETE", `/v1/agents/${me.agentId}/policies/${me.v1}`, null, me.token);
@@ -103,6 +107,8 @@ describe("version management", () => {
   });
 
   it("force on the active version clears the slot", async () => {
+    // Simulate the five-minute factory window passing.
+    store.db.prepare("UPDATE ai_cooldowns SET next_allowed_at = 0").run();
     const v4 = await call("POST", `/v1/agents/${me.agentId}/policies/compile`, { prompt: "hold the center patiently" }, me.token);
     await call("POST", `/v1/agents/${me.agentId}/policies/install`, { versionId: v4.json.versionId }, me.token);
     const gone = await call("POST", `/v1/agents/${me.agentId}/policies/${v4.json.versionId}/force-delete`, {}, me.token);
@@ -113,6 +119,8 @@ describe("version management", () => {
   });
 
   it("refuses force on live event seats", async () => {
+    // Simulate the five-minute factory window passing.
+    store.db.prepare("UPDATE ai_cooldowns SET next_allowed_at = 0").run();
     const v5 = await call("POST", `/v1/agents/${me.agentId}/policies/compile`, { prompt: "rush them down up close" }, me.token);
     store.db.prepare("INSERT INTO tournaments (id, name, event_json, games_json, created_at) VALUES (?, ?, ?, ?, ?)").run(
       "locked-cup", "Locked", JSON.stringify({ id: "locked-cup", phase: "LOCKED", entries: [{ leaderId: "x", agentVersionId: v5.json.versionId }] }), "{}", Date.now(),
