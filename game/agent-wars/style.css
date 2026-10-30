@@ -456,6 +456,10 @@ a.btn-primary { text-decoration: none; display: inline-block; font-family: var(-
 .rule { display: flex; justify-content: space-between; align-items: center; gap: 15px; border-bottom: 1px solid var(--line); padding: 9px 0; }
 .rule small { display: block; color: var(--dim); font-size: 12px; }
 a.link-quiet { color: var(--dim); font-size: 14px; }
+/* Arena series HUD: round, local-first score, per-round pips. */
+.arena-series { display: flex; gap: 8px; align-items: center; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; }
+.arena-series[hidden] { display: none; }
+#series-pips { font-variant-numeric: tabular-nums; letter-spacing: 2px; }
 /* MOBA viewer: gold, read-only builds, kill feed. */
 .moba-hud { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 12px; align-items: start; margin-bottom: 12px; }
 .moba-hud[hidden] { display: none; }

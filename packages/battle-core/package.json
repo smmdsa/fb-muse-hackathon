@@ -7,7 +7,7 @@
     "@agent-wars/behavior-dna": "workspace:*"
   },
   "scripts": {
-    "test": "node --test ./test/determinism.test.mjs ./test/mirror.test.mjs ./test/policy-driver.test.mjs ./test/replay.test.mjs ./test/moba.test.mjs ./test/moba-driver.test.mjs ./test/moba-balance.test.mjs ./test/overseer.test.mjs",
+    "test": "node --test ./test/determinism.test.mjs ./test/mirror.test.mjs ./test/policy-driver.test.mjs ./test/replay.test.mjs ./test/moba.test.mjs ./test/moba-driver.test.mjs ./test/moba-balance.test.mjs ./test/overseer.test.mjs ./test/arena.test.mjs",
     "build": "node ./scripts/build-check.mjs"
   }
 }

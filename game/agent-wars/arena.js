@@ -164,16 +164,29 @@ function perspectiveMeta(match, data, myVersion) {
   };
 }
 
+// Series result line. The replay owns the score: rounds never
+// touch the matches table, so the text renders after load.
+function arenaSeriesText(match, replay) {
+  const s = replay.score || { A: 0, B: 0 };
+  const rounds = (replay.rounds || []).map((r) => "R" + r.round + " " + r.winner).join(" - ");
+  arenaResult.hidden = false;
+  arenaResult.textContent = `${match.winner} takes the series ${s.A}-${s.B} (${rounds}). ${match.rated ? "Rated." : "Unrated sparring."}`;
+  toastSay(`${match.winner} takes the series ${s.A}-${s.B}.`);
+}
+
 async function playSettled(match) {
   if (!match || !match.id) return;
   const r = await arenaCall("GET", `/v1/matches/${match.id}/replay`);
-  if (r.status !== 200 || !r.data.replay || !r.data.replay.frames) {
+  if (r.status !== 200 || !r.data.replay || (!r.data.replay.frames && !r.data.replay.rounds)) {
     arenaSay("Replay unavailable — the result stands.");
     return;
   }
   if (r.data.replay.checksum !== match.checksum) {
     arenaSay("Replay checksum differs — the result stands.");
     return;
+  }
+  if (r.data.replay.version === 3 && r.data.replay.rounds) {
+    arenaSeriesText(match, r.data.replay);
   }
   if (typeof window.playServerReplay === "function") {
     window.playServerReplay(r.data.replay, {
@@ -191,11 +204,13 @@ async function playSettled(match) {
 function onSettled(m, instant) {
   const foe = String(m.b_version).startsWith("bot:") ? `sparring ${m.b_version}` : "a ranked foe";
   arenaResult.hidden = false;
-  arenaResult.textContent = instant
+  arenaResult.textContent = m.mode === "arena"
+    ? `Series settled: ${m.winner} takes it - loading rounds...`
+    : instant
     ? `${m.winner} wins in ${m.ticks} ticks. ${m.rated ? "Rated." : "Unrated sparring."}`
     : `${m.winner} wins in ${m.ticks} ticks vs ${foe}. ${m.rated ? "Rated." : "Unrated."} Details on the dashboard.`;
   arenaSay(instant ? "Matched at once — entering the arena." : "Match found — entering the arena.");
-  toastSay(`${m.winner} wins in ${m.ticks} ticks.`);
+  toastSay(m.mode === "arena" ? `${m.winner} takes the series.` : `${m.winner} wins in ${m.ticks} ticks.`);
   arenaTicket = "";
   queueBusy(false);
   clockStop();
@@ -356,7 +371,7 @@ arenaBoot();
   if (!id || !arenaToken) return;
   await arenaBoot();
   const r = await arenaCall("GET", `/v1/matches/${id}/replay`);
-  if (r.status !== 200 || !r.data.replay || !r.data.replay.frames) return;
+  if (r.status !== 200 || !r.data.replay || (!r.data.replay.frames && !r.data.replay.rounds)) return;
   const stored = r.data.stored || {};
   const ok = r.data.identical === true && r.data.replay.checksum === stored.checksum;
   const mine = stored.a_version === arenaVersion ? "a" : stored.b_version === arenaVersion ? "b" : null;
@@ -364,6 +379,9 @@ arenaBoot();
     ? econFor(stored, arenaVersion)
     : `${stored.rated ? "rated" : "unrated"} · ${stored.ticks} ticks`;
   showBattle();
+  if (r.data.replay.version === 3 && r.data.replay.rounds) {
+    arenaSeriesText(stored, r.data.replay);
+  }
   if (typeof window.playServerReplay === "function") {
     window.playServerReplay(r.data.replay, {
       winner: stored.winner,

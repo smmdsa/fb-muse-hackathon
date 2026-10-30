@@ -49,11 +49,14 @@ describe("meta provider", () => {
     for (const token of ["ownHpPct", "distFoe", "projectileTti", "coverDist", "lineOfSight", "dashReady", "shieldReady", "foeLastSeenAge", "objectiveDist", "timeLeft", "edgeDist", "energy", "paragraphs long"]) {
       assert.ok(system.includes(token), `system names operand ${token}`);
     }
-    for (const token of ["gt, gte, lt, lte, eq", "APPROACH", "RETREAT", "STRAFE", "KITE", "CAPTURE", "SEEK_COVER", "rejects the whole draft"]) {
+    for (const token of ["gt, gte, lt, lte, eq", "APPROACH", "RETREAT", "STRAFE", "KITE", "CAPTURE", "SEEK_COVER", "does nothing in the arena"]) {
       assert.ok(system.includes(token), `system names ${token}`);
     }
-    for (const token of ["ownGold", "nearFoeMinions", "nearAllyMinions", "distFoeTower", "foeTowerHpPct", "buildValue", "PUSH", "FARM", "DEFEND", "auto-attack", "scrap_blade", "siege_breaker", "schemaVersion\":2"]) {
-      assert.ok(system.includes(token), `system names moba token ${token}`);
+    for (const token of ["best of 3", "WAIT", "round", "knockout", "no lanes", "foeAlive", "omit buy always", "schemaVersion\":2"]) {
+      assert.ok(system.includes(token), `system names arena token ${token}`);
+    }
+    for (const token of ["ownGold", "nearFoeMinions", "nearAllyMinions", "distFoeTower", "foeTowerHpPct", "buildValue", "PUSH", "FARM", "DEFEND", "CONTEST_OVERSEER", "scrap_blade", "siege_breaker", "Overseer", "MINION", "STRUCTURE", "LAST_HIT"]) {
+      assert.ok(!system.includes(token), `system drops moba token ${token}`);
     }
   });
 
@@ -160,7 +163,7 @@ describe("prompt-to-chip targeting contract", () => {
       return chatOk(POLICY_TEXT)();
     };
     await createMetaProvider({ META_SPARK_KEY: "key" }, fetchFn).compileStrategy({ prompt: "focus enemy heroes", agentVersionId: "v1" });
-    for (const token of ["target", "FOE", "MINION", "STRUCTURE", "NONE", "first matching rule", "foeAlive"]) {
+    for (const token of ["target", "FOE", "NONE", "first matching rule", "foeAlive"]) {
       assert.ok(system.includes(token), `missing ${token}`);
     }
     assert.ok(!system.includes("Robots auto-attack anything in range"));
@@ -176,33 +179,33 @@ describe("malformed Muse responses", () => {
   });
 });
 
-describe("compiled strategy in the MOBA engine", () => {
+describe("compiled strategy in the arena engine", () => {
   it("keeps Muse's ordered target choices through validation and execution", async () => {
-    const { createBattle, drive, DEFAULT_MOBA } = await import("../../battle-core/src/index.ts");
+    const { createBattle, drive, ARENA_1V1 } = await import("../../battle-core/src/index.ts");
     const draft = { schemaVersion: 2, agentVersionId: "v1", dna: { aggression: 50, evasion: 50, preferredDistance: 50, energyConservation: 50 }, rules: [
       { id: "low-health-hold", when: { operand: "ownHpPct", op: "lt", value: 30 }, move: "RETREAT", target: "NONE" },
       { id: "focus-hero", when: { operand: "foeAlive", op: "eq", value: true }, move: "APPROACH", target: "FOE" },
     ] };
     const result = await createMetaProvider({ META_SPARK_KEY: "key" }, chatOk(JSON.stringify(draft))).compileStrategy({ prompt: "retreat without shooting when weak, otherwise target the enemy robot", agentVersionId: "v1" });
     assert.ok(result.policy, result.errors.join(", "));
-    const s = createBattle(DEFAULT_MOBA);
-    s.agents.A.pos = { x: 24, y: 8 };
-    s.agents.B.pos = { x: 24, y: 10 };
-    const attack = drive(s, result.policy, "A", DEFAULT_MOBA);
+    const s = createBattle(ARENA_1V1);
+    s.agents.A.pos = { x: 12, y: 8 };
+    s.agents.B.pos = { x: 12, y: 10 };
+    const attack = drive(s, result.policy, "A", ARENA_1V1);
     assert.equal(attack.fire, true);
     assert.deepEqual(attack.aim, { x: 0, y: 1 });
-    s.agents.A.hp = 100;
-    const retreat = drive(s, result.policy, "A", DEFAULT_MOBA);
+    s.agents.A.hp = 20;
+    const retreat = drive(s, result.policy, "A", ARENA_1V1);
     assert.equal(retreat.fire, false);
-    assert.ok(retreat.move.x < 0);
+    assert.ok(retreat.move.y < 0);
   });
 });
 
-describe("tactical compiler contract", () => {
-  it("teaches Muse the real tower and wave sensors and actions", async () => {
+describe("arena compiler contract", () => {
+  it("teaches Muse the real arena sensors and actions", async () => {
     let brief = '';
     const fetchFn = async (_url, init) => { brief = JSON.parse(init.body).messages[0].content; return chatOk(POLICY_TEXT)(); };
-    await createMetaProvider({ META_SPARK_KEY: 'test' }, fetchFn).compileStrategy({ prompt: 'wait until minions tank the tower', agentVersionId: 'v1' });
-    for (const key of ['foeTowerTargetsAllyMinion', 'foeTowerTargetsMe', 'inFoeTowerRange', 'nearAllyMinionHp', 'nearFoeMinionHp', 'killableFoeMinionsInRange', 'nextWaveSeconds', 'distOwnBase', 'ownStructureThreatened', 'WAIT', 'LAST_HIT']) assert.ok(brief.includes(key), key);
+    await createMetaProvider({ META_SPARK_KEY: 'test' }, fetchFn).compileStrategy({ prompt: 'hold the center and kite at mid range', agentVersionId: 'v1' });
+    for (const key of ['ownHpPct', 'distFoe', 'projectileTti', 'coverDist', 'lineOfSight', 'dashReady', 'shieldReady', 'objectiveDist', 'timeLeft', 'edgeDist', 'foeHpPct', 'gameTime', 'foeAlive', 'WAIT', 'NONE']) assert.ok(brief.includes(key), key);
   });
 });

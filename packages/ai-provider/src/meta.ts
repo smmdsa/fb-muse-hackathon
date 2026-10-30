@@ -20,30 +20,29 @@ const defaultFetch = (url: string, init: Record<string, unknown>) => {
 
 // The system brief pins the exact policy JSON the model must return.
 // It names every legal operand, operator, and move, because anything
-// else rejects the whole draft at validation. Fights run on the MOBA
-// lane, so the brief teaches that map: minions, towers, gold, shop.
+// else the arena ignores it. Fights run in the 1v1
+// battle arena, so the brief teaches that map: two robots, best of 3.
 const COMPILE_SYSTEM = [
-  "You draft fighting-robot policies for the MOBA mode of AGENT WARS.",
+  "You draft fighting-robot policies for the BATTLE ARENA mode of AGENT WARS.",
   "Reply with one JSON object and nothing else.",
   "Shape: {\"schemaVersion\":2,\"agentVersionId\":\"<id>\",",
   "\"dna\":{\"aggression\":0-100,\"evasion\":0-100,\"preferredDistance\":0-100,\"energyConservation\":0-100},",
   "\"rules\":[{\"id\":\"<slug>\",\"when\":{...},\"move\":\"<MOVE>\",",
-  "\"fire\":true|false,\"shield\":true|false,\"dash\":true|false,\"target\":\"<TARGET>\",\"buy\":\"<item>\"}]}.",
+  "\"fire\":true|false,\"shield\":true|false,\"dash\":true|false,\"target\":\"<TARGET>\"}].",
   "Send 2 to 6 rules. Keep every trait an integer 0-100.",
   "The brief can run paragraphs long. Read it whole, distill the overall battle plan, then mint rules that together express it.",
-  "Map: one lane on a 48x16 field. Each side holds 2 towers, 1 inhibitor, 2 nexus turrets, 1 nexus in that order. Waves of 5 minions spawn every 30s from 1:00. Each tick the first matching rule wins; put emergency and specific rules before general rules. Unmatched rules fall back to pushing and automatic targeting.",
-  "Operands, exactly these: ownHpPct, energy, distFoe, projectileTti, coverDist, lineOfSight, dashReady, shieldReady, foeLastSeenAge, objectiveDist, timeLeft, edgeDist, ownGold, ownDeaths, gameTime, distFoeTower, foeTowerHpPct, nearFoeMinions, nearAllyMinions, distFoeMinion, foeHpPct, buildValue, slotsFree, structLead, foeAlive.",
-  "Additional MOBA operands: inFoeTowerRange and foeTowerTargetsMe are booleans; allyMinionsUnderFoeTower counts living allied minions in the nearest enemy tower's range; nearAllyMinionHp and nearFoeMinionHp sum HP within 6 units of the robot; killableFoeMinionsInRange counts visible enemy minions within attack range whose current HP is at most one attack of damage; nextWaveSeconds is seconds until the next wave; distOwnBase is distance to own nexus; ownStructureThreatened is true if any enemy minion is within 6 units of an alive allied structure. These values are unavailable outside MOBA.",
-  "foeTowerTargetsAllyMinion is true when the nearest enemy tower currently targets a living allied minion.",
-  "The Overseer appears at 6:00 in the north-central pit, respawns 3 minutes after defeat and grants +20% robot attack damage for 90 seconds to sides that hit it during the killing tick. It retaliates against nearby robots once per second. In new arena matches only: overseerAlive (boolean), overseerHpPct (null when absent), overseerDist, overseerSpawnSeconds, ownOverseerBuffSeconds and foeOverseerBuffSeconds. CONTEST_OVERSEER approaches its pit while alive and stops at attack range; target OVERSEER fires only at it when visible and in range. In old matches those observations are unavailable. Use these only when relevant to the player's plan.",
-  "Operators, exactly these: gt, gte, lt, lte, eq. Value is a number; eq takes true or false for lineOfSight, dashReady, shieldReady, foeAlive, inFoeTowerRange, foeTowerTargetsMe, foeTowerTargetsAllyMinion, ownStructureThreatened, overseerAlive. foeLastSeenAge is not implemented: do not use it.",
-  "Moves, exactly these: APPROACH, RETREAT, STRAFE, KITE, CAPTURE, SEEK_COVER, PUSH, FARM, DEFEND, WAIT, CONTEST_OVERSEER. WAIT holds position; PUSH escorts your wave, FARM hunts last hits, DEFEND guards your threatened tower, CAPTURE sieges the nearest vulnerable enemy tower.",
-  "Target, optional: AUTO uses the default auto-attack targeting; FOE shoots only the enemy robot; MINION shoots only enemy minions; STRUCTURE shoots only a vulnerable enemy structure; NONE holds fire. These are strict choices: if the specified target is unavailable or out of range, no shot is fired. If omitted AUTO applies. In MOBA fire does not override target. Use target to express explicit combat instructions, and never invent actions the engine cannot perform.",
-  "LAST_HIT shoots only a visible in-range enemy minion currently killable by one attack; shots can miss or arrive after other damage. WAIT with NONE holds position and fire. Tower aggro may switch after you damage the enemy robot under its tower, even if allies are present.",
-  "The DNA traits are descriptive and do not change MOBA behavior; express every requested behavior in rules. Do not claim unsupported behaviors.",
-  "Buy, optional: \"buy\":\"<item>\" with one of scrap_blade, cloth_weave, worn_treads, overclock_chip, hull_patch, repair_cell, tempered_edge, bulwark_plate, turbo_treads, rapid_cycler, reinforced_hull, siege_breaker, aegis_core, phantom_drive, warlord_frame. Gate buys on ownGold and buildValue. The arena also auto-buys when no buy is requested and auto-combines items; a chip cannot disable these systems.",
+  "Map: a 24x16 closed arena with 4 symmetric cover blocks and a center zone. Two robots spawn on opposite sides and face each other. There are no lanes, no minions, no towers, no gold, no shop, and no neutral objectives.",
+  "Format: best of 3 rounds. Each round ends by knockout or at the 90 second cap. The round winner is the robot still standing, or at the cap the one ahead on damage, then center control, then health. First to 2 round wins takes the series. Every round resets positions, health, and energy. The chip persists across rounds, so write rules that fight every round from full health.",
+  "Operands, exactly these: ownHpPct, energy, distFoe, projectileTti, coverDist, lineOfSight, dashReady, shieldReady, objectiveDist, timeLeft, edgeDist, foeHpPct, gameTime, foeAlive.",
+  "objectiveDist measures distance to the arena center. timeLeft counts seconds left in the current round. gameTime counts seconds since the current round started.",
+  "Operators, exactly these: gt, gte, lt, lte, eq. Value is a number; eq takes true or false for lineOfSight, dashReady, shieldReady, foeAlive. foeLastSeenAge is not implemented: do not use it.",
+  "Moves, exactly these: APPROACH, RETREAT, STRAFE, KITE, CAPTURE, SEEK_COVER, WAIT. WAIT holds position; CAPTURE takes the arena center; SEEK_COVER runs to the nearest cover block.",
+  "Target, optional: AUTO fires at the enemy robot when visible; FOE does the same; NONE holds fire. If omitted AUTO applies. The robot fires at the visible foe on its own; set NONE only to hold fire on purpose, for example while retreating.",
+  "The DNA traits are descriptive and do not change arena behavior; express every requested behavior in rules. Do not claim unsupported behaviors.",
+  "There is no shop: omit buy always.",
+  "Each tick the first matching rule wins; put emergency and specific rules before general rules.",
   "Combine tests with {\"all\":[...]} or {\"any\":[...]}. Example: {\"operand\":\"distFoe\",\"op\":\"lt\",\"value\":6}.",
-  "Any other operand, operator, move, or item rejects the whole draft.",
+  "Any other operand, operator, or move does nothing in the arena: stay inside the lists above.",
   "Match the prompt mood: rush means high aggression,",
   "evade means high evasion, far means high preferredDistance, patient means high energyConservation.",
 ].join(" ");

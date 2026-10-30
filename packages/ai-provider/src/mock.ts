@@ -62,33 +62,18 @@ function traitsFor(prompt: string): DnaTraits {
   };
 }
 
-const MOBA_FARM: BehaviorRule = {
-  id: "farm-minions",
-  when: { any: [{ operand: "nearFoeMinions", op: "gte", value: 1 }, { operand: "distFoe", op: "lt", value: 6 }] },
-  move: "FARM",
-  fire: true,
-};
-
-const MOBA_PUSH: BehaviorRule = {
-  id: "push-wave",
-  when: { any: [{ operand: "nearAllyMinions", op: "gte", value: 1 }, { operand: "distFoe", op: "gte", value: 6 }] },
-  move: "PUSH",
-  fire: true,
-};
-
-// Dual-mode pool. MOBA rules pair their lane trigger with a duel
-// trigger, so every hash trio below fights in both sims: the MOBA
-// side reads minions, the duel side reads the foe. Evolution Lab
-// keeps dueling these drafts; the arena plays them on the lane.
+// Arena pool. Every rule reads the 1v1 duel: foe distance,
+// health, and the center. The hash drafter below picks trios
+// from these eight, so each trio must fight on its own.
 const RULE_POOL: BehaviorRule[] = [
   { id: "weak-retreat", when: { operand: "ownHpPct", op: "lt", value: 25 }, move: "RETREAT" },
-  MOBA_FARM,
+  { id: "bleed-cover", when: { operand: "ownHpPct", op: "lt", value: 50 }, move: "SEEK_COVER" },
   { id: "far-approach", when: { operand: "distFoe", op: "gt", value: 8 }, move: "APPROACH" },
   { id: "close-fire", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true },
-  MOBA_PUSH,
+  { id: "weak-foe-chase", when: { operand: "foeHpPct", op: "lt", value: 35 }, move: "APPROACH", fire: true },
   { id: "mid-strafe", when: { all: [{ operand: "distFoe", op: "gte", value: 4 }, { operand: "distFoe", op: "lte", value: 10 }] }, move: "STRAFE", fire: true },
   { id: "seek-center", when: { operand: "objectiveDist", op: "gt", value: 6 }, move: "CAPTURE" },
-  { id: "defend-base", when: { operand: "ownHpPct", op: "lt", value: 50 }, move: "DEFEND" },
+  { id: "hold-center", when: { all: [{ operand: "objectiveDist", op: "lte", value: 3 }, { operand: "lineOfSight", op: "eq", value: true }] }, move: "WAIT", fire: true },
 ];
 
 // The drafter picks three rules by prompt hash and stamps stable ids.

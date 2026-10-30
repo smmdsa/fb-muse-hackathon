@@ -7,7 +7,8 @@ import { addEntry, createEvent, lock, register as registerEntry, reportGame, see
 import type { EventPhase } from "@agent-wars/tournaments";
 import type { Championship } from "@agent-wars/tournaments";
 import { CATALOG } from "@agent-wars/economy";
-import { BENCH_POLICY, BOT_PRESETS, buildReplay, DEFAULT_MOBA, ARENA_MOBA, fightPolicies, pickBot } from "@agent-wars/battle-core";
+import { ARENA_1V1, BENCH_POLICY, BOT_PRESETS, buildReplay, DEFAULT_MOBA, ARENA_MOBA, fightPolicies, fightSeries, pickBot } from "@agent-wars/battle-core";
+import type { SeriesResult } from "@agent-wars/battle-core";
 import { MAX_DEFENSE_PER_DAY, recordDefense } from "@agent-wars/autobattle";
 import { pickOpponent } from "@agent-wars/matchmaker";
 import type { Candidate, History } from "@agent-wars/matchmaker";
@@ -131,8 +132,9 @@ async function leaderboard(env: WorkerEnv, seasonId: string): Promise<Response> 
   return json({ seasonId, rows });
 }
 
-// New fights run MOBA. Old rows without a mode read as duel.
-function matchMode(row: Record<string, unknown>): "duel" | "moba" {
+// New fights run the 1v1 battle arena. Old rows without a mode read as duel.
+function matchMode(row: Record<string, unknown>): "duel" | "moba" | "arena" {
+  if (row.mode === "arena-bo3") return "arena";
   return row.mode === "moba" || row.mode === "moba-v2" ? "moba" : "duel";
 }
 
@@ -160,9 +162,10 @@ async function replay(env: WorkerEnv, id: string): Promise<Response> {
     return json({ error: "replay unavailable: a version is gone" }, 410);
   }
   // The row names its sim. MOBA rows re-simulate as MOBA and
-  // serve v2 replays. Duel rows keep the v1 path untouched.
-  const cfg = matchMode(match) === "moba" ? (match.mode === "moba-v2" ? ARENA_MOBA : DEFAULT_MOBA) : undefined;
-  const again = fightPolicies(pa, pb, match.seed as string, cfg);
+  // serve v2 replays, arena rows serve v3. Duel rows keep v1.
+  const mode = matchMode(match);
+  const cfg = mode === "arena" ? ARENA_1V1 : mode === "moba" ? (match.mode === "moba-v2" ? ARENA_MOBA : DEFAULT_MOBA) : undefined;
+  const again = mode === "arena" ? fightSeries(pa, pb, match.seed as string, cfg) : fightPolicies(pa, pb, match.seed as string, cfg);
   const replay = buildReplay(pa, pb, match.seed as string, cfg);
   const agentCard = async (ver: Record<string, unknown> | null, versionId: string) => {
     if (!ver) {
@@ -537,7 +540,7 @@ async function runCasualD1(
     foeLabel = bot.id;
     foePolicy = bot.policy;
   }
-  const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, foePolicy, input.seed, ARENA_MOBA);
+  const out = fightSeries(JSON.parse(v.policy_json as string) as AgentPolicy, foePolicy, input.seed, ARENA_1V1);
   const id = input.key ?? mintId("m");
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   const plan = await planPay(env, input.leaderId, id, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
@@ -546,13 +549,13 @@ async function runCasualD1(
     : null;
   const writes: unknown[] = [
     env.DB.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'moba-v2')",
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'arena-bo3')",
     ).bind(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, plan.credited, planB?.credited ?? 0, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
     ...plan.stmts,
     ...(planB ? planB.stmts : []),
   ];
   await env.DB.batch(writes as never[]);
-  return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !input.bVersionId, paid: plan.credited, mode: "moba" };
+  return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, score: out.score, rounds: out.rounds, foe: foeLabel, bot: !input.bVersionId, paid: plan.credited, mode: "arena" };
 }
 
 async function settleTicketD1(env: WorkerEnv, ticket: Record<string, unknown>, foeVersion: string | null): Promise<Record<string, unknown>> {
@@ -655,11 +658,11 @@ async function settleRankedD1(
   const bAgent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(b.agent_id as string).first<Record<string, unknown>>();
   if (!aAgent || !bAgent) throw new Error("unknown agent");
   if (aAgent.leader_id === bAgent.leader_id) throw new Error("self match denied");
-  const out = fightPolicies(
+  const out = fightSeries(
     JSON.parse(a.policy_json as string) as AgentPolicy,
     JSON.parse(b.policy_json as string) as AgentPolicy,
     input.seed,
-    ARENA_MOBA,
+    ARENA_1V1,
   );
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   const ledger = createLedger("local-s1");
@@ -691,7 +694,7 @@ async function settleRankedD1(
     ...planA.stmts,
     ...planB.stmts,
     env.DB.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'moba-v2')",
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'arena-bo3')",
     ).bind(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, planA.credited, planB.credited, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })),
   );
   try {
@@ -703,7 +706,7 @@ async function settleRankedD1(
     if (!stored) throw new Error("settle failed");
     return settledResultD1(env, stored as Record<string, number | string>);
   }
-  return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA: planA.credited, paidB: planB.credited, mode: "moba" };
+  return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, score: out.score, rounds: out.rounds, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA: planA.credited, paidB: planB.credited, mode: "arena" };
 }
 
 async function requestMatchD1(
@@ -758,6 +761,22 @@ async function readTicketD1(
 }
 
 async function settledResultD1(env: WorkerEnv, row: Record<string, unknown>): Promise<Record<string, unknown>> {
+  // Arena rows re-simulate the series: the row stores winner, ticks, and
+  // checksum only, while fresh settles also return score and rounds.
+  // Missing versions stay silent, so the retry keeps the stored receipt.
+  let series: SeriesResult | null = null;
+  if (matchMode(row) === "arena") {
+    const a = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(row.a_version).first<Record<string, unknown>>();
+    const b = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(row.b_version).first<Record<string, unknown>>();
+    if (a && b) {
+      series = fightSeries(
+        JSON.parse(a.policy_json as string) as AgentPolicy,
+        JSON.parse(b.policy_json as string) as AgentPolicy,
+        row.seed as string,
+        ARENA_1V1,
+      );
+    }
+  }
   const credited = async (side: string): Promise<number> => {
     const r = await env.DB.prepare("SELECT SUM(delta) AS total FROM wallet_txns WHERE idem_key = ?").bind(`${row.id}-${side}`).first<Record<string, unknown>>();
     return (r?.total as number) ?? 0;
@@ -773,6 +792,7 @@ async function settledResultD1(env: WorkerEnv, row: Record<string, unknown>): Pr
     paidB: await credited("b"),
     mode: matchMode(row),
     deduped: true,
+    ...(series ? { score: series.score, rounds: series.rounds } : null),
   };
 }
 
@@ -1165,12 +1185,12 @@ export default {
       if (!owner || owner.leader_id !== me.id) return json({ error: "version not found for this leader" }, 404);
       const v = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(versionId).first<Record<string, unknown>>();
       if (!v) return json({ error: "unknown version" }, 404);
-      const out = fightPolicies(JSON.parse(v.policy_json as string) as AgentPolicy, BENCH_POLICY, seed, ARENA_MOBA);
+      const out = fightSeries(JSON.parse(v.policy_json as string) as AgentPolicy, BENCH_POLICY, seed, ARENA_1V1);
       const id = mintId("m");
       await env.DB.prepare(
-        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'moba-v2')",
+        "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'arena-bo3')",
       ).bind(id, seed, versionId, "benchmark-v1", out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB })).run();
-      return json({ matchId: id, ...out, mode: "moba" }, 201);
+      return json({ matchId: id, ...out, mode: "arena" }, 201);
     }
     const analysisMatch = request.method === "POST" && /^\/v1\/battles\/[^/]+\/analysis$/.exec(url.pathname);
     if (analysisMatch) {

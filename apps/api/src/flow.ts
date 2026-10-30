@@ -1,7 +1,7 @@
 // Engine glue. Pure packages decide. This file persists the results.
 
-import { BENCH_POLICY, DEFAULT_MOBA, ARENA_MOBA, fightPolicies } from "@agent-wars/battle-core";
-import type { BattleConfig } from "@agent-wars/battle-core";
+import { ARENA_1V1, BENCH_POLICY, DEFAULT_MOBA, ARENA_MOBA, fightSeries } from "@agent-wars/battle-core";
+import type { BattleConfig, SeriesResult } from "@agent-wars/battle-core";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
 import { earnAc, createWallet } from "@agent-wars/economy";
@@ -41,16 +41,19 @@ export function getVersion(store: Store, versionId: string): { policy: AgentPoli
   return { policy: JSON.parse(row.policy_json as string) as AgentPolicy, agentId: row.agent_id as string };
 }
 
-// New fights run MOBA. Old rows without a mode read as duel.
-export type MatchMode = "duel" | "moba";
+// New fights run the 1v1 battle arena. MOBA rows replay on the
+// lane. Old rows without a mode read as duel.
+export type MatchMode = "duel" | "moba" | "arena";
 
 export function matchMode(row: Record<string, unknown>): MatchMode {
+  if (row.mode === "arena-bo3") return "arena";
   return row.mode === "moba" || row.mode === "moba-v2" ? "moba" : "duel";
 }
 
 // The helper maps a stored mode to its sim config. Duel passes
 // undefined, so the sim keeps its byte-identical duel defaults.
 export function battleConfigFor(mode: MatchMode, storedMode?: unknown): BattleConfig | undefined {
+  if (mode === "arena") return ARENA_1V1;
   return mode === "moba" ? (storedMode === "moba-v2" ? ARENA_MOBA : DEFAULT_MOBA) : undefined;
 }
 
@@ -58,15 +61,15 @@ export function battleConfigFor(mode: MatchMode, storedMode?: unknown): BattleCo
 export function runTraining(
   store: Store,
   input: { versionId: string; seed: string },
-): { matchId: string; winner: string; ticks: number; checksum: string; mode: MatchMode } {
+): SeriesResult & { matchId: string; mode: MatchMode } {
   const found = getVersion(store, input.versionId);
   if (!found) throw new Error("unknown version");
-  const out = fightPolicies(found.policy, BENCH_POLICY, input.seed, ARENA_MOBA);
+  const out = fightSeries(found.policy, BENCH_POLICY, input.seed, ARENA_1V1);
   const id = mintId("m");
   store.db.prepare(
-    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'moba-v2')",
+    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'arena-bo3')",
   ).run(id, input.seed, input.versionId, "benchmark-v1", out.winner, out.ticks, out.checksum, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
-  return { matchId: id, ...out, mode: "moba" };
+  return { matchId: id, ...out, mode: "arena" };
 }
 
 // Ranked pre-checks. The route spends energy only after this passes.
@@ -96,7 +99,7 @@ export function runRanked(
   const aAgent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(a.agentId) as Record<string, unknown>;
   const bAgent = store.db.prepare("SELECT * FROM agents WHERE id = ?").get(b.agentId) as Record<string, unknown>;
   if (aAgent.leader_id === bAgent.leader_id) throw new Error("self match denied");
-  const out = fightPolicies(a.policy, b.policy, input.seed, ARENA_MOBA);
+  const out = fightSeries(a.policy, b.policy, input.seed, ARENA_1V1);
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   let applied = { deltaA: 0, deltaB: 0 };
   let paidA = 0;
@@ -125,7 +128,7 @@ export function runRanked(
   paidA = creditAc(store, aAgent.leader_id as string, input.key, "a", winner === "A" ? "win" : winner === "B" ? "loss" : "no-contest");
   paidB = creditAc(store, bAgent.leader_id as string, input.key, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
   store.db.prepare(
-    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'moba-v2')",
+    "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, delta_a, delta_b, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'arena-bo3')",
   ).run(input.key, input.seed, input.aVersionId, input.bVersionId, winner, out.ticks, out.checksum, applied.deltaA, applied.deltaB, paidA, paidB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
   };
   try {
@@ -135,11 +138,20 @@ export function runRanked(
     if (dupe && /constraint|UNIQUE|PRIMARY/i.test((err as Error).message)) return settledResult(store, dupe);
     throw err;
   }
-  return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA, paidB, mode: "moba" };
+  return { matchId: input.key, winner, ticks: out.ticks, checksum: out.checksum, score: out.score, rounds: out.rounds, deltaA: applied.deltaA, deltaB: applied.deltaB, paidA, paidB, mode: "arena" };
 }
 
 // A settled row replays as the original result shape, never the raw row.
-function settledResult(store: Store, row: Record<string, unknown>): Record<string, unknown> {
+export function settledResult(store: Store, row: Record<string, unknown>): Record<string, unknown> {
+  // Arena rows re-simulate the series: the row stores winner, ticks, and
+  // checksum only, while fresh settles also return score and rounds.
+  // Missing versions stay silent, so the retry keeps the stored receipt.
+  let series: SeriesResult | null = null;
+  if (matchMode(row) === "arena") {
+    const a = getVersion(store, row.a_version as string);
+    const b = getVersion(store, row.b_version as string);
+    if (a && b) series = fightSeries(a.policy, b.policy, row.seed as string, ARENA_1V1);
+  }
   const credited = (side: string): number => {
     const r = store.db.prepare("SELECT SUM(delta) AS total FROM wallet_txns WHERE idem_key = ?").get(`${row.id}-${side}`) as Record<string, unknown> | null;
     return (r?.total as number) ?? 0;
@@ -155,6 +167,7 @@ function settledResult(store: Store, row: Record<string, unknown>): Record<strin
     paidB: credited("b"),
     mode: matchMode(row),
     deduped: true,
+    ...(series ? { score: series.score, rounds: series.rounds } : null),
   };
 }
 
@@ -624,7 +637,7 @@ export function findHumanOpponent(
 export function runCasual(
   store: Store,
   input: { aVersionId: string; bVersionId?: string; bBot?: string; seed: string; leaderId: string; key?: string; otherLeaderId?: string },
-): { matchId: string; winner: string; ticks: number; checksum: string; foe: string; bot: boolean; paid: number; mode: MatchMode } {
+): SeriesResult & { matchId: string; foe: string; bot: boolean; paid: number; mode: MatchMode } {
   const found = getVersion(store, input.aVersionId);
   if (!found) throw new Error("unknown version");
   const bot = input.bBot ? pickBotFor(store, input.leaderId) : null;
@@ -634,7 +647,7 @@ export function runCasual(
     ? (getVersion(store, input.bVersionId)?.policy ?? null)
     : (bot?.policy ?? null);
   if (!foePolicy) throw new Error("unknown foe version");
-  const out = fightPolicies(found.policy, foePolicy, input.seed, ARENA_MOBA);
+  const out = fightSeries(found.policy, foePolicy, input.seed, ARENA_1V1);
   const id = input.key ?? mintId("m");
   const winner = out.winner === "DRAW" ? "DRAW" : out.winner;
   // One write block: the match row and the wallet credits land together.
@@ -646,10 +659,10 @@ export function runCasual(
       paidB = creditAc(store, input.otherLeaderId, id, "b", winner === "B" ? "win" : winner === "A" ? "loss" : "no-contest");
     }
     store.db.prepare(
-      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'moba-v2')"
+      "INSERT INTO matches (id, seed, a_version, b_version, winner, ticks, checksum, rated, paid_a, paid_b, created_at, chips_json, mode) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'arena-bo3')"
     ).run(id, input.seed, input.aVersionId, foeLabel, out.winner, out.ticks, out.checksum, paid, paidB, Date.now(), JSON.stringify({ a: out.chipsA, b: out.chipsB }));
   });
-  return { matchId: id, winner, ticks: out.ticks, checksum: out.checksum, foe: foeLabel, bot: !!bot, paid, mode: "moba" };
+  return { matchId: id, ...out, winner, foe: foeLabel, bot: !!bot, paid, mode: "arena" };
 }
 
 function pickBotFor(store: Store, leaderId: string): { id: string; policy: import("@agent-wars/behavior-dna").AgentPolicy } {

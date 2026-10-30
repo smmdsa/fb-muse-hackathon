@@ -28,7 +28,7 @@
 <main class="shell content">
 <header class="top">
 <div>
-<p class="eyebrow">Matchmaking — the MOBA of agents</p>
+<p class="eyebrow">Matchmaking — 1v1 battle arena · best of 3</p>
 <h1>ARENA</h1>
 <p class="sub">Queue normal or ranked. Matches auto-accept.</p>
 </div>
@@ -87,13 +87,18 @@
 <div class="clock"><span id="arena-clock">90</span><span id="arena-clock-unit">s</span><br /><span class="pill" id="pill-winner">no winner yet</span> <span class="pill live" id="moba-live" hidden title="Jump to live">● LIVE</span></div>
 <div class="side right"><div><span class="name tag-b" id="score-b-name">CRIMSON</span><div class="bar"><div class="fill hp-b" id="hp-b"></div></div><div class="bar thin"><div class="fill en-b" id="en-b"></div></div></div><img id="score-b-img" alt="Crimson agent" src="" hidden /></div>
 </div>
+<div class="arena-series" id="arena-series" hidden>
+<span class="pill" id="series-round">ROUND 1/3</span>
+<span class="pill" id="series-score">0 — 0</span>
+<span class="pill" id="series-pips" title="rounds">○ ○ ○</span>
+</div>
 <div class="moba-hud" id="moba-hud" hidden>
 <div class="moba-side"><span class="name tag-a">CYAN</span> <span class="pill" id="gold-a">350g</span> <span class="pill" id="respawn-a" hidden>respawn —</span> <span class="pill" id="kd-a" title="kills / deaths">K 0 · D 0</span><div class="builds" id="builds-a" aria-label="Cyan build, read only"></div></div>
 <div class="moba-kills"><ol id="moba-feed" aria-live="polite"></ol></div>
 <div class="moba-side right"><span class="pill" id="kd-b" title="kills / deaths">K 0 · D 0</span> <div class="builds" id="builds-b" aria-label="Crimson build, read only"></div> <span class="pill" id="respawn-b" hidden>respawn —</span> <span class="pill" id="gold-b">350g</span> <span class="name tag-b">CRIMSON</span></div>
 </div>
 <div class="stage">
-<canvas id="arena" width="960" height="640" role="img" aria-label="Top-down robot arena. Duel or MOBA lane battle."></canvas>
+<canvas id="arena" width="960" height="640" role="img" aria-label="Top-down robot arena. 1v1 battle, best of 3 rounds."></canvas>
 <div class="overlay" id="arena-overlay"><div><p class="eyebrow">The Forge · agent duel</p><strong>THE ARENA AWAITS</strong><p class="sub">Match found — the battle loads here.</p></div></div>
 <div class="endcard" id="endcard" hidden>
 <h2 id="end-title">Winner</h2>

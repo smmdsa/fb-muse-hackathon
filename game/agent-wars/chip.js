@@ -338,7 +338,7 @@ $("fight-btn").addEventListener("click", async () => {
     $("train-msg").textContent = `Fight failed: ${r.data.error || r.status}.`;
     return;
   }
-  $("train-msg").textContent = `${r.data.winner} wins in ${r.data.ticks} ticks. Library updated.`;
+  $("train-msg").textContent = r.data.mode === "arena" && r.data.score ? `${r.data.winner} takes the series ${r.data.score.A}-${r.data.score.B}. Library updated.` : `${r.data.winner} wins in ${r.data.ticks} ticks. Library updated.`;
   await refresh();
 });
 

@@ -44,14 +44,32 @@ function norm(v: Vec2): Vec2 {
 
 // The helper spawns one agent at its mirror side.
 function spawn(id: AgentId, cfg: BattleConfig): AgentState {
-  const x = id === "A" ? 2 : cfg.world.width - 2;
+  const w = cfg.world.width;
+  const h = cfg.world.height;
+  const shift = cfg.spawnShift ?? 0;
+  let x = id === "A" ? 2 : w - 2;
+  let y = h / 2;
+  let ax = id === "A" ? 1 : -1;
+  let ay = 0;
+  if (shift === 1) {
+    x = id === "A" ? w - 2 : 2;
+    ax = id === "A" ? -1 : 1;
+  } else if (shift === 2) {
+    x = id === "A" ? w * 0.25 : w * 0.75;
+    y = id === "A" ? h * 0.25 : h * 0.75;
+    const dx = (id === "A" ? w * 0.75 : w * 0.25) - x;
+    const dy = (id === "A" ? h * 0.75 : h * 0.25) - y;
+    const len = Math.hypot(dx, dy) || 1;
+    ax = dx / len;
+    ay = dy / len;
+  }
   return {
     id,
-    pos: { x, y: cfg.world.height / 2 },
+    pos: { x, y },
     vel: { x: 0, y: 0 },
     hp: cfg.agent.maxHp,
     energy: cfg.agent.maxEnergy,
-    aim: { x: id === "A" ? 1 : -1, y: 0 },
+    aim: { x: ax, y: ay },
     alive: true,
     dashCooldownUntil: 0,
     shieldUntil: 0,

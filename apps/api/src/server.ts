@@ -5,8 +5,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
-import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies } from "@agent-wars/battle-core";
-import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, battleConfigFor, board, buyItem, cancelTicket, compileAndPublish, claimFtue, createAgent, createTournament, dashboard, deleteVersion, energyFor, energyView, equipItem, forceDeleteVersion, ftueStatus, getLeader, getTournament, getVersion, installVersion, listTournaments, matchMode, MAX_PROMPT, openTicket, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, renameVersion, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, transitionTournament, validateRanked, withMatch } from "./flow.ts";
+import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies, fightSeries } from "@agent-wars/battle-core";
+import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, battleConfigFor, board, buyItem, cancelTicket, compileAndPublish, claimFtue, createAgent, createTournament, dashboard, deleteVersion, energyFor, energyView, equipItem, forceDeleteVersion, ftueStatus, getLeader, getTournament, getVersion, installVersion, listTournaments, matchMode, MAX_PROMPT, openTicket, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, renameVersion, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, settledResult, transitionTournament, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 import { hasKey } from "@agent-wars/ai-provider";
@@ -364,7 +364,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         }
         const duped = ctx.store.db.prepare("SELECT * FROM matches WHERE id = ?").get(key) as Record<string, unknown> | null;
         if (duped) {
-          send(res, 201, { ...duped, deduped: true });
+          send(res, 201, settledResult(ctx.store, duped));
           return;
         }
         try {
@@ -545,9 +545,10 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           return;
         }
         // The row names its sim. MOBA rows re-simulate as MOBA and
-        // serve v2 replays. Duel rows keep the v1 path untouched.
-        const cfg = battleConfigFor(matchMode(match), match.mode);
-        const again = fightPolicies(a.policy, pb, match.seed as string, cfg);
+        // serve v2 replays, arena rows serve v3. Duel rows keep v1.
+        const mode = matchMode(match);
+        const cfg = battleConfigFor(mode, match.mode);
+        const again = mode === "arena" ? fightSeries(a.policy, pb, match.seed as string, cfg) : fightPolicies(a.policy, pb, match.seed as string, cfg);
         const replay = buildReplay(a.policy, pb, match.seed as string, cfg);
         const agentCard = (ver: { agentId: string } | null, versionId: string) => {
           if (!ver) {

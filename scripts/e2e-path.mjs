@@ -61,7 +61,11 @@ const match = ticket.match;
 const r = await step("replay", "GET", `/v1/matches/${match.id}/replay`, null, token);
 await need(r, 200, (d) => {
   if (d.identical !== true) fail("replay", "server checksum differs");
-  if (!d.replay || !d.replay.frames || !d.replay.frames.length) fail("replay", "no frames");
+  if (!d.replay) fail("replay", "no replay");
+  if (d.replay.version === 3) {
+    if (!d.replay.rounds || !(d.replay.rounds.length === 2 || d.replay.rounds.length === 3)) fail("replay", "no rounds");
+    if (!d.replay.rounds[0].frames || !d.replay.rounds[0].frames.length) fail("replay", "no frames");
+  } else if (!d.replay.frames || !d.replay.frames.length) fail("replay", "no frames");
   if (d.replay.checksum !== match.checksum) fail("replay", "checksum drift");
 });
 

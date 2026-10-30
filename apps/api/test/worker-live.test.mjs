@@ -82,7 +82,7 @@ describe("worker live matchmaking pairs", () => {
     assert.equal(back.json.status, "settled");
     assert.ok(back.json.match);
     assert.equal(back.json.match.rated, 1);
-    assert.equal(back.json.match.mode, "moba");
+    assert.equal(back.json.match.mode, "arena");
     const m = db.prepare("SELECT * FROM matches WHERE id = ?").get(qa.json.id);
     assert.equal(m.a_version, "v30a");
     assert.equal(m.b_version, "v30b");

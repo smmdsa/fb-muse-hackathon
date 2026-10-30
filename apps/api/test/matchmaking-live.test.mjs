@@ -40,7 +40,7 @@ describe("live matchmaking pairs", () => {
     assert.ok(back.match);
     assert.equal(back.match.id, qa.id);
     assert.equal(back.match.rated, 1);
-    assert.equal(back.match.mode, "moba");
+    assert.equal(back.match.mode, "arena");
     assert.equal(back.foe_version, b.version);
     assert.equal(qb.foe_version, a.version);
     const m = arena.db.prepare("SELECT * FROM matches WHERE id = ?").get(qa.id);
