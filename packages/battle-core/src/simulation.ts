@@ -1,14 +1,16 @@
 // Deterministic battle step. Fixed dt keeps replays identical.
 
-import { fnv1a } from "./rng.ts";
+import { fnv1a, mulberry32, seedFromString } from "./rng.ts";
 import { createMobaAgent, createMobaState, mobaStateKey, stepMobaBattle } from "./moba.ts";
 import { circleHitsBox, forgeWorld, pointInBox, segmentHitsBox } from "./world.ts";
 import type {
   AgentAction,
   AgentId,
   AgentState,
+  ArenaExtraState,
   BattleConfig,
   BattleState,
+  PickupKind,
   Vec2,
 } from "./types.ts";
 
@@ -28,12 +30,36 @@ export const DEFAULT_BATTLE: BattleConfig = {
 const FIRE_INTERVAL = 0.5;
 const PROJECTILE_SPEED = 14;
 const PROJECTILE_DAMAGE = 10;
-const DASH_COST = 25;
-const DASH_COOLDOWN = 3;
-const DASH_MULT = 3.2;
-const SHIELD_COST = 20;
-const SHIELD_ACTIVE = 0.8;
-const SHIELD_COOLDOWN = 4;
+export const DASH_COST = 25;
+export const DASH_COOLDOWN = 3;
+export const DASH_MULT = 3.2;
+export const SHIELD_COST = 20;
+export const SHIELD_ACTIVE = 0.8;
+export const SHIELD_COOLDOWN = 4;
+// Arena combat. Shots fly 6u max with the bot as 1u, fire every
+// 1.025s, and energy regens 5/s. The skill fires one powered shot
+// for 25 energy on a 3s cooldown. Pickups spawn on a fixed clock:
+// green heals 20 HP, blue shields 5s, red adds 12% damage for 15s.
+export const ARENA_RANGE = 6;
+export const ARENA_FIRE_INTERVAL = 1.025;
+export const ARENA_SKILL_COST = 25;
+export const ARENA_SKILL_COOLDOWN = 3;
+export const ARENA_SKILL_DAMAGE = 20;
+export const ARENA_PICKUP_FIRST_TICK = 150;
+export const ARENA_PICKUP_EVERY_TICKS = 300;
+export const ARENA_PICKUP_MAX = 3;
+export const ARENA_PICKUP_HEAL = 20;
+export const ARENA_PICKUP_SHIELD_SECS = 5;
+export const ARENA_PICKUP_DMG_SECS = 15;
+export const ARENA_PICKUP_DMG_MULT = 1.12;
+const ARENA_PICKUP_SPOTS = [
+  { x: 12, y: 8 },
+  { x: 6, y: 8 },
+  { x: 18, y: 8 },
+  { x: 12, y: 4 },
+  { x: 12, y: 12 },
+];
+const ARENA_PICKUP_KINDS: PickupKind[] = ["green", "blue", "red"];
 
 // The helper clamps a vector to max length 1.
 function norm(v: Vec2): Vec2 {
@@ -102,6 +128,7 @@ export function createBattle(cfg: BattleConfig = DEFAULT_BATTLE): BattleState {
     nextProjectileId: 1,
     over: false,
     winner: null,
+    ...(cfg.mode === "arena" ? { arena: { pickups: [], spawnCount: 0, nextPickupId: 1, log: [] } } : {}),
   };
 }
 
@@ -131,6 +158,15 @@ function resolveCovers(
   return p;
 }
 
+// The draw picks one arena pickup from the seed and the spawn
+// index. Same seed and index give the same kind and spot.
+function arenaPickupSpawn(seed: string, index: number): { kind: PickupKind; pos: { x: number; y: number } } {
+  const rng = mulberry32(seedFromString(`${seed}#pickup${index}`));
+  const kind = ARENA_PICKUP_KINDS[Math.floor(rng() * ARENA_PICKUP_KINDS.length)];
+  const spot = ARENA_PICKUP_SPOTS[Math.floor(rng() * ARENA_PICKUP_SPOTS.length)];
+  return { kind, pos: { x: spot.x, y: spot.y } };
+}
+
 // The step advances the full battle by one tick.
 export function stepBattle(
   state: BattleState,
@@ -142,6 +178,7 @@ export function stepBattle(
   const dt = 1 / cfg.world.tickHz;
   const time = state.time + dt;
   const tick = state.tick + 1;
+  const isArena = cfg.mode === "arena";
   const agents: Record<AgentId, AgentState> = {
     A: { ...state.agents.A, pos: { ...state.agents.A.pos } },
     B: { ...state.agents.B, pos: { ...state.agents.B.pos } },
@@ -167,6 +204,12 @@ export function stepBattle(
       a.shieldUntil = time + SHIELD_ACTIVE;
       a.shieldCooldownUntil = time + SHIELD_COOLDOWN;
     }
+    if (isArena && act.skill === true && a.energy >= ARENA_SKILL_COST && time >= (a.skillCooldownUntil ?? 0) && time - a.lastShotAt >= ARENA_FIRE_INTERVAL) {
+      a.energy -= ARENA_SKILL_COST;
+      a.skillCooldownUntil = time + ARENA_SKILL_COOLDOWN;
+      a.lastShotAt = time;
+      a.skillArmed = true;
+    }
     a.energy = Math.min(cfg.agent.maxEnergy, a.energy + cfg.agent.energyRegen * dt);
     const next = {
       x: a.pos.x + move.x * speed * dt,
@@ -184,12 +227,21 @@ export function stepBattle(
 
   let projectiles = state.projectiles.map((p) => ({ ...p }));
   let nextId = state.nextProjectileId;
+  const fireGap = isArena ? ARENA_FIRE_INTERVAL : FIRE_INTERVAL;
+  const arena: ArenaExtraState | null = isArena
+    ? {
+      pickups: (state.arena?.pickups ?? []).map((p) => ({ ...p, pos: { ...p.pos } })),
+      spawnCount: state.arena?.spawnCount ?? 0,
+      nextPickupId: state.arena?.nextPickupId ?? 1,
+      log: [...(state.arena?.log ?? [])],
+    }
+    : null;
 
   for (const id of ["A", "B"] as AgentId[]) {
     const a = agents[id];
     if (!a.alive) continue;
     const act = actions[id];
-    if (act.fire && time - a.lastShotAt >= FIRE_INTERVAL) {
+    if (act.fire && time - a.lastShotAt >= fireGap) {
       a.lastShotAt = time;
       const sx = a.pos.x + a.aim.x * (cfg.agent.radius + 0.1);
       const sy = a.pos.y + a.aim.y * (cfg.agent.radius + 0.1);
@@ -200,7 +252,35 @@ export function stepBattle(
         prev: { x: sx, y: sy },
         vel: { x: a.aim.x * PROJECTILE_SPEED, y: a.aim.y * PROJECTILE_SPEED },
         alive: true,
+        ...(isArena
+          ? { traveled: 0, dmg: PROJECTILE_DAMAGE * (time < (a.dmgBuffUntil ?? 0) ? ARENA_PICKUP_DMG_MULT : 1) }
+          : {}),
       });
+    }
+  }
+
+  // The skill fires one powered shot. Policy triggers it. It costs
+  // 25 energy and locks for 3s. Duel never reads act.skill.
+  for (const id of ["A", "B"] as AgentId[]) {
+    const a = agents[id];
+    if (!a.alive || !isArena || !arena) continue;
+    const act = actions[id];
+    if (a.skillArmed) {
+      a.skillArmed = false;
+      const sx = a.pos.x + a.aim.x * (cfg.agent.radius + 0.1);
+      const sy = a.pos.y + a.aim.y * (cfg.agent.radius + 0.1);
+      projectiles.push({
+        id: nextId++,
+        owner: id,
+        pos: { x: sx, y: sy },
+        prev: { x: sx, y: sy },
+        vel: { x: a.aim.x * PROJECTILE_SPEED, y: a.aim.y * PROJECTILE_SPEED },
+        alive: true,
+        traveled: 0,
+        dmg: ARENA_SKILL_DAMAGE * (time < (a.dmgBuffUntil ?? 0) ? ARENA_PICKUP_DMG_MULT : 1),
+        powered: true,
+      });
+      arena.log.push({ t: tick, side: id, type: "skill" });
     }
   }
 
@@ -208,6 +288,9 @@ export function stepBattle(
     if (!p.alive) continue;
     p.prev = { ...p.pos };
     p.pos = { x: p.pos.x + p.vel.x * dt, y: p.pos.y + p.vel.y * dt };
+    if (p.traveled !== undefined) {
+      p.traveled += Math.hypot(p.pos.x - p.prev.x, p.pos.y - p.prev.y);
+    }
     if (
       p.pos.x < 0 ||
       p.pos.x > cfg.world.width ||
@@ -237,16 +320,50 @@ export function stepBattle(
       p.alive = false;
       const shielded = time <= t.shieldUntil;
       if (!shielded) {
-        t.hp -= PROJECTILE_DAMAGE;
+        const dmg = p.dmg ?? PROJECTILE_DAMAGE;
+        t.hp -= dmg;
         const owner = agents[p.owner];
-        owner.damageDealt += PROJECTILE_DAMAGE;
+        owner.damageDealt += dmg;
         if (t.hp <= 0) {
           t.hp = 0;
           t.alive = false;
         }
       }
     }
+    if (p.traveled !== undefined && p.traveled >= ARENA_RANGE) {
+      p.alive = false;
+    }
   }
+  // Pickups spawn on a fixed clock and vanish on touch. Green
+  // heals, blue shields, red boosts damage. Duel has no arena.
+  if (arena) {
+    if (
+      tick >= ARENA_PICKUP_FIRST_TICK &&
+      (tick - ARENA_PICKUP_FIRST_TICK) % ARENA_PICKUP_EVERY_TICKS === 0 &&
+      arena.pickups.length < ARENA_PICKUP_MAX
+    ) {
+      const drawn = arenaPickupSpawn(cfg.seed, arena.spawnCount);
+      arena.spawnCount += 1;
+      arena.pickups.push({ id: arena.nextPickupId++, kind: drawn.kind, pos: drawn.pos });
+    }
+    for (const id of ["A", "B"] as AgentId[]) {
+      const a = agents[id];
+      if (!a.alive) continue;
+      const idx = arena.pickups.findIndex(
+        (p) => Math.hypot(p.pos.x - a.pos.x, p.pos.y - a.pos.y) <= cfg.agent.radius + 0.4,
+      );
+      if (idx === -1) continue;
+      const [got] = arena.pickups.splice(idx, 1);
+      if (got.kind === "green") a.hp = Math.min(cfg.agent.maxHp, a.hp + ARENA_PICKUP_HEAL);
+      else if (got.kind === "blue") {
+        a.shieldUntil = Math.max(a.shieldUntil, time + ARENA_PICKUP_SHIELD_SECS);
+        a.shieldCooldownUntil = Math.max(a.shieldCooldownUntil, time + ARENA_PICKUP_SHIELD_SECS);
+      }
+      else a.dmgBuffUntil = time + ARENA_PICKUP_DMG_SECS;
+      arena.log.push({ t: tick, side: id, type: "pickup", kind: got.kind });
+    }
+  }
+
   projectiles = projectiles.filter((p) => p.alive);
 
   const aAlive = agents.A.alive;
@@ -261,7 +378,7 @@ export function stepBattle(
     winner = decideWinner(agents.A, agents.B);
   }
 
-  return { tick, time, agents, projectiles, nextProjectileId: nextId, over, winner };
+  return { tick, time, agents, projectiles, nextProjectileId: nextId, over, winner, ...(arena ? { arena } : {}) };
 }
 
 // The scorer picks the winner at time expiry.
@@ -287,8 +404,13 @@ export function stateKey(s: BattleState): string {
     f(a.pos.x), f(a.pos.y), a.hp, f(a.energy),
     f(b.pos.x), f(b.pos.y), b.hp, f(b.energy),
     s.projectiles.length,
-    ...s.projectiles.map((p) => `${p.id}:${f(p.pos.x)},${f(p.pos.y)}`),
+    ...s.projectiles.map((p) => `${p.id}${p.powered ? "*" : ""}:${f(p.pos.x)},${f(p.pos.y)}`),
   ];
+  if (s.arena) {
+    parts.push(`pk:${s.arena.spawnCount}:${s.arena.pickups.map((p) => `${p.id}${p.kind[0]}${f(p.pos.x)},${f(p.pos.y)}`).join(";")}`);
+    parts.push(`sk:${f(a.skillCooldownUntil ?? 0)},${f(b.skillCooldownUntil ?? 0)},${f(a.dmgBuffUntil ?? 0)},${f(b.dmgBuffUntil ?? 0)}`);
+    parts.push(`sh:${f(a.shieldUntil)},${f(b.shieldUntil)}`);
+  }
   return parts.join("|");
 }
 

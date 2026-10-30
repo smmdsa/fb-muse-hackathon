@@ -13,7 +13,7 @@ export const FALLBACK_RULE_ID = "fallback-safe";
 
 // The safe policy holds the line. It never fires and walks to center.
 export function fallback(): Intents {
-  return { move: "CAPTURE", fire: false, dash: false, shield: false, buy: null, ruleId: FALLBACK_RULE_ID };
+  return { move: "CAPTURE", fire: false, dash: false, shield: false, skill: false, buy: null, ruleId: FALLBACK_RULE_ID };
 }
 
 // The evaluator walks rules in order and returns the first match.
@@ -32,6 +32,7 @@ function toIntents(rule: BehaviorRule): Intents {
     fire: rule.fire === true,
     dash: rule.dash === true,
     shield: rule.shield === true,
+    skill: rule.skill === true,
     buy: rule.buy ?? null,
     ruleId: rule.id,
     ...(rule.target === undefined ? {} : { target: rule.target }),
@@ -63,6 +64,7 @@ function valueOf(operand: Leaf["operand"], obs: Observation): number | boolean |
     case "lineOfSight": return obs.lineOfSight;
     case "dashReady": return obs.dashReady;
     case "shieldReady": return obs.shieldReady;
+    case "skillReady": return obs.skillReady ?? null;
     case "foeLastSeenAge": return obs.foeLastSeenAge;
     case "objectiveDist": return obs.objectiveDist;
     case "timeLeft": return obs.timeLeft;
@@ -96,6 +98,8 @@ function valueOf(operand: Leaf["operand"], obs: Observation): number | boolean |
     case "overseerSpawnSeconds": return obs.overseerSpawnSeconds ?? null;
     case "ownOverseerBuffSeconds": return obs.ownOverseerBuffSeconds ?? null;
     case "foeOverseerBuffSeconds": return obs.foeOverseerBuffSeconds ?? null;
+    case "pickupDist": return obs.pickupDist ?? null;
+    case "pickupKind": return obs.pickupKind ?? null;
   }
 }
 

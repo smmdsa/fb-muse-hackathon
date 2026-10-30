@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Agent Wars — Arena</title>
+<link rel="icon" href="data:," />
 <link rel="stylesheet" href="./style.css" />
 <link rel="stylesheet" href="./shell.css" />
 </head>
@@ -92,6 +93,11 @@
 <span class="pill" id="series-score">0 — 0</span>
 <span class="pill" id="series-pips" title="rounds">○ ○ ○</span>
 </div>
+<div class="arena-legend" id="arena-legend" hidden>
+<span class="pill" title="energy">thin bar = energy</span>
+<span class="pill" title="pickups"><i class="dot dot-g"></i>green heals <i class="dot dot-b"></i>blue shields <i class="dot dot-r"></i>red +12% damage</span>
+<span class="pill" title="rings">white ring = shield · gold ring = damage buff</span>
+</div>
 <div class="moba-hud" id="moba-hud" hidden>
 <div class="moba-side"><span class="name tag-a">CYAN</span> <span class="pill" id="gold-a">350g</span> <span class="pill" id="respawn-a" hidden>respawn —</span> <span class="pill" id="kd-a" title="kills / deaths">K 0 · D 0</span><div class="builds" id="builds-a" aria-label="Cyan build, read only"></div></div>
 <div class="moba-kills"><ol id="moba-feed" aria-live="polite"></ol></div>
@@ -99,6 +105,7 @@
 </div>
 <div class="stage">
 <canvas id="arena" width="960" height="640" role="img" aria-label="Top-down robot arena. 1v1 battle, best of 3 rounds."></canvas>
+<div class="paused-mark" id="paused-mark" hidden>PAUSED</div>
 <div class="overlay" id="arena-overlay"><div><p class="eyebrow">The Forge · agent duel</p><strong>THE ARENA AWAITS</strong><p class="sub">Match found — the battle loads here.</p></div></div>
 <div class="endcard" id="endcard" hidden>
 <h2 id="end-title">Winner</h2>

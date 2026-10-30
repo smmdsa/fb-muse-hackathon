@@ -10,7 +10,7 @@ export type MoveIntent =
   | "PUSH"
   | "FARM"
   | "DEFEND"
-  | "WAIT" | "CONTEST_OVERSEER";
+  | "WAIT" | "CONTEST_OVERSEER" | "COLLECT";
 
 export type AbilityIntent = "AIM" | "FIRE" | "DASH" | "SHIELD";
 export type TargetIntent = "AUTO" | "FOE" | "MINION" | "STRUCTURE" | "NONE" | "LAST_HIT" | "OVERSEER";
@@ -50,7 +50,7 @@ export type Operand =
   | "killableFoeMinionsInRange"
   | "nextWaveSeconds"
   | "distOwnBase"
-  | "ownStructureThreatened" | "overseerAlive" | "overseerHpPct" | "overseerDist" | "overseerSpawnSeconds" | "ownOverseerBuffSeconds" | "foeOverseerBuffSeconds";
+  | "ownStructureThreatened" | "overseerAlive" | "overseerHpPct" | "overseerDist" | "overseerSpawnSeconds" | "ownOverseerBuffSeconds" | "foeOverseerBuffSeconds" | "skillReady" | "pickupDist" | "pickupKind";
 
 export type NumOp = "gt" | "gte" | "lt" | "lte";
 
@@ -71,6 +71,7 @@ export type BehaviorRule = {
   fire?: boolean;
   dash?: boolean;
   shield?: boolean;
+  skill?: boolean;
   buy?: string;
   target?: TargetIntent;
 };
@@ -98,6 +99,7 @@ export type Observation = {
   lineOfSight: boolean;
   dashReady: boolean;
   shieldReady: boolean;
+  skillReady: boolean;
   foeLastSeenAge: number;
   objectiveDist: number;
   timeLeft: number;
@@ -131,6 +133,8 @@ export type Observation = {
   overseerSpawnSeconds?: number;
   ownOverseerBuffSeconds?: number;
   foeOverseerBuffSeconds?: number;
+  pickupDist?: number | null;
+  pickupKind?: number;
 };
 
 export type Intents = {
@@ -138,6 +142,7 @@ export type Intents = {
   fire: boolean;
   dash: boolean;
   shield: boolean;
+  skill: boolean;
   buy: string | null;
   ruleId: string;
   target?: TargetIntent;

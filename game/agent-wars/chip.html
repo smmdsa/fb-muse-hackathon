@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Agent Wars — Chip Lab</title>
+<link rel="icon" href="data:," />
 <link rel="stylesheet" href="./style.css" />
 <link rel="stylesheet" href="./shell.css" />
 </head>
@@ -74,6 +75,31 @@
 <div id="dash"></div>
 </section>
 
+<section class="panel" id="ref-card">
+<h2>04 / Arena reference</h2>
+<p class="sub">Combat facts the compiler teaches. Chips read these sensors and pay these costs.</p>
+<h3>Arena combat</h3>
+<ul>
+<li>Bot spans 1u wide. Shots reach 6u.</li>
+<li>Fire runs on its own every 1.025s at the visible foe in range. Target NONE holds fire and skill.</li>
+<li>Energy caps at 100 and regens 5 per second.</li>
+<li>Dash costs 25 energy, boosts speed x3.2 for the tick, and locks for 3s. Shield costs 20 energy, blocks all damage for 0.8s, and locks for 4s.</li>
+<li>Skill fires one 20-damage powered shot for 25 energy on a 3s lock and shares the 1.025s fire window.</li>
+<li>First pickup spawns at 5s, then one every 10s, at most 3 live. Green heals 20 HP. Blue shields for 5s. Red adds 12% damage for 15s.</li>
+</ul>
+<h3>Operands</h3>
+<p class="sub" id="ref-operands">ownHpPct, energy, distFoe, projectileTti, coverDist, lineOfSight, dashReady, shieldReady, objectiveDist, timeLeft, edgeDist, foeHpPct, gameTime, foeAlive, skillReady, pickupDist, pickupKind</p>
+<p class="sub">pickupKind codes: 0 none, 1 green, 2 blue, 3 red. pickupDist reads nothing when the field holds no pickup.</p>
+<h3>Moves</h3>
+<p class="sub" id="ref-moves">APPROACH, RETREAT, STRAFE, KITE, CAPTURE, SEEK_COVER, WAIT, COLLECT</p>
+<p class="sub">COLLECT walks to the nearest live pickup and holds when none is live.</p>
+<h3>Benchmark bots</h3>
+<ul id="ref-bots">
+<li>SHADOW-UNIT — 400 AP</li>
+<li>BENCH-UNIT — 550 AP</li>
+<li>BREAKER-UNIT — 700 AP</li>
+</ul>
+</section>
 </main>
 </div>
 </div>

@@ -432,7 +432,7 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
       createdAt: v.created_at,
       corrupt: false,
       label: (v.label as string) ?? null,
-      chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, target: r.target ?? "AUTO", dash: r.dash === true, shield: r.shield === true, buy: r.buy ?? null, when: r.when ?? null, triggers: triggers[r.id] ?? 0 })),
+      chips: policy.rules.map((r) => ({ id: r.id, move: r.move, fire: r.fire === true, target: r.target ?? "AUTO", dash: r.dash === true, shield: r.shield === true, skill: r.skill === true, buy: r.buy ?? null, when: r.when ?? null, triggers: triggers[r.id] ?? 0 })),
       dna: policy.dna,
       fights: fights.length,
       wins,

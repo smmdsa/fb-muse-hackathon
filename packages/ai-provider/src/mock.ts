@@ -62,18 +62,18 @@ function traitsFor(prompt: string): DnaTraits {
   };
 }
 
-// Arena pool. Every rule reads the 1v1 duel: foe distance,
-// health, and the center. The hash drafter below picks trios
+// Arena pool. Every rule reads the 1v1 arena: foe distance,
+// health, energy, pickups, and the skill. The hash drafter below picks trios
 // from these eight, so each trio must fight on its own.
 const RULE_POOL: BehaviorRule[] = [
   { id: "weak-retreat", when: { operand: "ownHpPct", op: "lt", value: 25 }, move: "RETREAT" },
   { id: "bleed-cover", when: { operand: "ownHpPct", op: "lt", value: 50 }, move: "SEEK_COVER" },
   { id: "far-approach", when: { operand: "distFoe", op: "gt", value: 8 }, move: "APPROACH" },
   { id: "close-fire", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true },
-  { id: "weak-foe-chase", when: { operand: "foeHpPct", op: "lt", value: 35 }, move: "APPROACH", fire: true },
-  { id: "mid-strafe", when: { all: [{ operand: "distFoe", op: "gte", value: 4 }, { operand: "distFoe", op: "lte", value: 10 }] }, move: "STRAFE", fire: true },
-  { id: "seek-center", when: { operand: "objectiveDist", op: "gt", value: 6 }, move: "CAPTURE" },
-  { id: "hold-center", when: { all: [{ operand: "objectiveDist", op: "lte", value: 3 }, { operand: "lineOfSight", op: "eq", value: true }] }, move: "WAIT", fire: true },
+  { id: "weak-foe-chase", when: { all: [{ operand: "foeHpPct", op: "lt", value: 35 }, { operand: "skillReady", op: "eq", value: true }] }, move: "APPROACH", fire: true, skill: true },
+  { id: "mid-strafe", when: { all: [{ operand: "distFoe", op: "gte", value: 4 }, { operand: "distFoe", op: "lte", value: 10 }, { operand: "energy", op: "gt", value: 20 }] }, move: "STRAFE", fire: true },
+  { id: "grab-near", when: { operand: "pickupDist", op: "lt", value: 5 }, move: "COLLECT" },
+  { id: "hurt-green", when: { all: [{ operand: "ownHpPct", op: "lt", value: 60 }, { operand: "pickupKind", op: "eq", value: 1 }] }, move: "COLLECT" },
 ];
 
 // The drafter picks three rules by prompt hash and stamps stable ids.
