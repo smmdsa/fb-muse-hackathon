@@ -26,6 +26,7 @@ const MOVES: MoveIntent[] = [
   "DEFEND",
   "WAIT",
   "CONTEST_OVERSEER",
+  "COLLECT",
 ];
 
 const OPERANDS: Operand[] = [
@@ -58,6 +59,7 @@ const OPERANDS: Operand[] = [
   "nearAllyMinionHp", "nearFoeMinionHp", "killableFoeMinionsInRange",
   "nextWaveSeconds", "distOwnBase", "ownStructureThreatened",
   "overseerAlive", "overseerHpPct", "overseerDist", "overseerSpawnSeconds", "ownOverseerBuffSeconds", "foeOverseerBuffSeconds",
+  "skillReady", "pickupDist", "pickupKind",
 ];
 
 // Buyable item ids. This list mirrors battle-core items.ts.
@@ -144,7 +146,7 @@ function checkRule(rule: BehaviorRule, errors: string[], seen: Set<string>): voi
   if (!MOVES.includes(rule.move)) {
     errors.push(`rule ${tag} names an unknown move`);
   }
-  for (const key of ["fire", "dash", "shield"] as const) {
+  for (const key of ["fire", "dash", "shield", "skill"] as const) {
     if (rule[key] !== undefined && typeof rule[key] !== "boolean") {
       errors.push(`rule ${tag} flag ${key} must be a boolean`);
     }
@@ -157,7 +159,7 @@ function checkRule(rule: BehaviorRule, errors: string[], seen: Set<string>): voi
   if (rule.target !== undefined && !["AUTO", "FOE", "MINION", "STRUCTURE", "NONE", "LAST_HIT", "OVERSEER"].includes(rule.target)) {
     errors.push(`rule ${tag} names an unknown target`);
   }
-  const known = new Set(["id", "when", "move", "fire", "dash", "shield", "buy", "target"]);
+  const known = new Set(["id", "when", "move", "fire", "dash", "shield", "skill", "buy", "target"]);
   for (const key of Object.keys(rule)) {
     if (!known.has(key)) {
       errors.push(`rule ${tag} holds unknown field ${key}`);

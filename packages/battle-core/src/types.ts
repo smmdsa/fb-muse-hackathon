@@ -22,6 +22,7 @@ export type AgentAction = {
   dash: boolean;
   shield: boolean;
   buy?: string | null;
+  skill?: boolean;
 };
 
 export type AgentConfig = {
@@ -43,6 +44,9 @@ export type AgentState = {
   dashCooldownUntil: number;
   shieldUntil: number;
   shieldCooldownUntil: number;
+  skillCooldownUntil?: number;
+  dmgBuffUntil?: number;
+  skillArmed?: boolean;
   lastShotAt: number;
   damageDealt: number;
   controlTime: number;
@@ -62,6 +66,8 @@ export type Projectile = {
   vel: Vec2;
   alive: boolean;
   dmg?: number;
+  traveled?: number;
+  powered?: boolean;
   srcTower?: StructureId | null;
   srcMinion?: number | null;
 };
@@ -94,6 +100,28 @@ export type BattleConfig = {
   spawnShift?: number;
 };
 
+export type PickupKind = "green" | "blue" | "red";
+
+export type PickupState = {
+  id: number;
+  kind: PickupKind;
+  pos: Vec2;
+};
+
+export type ArenaLogEvent = {
+  t: number;
+  side: AgentId;
+  type: "pickup" | "skill";
+  kind?: PickupKind;
+};
+
+export type ArenaExtraState = {
+  pickups: PickupState[];
+  spawnCount: number;
+  nextPickupId: number;
+  log: ArenaLogEvent[];
+};
+
 export type BattleState = {
   tick: number;
   time: number;
@@ -103,6 +131,7 @@ export type BattleState = {
   over: boolean;
   winner: AgentId | "DRAW" | null;
   moba?: MobaState;
+  arena?: ArenaExtraState;
 };
 
 export type StructureId =

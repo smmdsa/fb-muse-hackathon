@@ -1,5 +1,5 @@
 // S1 arena demo. This file holds a small standalone sim for the viewer.
-// The canonical sim lives in packages/battle-core. This copy mirrors it.
+// The canonical sim lives in packages/battle-core. This copy mirrors its combat. Pickups and the skill stay server-side.
 
 "use strict";
 
@@ -7,11 +7,11 @@ const W = 24;
 const H = 16;
 const TICK = 1 / 30;
 const SPEED = 4;
-const RADIUS = 0.35;
+const RADIUS = 0.5;
 const MAX_HP = 100;
 const MAX_EN = 100;
-const REGEN = 8;
-const FIRE_GAP = 0.5;
+const REGEN = 5;
+const FIRE_GAP = 1.025;
 const SHOT_SPEED = 14;
 const SHOT_DMG = 10;
 const DASH_COST = 25;
@@ -63,6 +63,7 @@ function compileBrains() {
 
 let agents = null;
 let shots = [];
+let pickupsDraw = [];
 let sparks = [];
 let tick = 0;
 let time = 0;
@@ -277,7 +278,7 @@ function drive(side) {
     my: my * damp,
     ax: los ? toFoe.x : mx,
     ay: los ? toFoe.y : my,
-    fire: pick.fire === true && dist < 12,
+    fire: pick.fire === true && dist <= 7,
     dash: pick.dash === true && me.en > 50,
     shield: pick.shield === true,
   };
@@ -322,9 +323,10 @@ function step() {
 function move(me, p) {
   if (!me.alive) return;
   let sp = SPEED;
-  if (p.dash && me.en >= DASH_COST) {
+  if (p.dash && me.en >= DASH_COST && time >= (me.dashCdUntil || 0)) {
     sp *= 3.2;
     me.en -= DASH_COST;
+    me.dashCdUntil = time + 3;
     sparks.push({ x: me.x, y: me.y, age: 0, text: "DASH", color: "#ffffff" });
   }
   if (p.shield && me.en >= SHIELD_COST && time >= me.shieldCdUntil) {
@@ -360,12 +362,13 @@ function shoot(me, p, side) {
   if (side === "A") lastA = time; else lastB = time;
   shots.push({
     owner: side,
-    x: me.x + me.ax * 0.5,
-    y: me.y + me.ay * 0.5,
+    x: me.x + me.ax * 0.6,
+    y: me.y + me.ay * 0.6,
     px: me.x,
     py: me.y,
     vx: me.ax * SHOT_SPEED,
     vy: me.ay * SHOT_SPEED,
+    t: 0,
   });
 }
 
@@ -398,12 +401,16 @@ function fly() {
       if (t.hp <= 0) { t.hp = 0; t.alive = false; }
       continue;
     }
+    s.t += Math.hypot(s.x - s.px, s.y - s.py);
+    if (s.t >= 6) continue;
     out.push(s);
   }
   shots = out;
 }
 
 function draw() {
+  const mark = document.getElementById("paused-mark");
+  if (mark && mark.hidden === paused) mark.hidden = !paused;
   const sx = canvas.width / W;
   const sy = canvas.height / H;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -419,8 +426,20 @@ function draw() {
   for (const s of shots) {
     ctx.fillStyle = s.owner === "A" ? "#37e0ff" : "#ff5d7a";
     ctx.beginPath();
-    ctx.arc(s.x * sx, s.y * sy, 4, 0, Math.PI * 2);
+    ctx.arc(s.x * sx, s.y * sy, s.powered ? 7 : 4, 0, Math.PI * 2);
     ctx.fill();
+  }
+  if (arena) {
+    for (const q of pickupsDraw) {
+      ctx.fillStyle = q.k === "green" ? "#3dff7a" : q.k === "blue" ? "#37e0ff" : "#ff5d5d";
+      ctx.save();
+      ctx.translate(q.x * sx, q.y * sy);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillRect(-5, -5, 10, 10);
+      ctx.strokeStyle = "#05070f";
+      ctx.strokeRect(-5, -5, 10, 10);
+      ctx.restore();
+    }
   }
   unit(agents.A, "#37e0ff", sx, sy);
   unit(agents.B, "#ff5d7a", sx, sy);
@@ -533,6 +552,13 @@ function unit(me, color, sx, sy) {
     ctx.stroke();
     ctx.setLineDash([]);
   }
+  if (me.dmgBuff) {
+    ctx.strokeStyle = "#ffd34d";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(px, py, RADIUS * sx + 13, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   if (time <= me.shieldUntil) {
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 2;
@@ -644,6 +670,8 @@ againBtn.addEventListener("click", () => {
 pauseBtn.addEventListener("click", () => {
   paused = !paused;
   pauseBtn.textContent = paused ? "Resume" : "Pause";
+  const mark = document.getElementById("paused-mark");
+  if (mark) mark.hidden = !paused;
   pillState.textContent = paused ? "paused" : "live";
 });
 
@@ -663,6 +691,8 @@ const REPLAY_EVERY = 9;
 const FRAME_MS = REPLAY_EVERY * 1000 * TICK;
 const MOBA_EVERY = 18;
 const MOBA_FRAME_MS = MOBA_EVERY * 1000 * TICK;
+const ARENA_EVERY = 3;
+const ARENA_FRAME_MS = ARENA_EVERY * 1000 * TICK;
 const SPEEDS = [1, 2, 4];
 let replayFrames = null;
 let replayIdx = 0;
@@ -2054,6 +2084,7 @@ function arenaLoadRound(i) {
   arena.idx = 1;
   arena.prev = arena.frames[0] || null;
   arena.curr = arena.frames[0] || null;
+  arena.evIdx = 0;
   replayAlpha = 0;
   note("Round " + r.round + " starts: " + arena.frames.length + " frames");
   arenaSeriesHud();
@@ -2094,6 +2125,8 @@ function playArenaReplay(replay, meta) {
   const unit = document.getElementById("arena-clock-unit");
   if (unit) unit.textContent = "s";
   note("Arena series loads: " + rounds.length + " rounds at " + replaySpeed + "x");
+  const legend = document.getElementById("arena-legend");
+  if (legend) legend.hidden = false;
   pauseBtn.disabled = false;
   pauseBtn.textContent = "Pause";
   arenaNames();
@@ -2108,8 +2141,8 @@ function playArenaReplay(replay, meta) {
 // One round frame mapped to [local, foe] robot reads.
 function arenaMap(f) {
   if (!f) return null;
-  const a = { x: f.ax, y: f.ay, hp: f.ahp, en: f.aen };
-  const b = { x: f.bx, y: f.by, hp: f.bhp, en: f.ben };
+  const a = { x: f.ax, y: f.ay, hp: f.ahp, en: f.aen, sh: f.ash === true, bf: f.abf === true };
+  const b = { x: f.bx, y: f.by, hp: f.bhp, en: f.ben, sh: f.bsh === true, bf: f.bbf === true };
   return arenaFlip() ? [b, a] : [a, b];
 }
 
@@ -2135,9 +2168,23 @@ function arenaToAgents(t) {
       ax: arenaFlip() ? -fx : fx,
       ay: fy,
       alive: f[i].hp > 0,
+      shieldUntil: f[i].sh ? time + 1 : -1,
+      dmgBuff: f[i].bf,
     };
   };
   agents = { A: mk("A", 0), B: mk("B", 1) };
+  const cf = arena.curr || {};
+  shots = ((cf && cf.shots) || []).map((s) => ({
+    owner: arenaDS(s.o),
+    x: arenaFlip() ? W - s.x : s.x,
+    y: s.y,
+    powered: s.p === true,
+  }));
+  pickupsDraw = ((cf && cf.pickups) || []).map((q) => ({
+    x: arenaFlip() ? W - q.x : q.x,
+    y: q.y,
+    k: q.k,
+  }));
   tick = arena.curr ? arena.curr.t : 0;
   time = tick * TICK;
 }
@@ -2154,13 +2201,13 @@ function arenaStep() {
     }
     return;
   }
-  if (arena.idx >= arena.frames.length && replayAlpha >= FRAME_MS) {
+  if (arena.idx >= arena.frames.length && replayAlpha >= ARENA_FRAME_MS) {
     arenaRoundEnd();
     return;
   }
   replayAlpha += STEP_MS * replaySpeed;
-  while (replayAlpha >= FRAME_MS && arena.idx < arena.frames.length) {
-    replayAlpha -= FRAME_MS;
+  while (replayAlpha >= ARENA_FRAME_MS && arena.idx < arena.frames.length) {
+    replayAlpha -= ARENA_FRAME_MS;
     arena.prev = arena.curr;
     arena.curr = arena.frames[arena.idx];
     arena.idx += 1;
@@ -2168,8 +2215,20 @@ function arenaStep() {
     const f = arenaMap(arena.curr);
     if (f[0].hp < p[0].hp) flash("A");
     if (f[1].hp < p[1].hp) flash("B");
+    const evs = (arena.rounds[arena.rIdx] && arena.rounds[arena.rIdx].events) || [];
+    while (arena.evIdx < evs.length && evs[arena.evIdx].t <= arena.curr.t) {
+      const e = evs[arena.evIdx];
+      arena.evIdx += 1;
+      if (e.type === "pickup") {
+        note(arenaName(e.side) + " takes " + (e.kind || "pickup") + " pickup");
+        const u = agents[arenaDS(e.side)];
+        if (u) sparks.push({ x: u.x, y: u.y - 1.2, age: 0, text: "+" + (e.kind || ""), color: e.kind === "green" ? "#3dff7a" : e.kind === "blue" ? "#37e0ff" : "#ff5d5d" });
+      } else if (e.type === "skill") {
+        note(arenaName(e.side) + " fires a powered shot");
+      }
+    }
   }
-  const t = arena.frames.length ? Math.min(1, replayAlpha / FRAME_MS) : 1;
+  const t = arena.frames.length ? Math.min(1, replayAlpha / ARENA_FRAME_MS) : 1;
   arenaToAgents(t);
   draw();
   sync();

@@ -4,7 +4,7 @@ import { FALLBACK_RULE_ID, evaluate } from "@agent-wars/behavior-dna";
 import type { AgentPolicy, Observation, TargetIntent } from "@agent-wars/behavior-dna";
 import { BASE_ITEMS, MAX_SLOTS, RECIPE_BY_ID } from "./items.ts";
 import { DEFAULT_MOBA, LANE_Y, MINION_RADIUS, ROBOT_RANGE, TOWER_RANGE, OVERSEER_RADIUS, WAVE_FIRST_TICK, WAVE_EVERY_TICKS, STRUCTURES, armorMult, isVulnerable, robotAD, segCircle } from "./moba.ts";
-import { checksum, createBattle, DEFAULT_BATTLE, stepBattle } from "./simulation.ts";
+import { ARENA_FIRE_INTERVAL, ARENA_RANGE, ARENA_SKILL_COST, checksum, createBattle, DEFAULT_BATTLE, stepBattle } from "./simulation.ts";
 import { fnv1a } from "./rng.ts";
 import { arenaWorld, segmentHitsBox } from "./world.ts";
 import type { AgentAction, AgentId, BattleConfig, BattleState, MinionState, MobaEvent, StructureState, Vec2 } from "./types.ts";
@@ -85,9 +85,16 @@ export type ReplayFrame = {
   t: number;
   ax: number; ay: number; ahp: number; aen: number;
   bx: number; by: number; bhp: number; ben: number;
+  shots?: { x: number; y: number; o: AgentId; p?: boolean }[];
+  pickups?: { x: number; y: number; k: string }[];
+  ash?: boolean; bsh?: boolean;
+  abf?: boolean; bbf?: boolean;
 };
 
-export type ReplayEvent = { t: number; side: AgentId; type: "hit" | "ko" };
+export type ReplayEvent =
+  | { t: number; side: AgentId; type: "hit" | "ko" }
+  | { t: number; side: AgentId; type: "pickup"; kind: string }
+  | { t: number; side: AgentId; type: "skill" };
 
 export type Replay = {
   seed: string;
@@ -137,11 +144,32 @@ export type ReplayV2 = {
 // keeps reference fights under 1 MB, and the viewer glides.
 const REPLAY_EVERY_V1 = 9;
 const REPLAY_EVERY_V2 = 18;
+// Arena samples every 3 ticks: the 100 ms cadence keeps shots on
+// screen across frames, since a 6u shot lives about 13 ticks.
+const REPLAY_EVERY_V3 = 3;
+
+// Arena frame extras. Shots, pickups, and shield/buff flags ride
+// every frame so the viewer draws live combat. Duel states carry
+// no arena, so duel frames stay byte-identical.
+function arenaBits(state: BattleState): Partial<ReplayFrame> {
+  if (!state.arena) return {};
+  const a = state.agents.A;
+  const b = state.agents.B;
+  return {
+    shots: state.projectiles.map((p) => ({ x: r2(p.pos.x), y: r2(p.pos.y), o: p.owner, ...(p.powered ? { p: true } : {}) })),
+    pickups: state.arena.pickups.map((p) => ({ x: r2(p.pos.x), y: r2(p.pos.y), k: p.kind })),
+    ash: state.time <= a.shieldUntil,
+    bsh: state.time <= b.shieldUntil,
+    abf: state.time < (a.dmgBuffUntil ?? 0),
+    bbf: state.time < (b.dmgBuffUntil ?? 0),
+  };
+}
 
 function snap(state: BattleState): ReplayFrame {
   const a = state.agents.A;
   const b = state.agents.B;
   return {
+    ...arenaBits(state),
     t: state.tick,
     ax: a.pos.x, ay: a.pos.y, ahp: a.hp, aen: a.energy,
     bx: b.pos.x, by: b.pos.y, bhp: b.hp, ben: b.energy,
@@ -280,15 +308,16 @@ export function buildMobaReplay(
 // Battle Arena 1v1. Two robots face off with no lanes, minions,
 // towers, gold, or shop. Rounds run on the 24x16 arena with a 90
 // second cap. The series plays best of 3: first to 2 round wins.
+// The bot spans 1u wide, so shots reach 6u and regen runs 5/s.
 export const ARENA_1V1: BattleConfig = {
   seed: "arena-001",
   world: arenaWorld(),
   agent: {
-    radius: 0.35,
+    radius: 0.5,
     speed: 4,
     maxHp: 100,
     maxEnergy: 100,
-    energyRegen: 8,
+    energyRegen: 5,
   },
   mode: "arena",
 };
@@ -371,6 +400,7 @@ function playRound(
   let state = createBattle(cfg);
   const frames: ReplayFrame[] = [snap(state)];
   const events: ReplayEvent[] = [];
+  let seenLog = 0;
   let guard = 0;
   while (!state.over && guard < cfg.world.maxTicks) {
     const before = snap(state);
@@ -383,7 +413,15 @@ function playRound(
     for (const [side, was, is] of [["A", before.ahp, state.agents.A.hp], ["B", before.bhp, state.agents.B.hp]] as const) {
       if (is < was) events.push({ t: state.tick, side, type: is <= 0 ? "ko" : "hit" });
     }
-    if (state.tick % REPLAY_EVERY_V1 === 0 || state.over) frames.push(snap(state));
+    const freshLog = state.arena?.log ?? [];
+    for (let k = seenLog; k < freshLog.length; k += 1) {
+      const e = freshLog[k];
+      events.push(e.type === "pickup"
+        ? { t: e.t, side: e.side, type: "pickup", kind: e.kind ?? "green" }
+        : { t: e.t, side: e.side, type: "skill" });
+    }
+    seenLog = freshLog.length;
+    if (state.tick % REPLAY_EVERY_V3 === 0 || state.over) frames.push(snap(state));
   }
   const winner = state.winner ?? "DRAW";
   return {
@@ -589,6 +627,23 @@ function dir(from: Vec2, to: Vec2): Vec2 {
   return { x: dx / len, y: dy / len };
 }
 
+// Pickup codes. The chips read kinds as numbers: none 0,
+// green 1, blue 2, red 3. Duel and MOBA states carry no
+// arena, so they read none.
+const PICKUP_CODES = { green: 1, blue: 2, red: 3 } as const;
+
+// The helper finds the nearest live pickup. No pickup
+// reads as null distance and kind 0.
+function nearestPickup(state: BattleState, me: AgentId): { dist: number | null; kind: number } {
+  const a = state.agents[me];
+  let best: { dist: number | null; kind: number } = { dist: null, kind: 0 };
+  for (const p of state.arena?.pickups ?? []) {
+    const d = Math.hypot(p.pos.x - a.pos.x, p.pos.y - a.pos.y);
+    if (best.dist === null || d < best.dist) best = { dist: d, kind: PICKUP_CODES[p.kind] };
+  }
+  return best;
+}
+
 // The reader builds what the robot knows. Covers block sight.
 export function observe(
   state: BattleState,
@@ -691,6 +746,9 @@ export function observe(
     slotsFree: MAX_SLOTS - items.length,
     structLead: ownAlive - foeLive,
     foeAlive: f.alive,
+    skillReady: state.arena ? a.energy >= ARENA_SKILL_COST && state.time >= (a.skillCooldownUntil ?? 0) && state.time - a.lastShotAt >= ARENA_FIRE_INTERVAL : false,
+    pickupDist: nearestPickup(state, me).dist,
+    pickupKind: nearestPickup(state, me).kind,
     ...(state.moba?.overseer ? {
       overseerAlive: state.moba.overseer.alive,
       overseerHpPct: state.moba.overseer.alive ? state.moba.overseer.hp / state.moba.overseer.maxHp * 100 : null,
@@ -971,6 +1029,18 @@ export function drive(
       move = dir(a.pos, best);
       break;
     }
+    case "COLLECT": {
+      // The walk heads for the nearest live pickup. No pickup
+      // holds position. Duel and MOBA never spawn pickups.
+      let best: Vec2 | null = null;
+      let bestD = Infinity;
+      for (const p of state.arena?.pickups ?? []) {
+        const d = Math.hypot(p.pos.x - a.pos.x, p.pos.y - a.pos.y);
+        if (d < bestD) { bestD = d; best = p.pos; }
+      }
+      move = best ? dir(a.pos, best) : { x: 0, y: 0 };
+      break;
+    }
     case "PUSH":
       move = pushMove(state, me, cfg);
       break;
@@ -1003,7 +1073,8 @@ export function drive(
   // fire rule fight instead of standing still. The chip keeps full
   // authority over movement, dash, shield, and buys. Duel keeps
   // rule-gated fire, so duel replays stay byte-identical. Arena
-  // fires at the visible foe on its own; only target NONE holds it.
+  // fires at the visible foe in range on its own; only target
+  // NONE holds it, and the range gate below quiets rule fire too.
   let aim: Vec2;
   let fire = want.fire;
   if (cfg.mode === "moba" && state.moba) {
@@ -1020,7 +1091,7 @@ export function drive(
       if (want.target === "NONE") {
         aim = move;
         fire = false;
-      } else if (obs.lineOfSight) {
+      } else if (obs.lineOfSight && Math.hypot(f.pos.x - a.pos.x, f.pos.y - a.pos.y) <= ARENA_RANGE + 1) {
         aim = { ...toFoe };
         fire = true;
       } else {
@@ -1033,9 +1104,10 @@ export function drive(
   return {
     move,
     aim,
-    fire,
+    fire: cfg.mode === "arena" ? fire && Math.hypot(f.pos.x - a.pos.x, f.pos.y - a.pos.y) <= ARENA_RANGE + 1 : fire,
     dash: want.dash,
     shield: want.shield,
+    skill: cfg.mode === "arena" ? (want.skill ?? false) && fire : (want.skill ?? false),
     buy: want.buy ?? null,
   };
 }
