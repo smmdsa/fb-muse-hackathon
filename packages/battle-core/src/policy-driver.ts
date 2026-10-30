@@ -5,7 +5,8 @@ import type { AgentPolicy, Observation, TargetIntent } from "@agent-wars/behavio
 import { BASE_ITEMS, MAX_SLOTS, RECIPE_BY_ID } from "./items.ts";
 import { DEFAULT_MOBA, LANE_Y, MINION_RADIUS, ROBOT_RANGE, TOWER_RANGE, OVERSEER_RADIUS, WAVE_FIRST_TICK, WAVE_EVERY_TICKS, STRUCTURES, armorMult, isVulnerable, robotAD, segCircle } from "./moba.ts";
 import { checksum, createBattle, DEFAULT_BATTLE, stepBattle } from "./simulation.ts";
-import { segmentHitsBox } from "./world.ts";
+import { fnv1a } from "./rng.ts";
+import { arenaWorld, segmentHitsBox } from "./world.ts";
 import type { AgentAction, AgentId, BattleConfig, BattleState, MinionState, MobaEvent, StructureState, Vec2 } from "./types.ts";
 
 // Sparring bots. Rule-based presets near ladder bands, never AP minters.
@@ -148,14 +149,15 @@ function snap(state: BattleState): ReplayFrame {
 }
 
 export function buildReplay(a: AgentPolicy, b: AgentPolicy, seed: string): Replay;
-export function buildReplay(a: AgentPolicy, b: AgentPolicy, seed: string, base: BattleConfig): Replay | ReplayV2;
+export function buildReplay(a: AgentPolicy, b: AgentPolicy, seed: string, base: BattleConfig): Replay | ReplayV2 | ReplayV3;
 export function buildReplay(
   a: AgentPolicy,
   b: AgentPolicy,
   seed: string,
   base?: BattleConfig,
-): Replay | ReplayV2 {
+): Replay | ReplayV2 | ReplayV3 {
   if (base?.mode === "moba") return buildMobaReplay(a, b, seed, base);
+  if (base?.mode === "arena") return buildArenaReplay(a, b, seed, base);
   const cfg = { ...DEFAULT_BATTLE, seed };
   let state = createBattle(cfg);
   const frames: ReplayFrame[] = [snap(state)];
@@ -272,6 +274,201 @@ export function buildMobaReplay(
     ...(cfg.rulesetVersion === 2 ? { rulesetVersion: 2, structurePositions: Object.fromEntries((state.moba?.structures ?? []).map(s => [s.id, { ...s.pos }])) } : {}),
     frames,
     events: [...(state.moba?.log ?? [])],
+  };
+}
+
+// Battle Arena 1v1. Two robots face off with no lanes, minions,
+// towers, gold, or shop. Rounds run on the 24x16 arena with a 90
+// second cap. The series plays best of 3: first to 2 round wins.
+export const ARENA_1V1: BattleConfig = {
+  seed: "arena-001",
+  world: arenaWorld(),
+  agent: {
+    radius: 0.35,
+    speed: 4,
+    maxHp: 100,
+    maxEnergy: 100,
+    energyRegen: 8,
+  },
+  mode: "arena",
+};
+
+export type ArenaRoundSummary = {
+  round: number;
+  winner: string;
+  ticks: number;
+  checksum: string;
+  damageA: number;
+  damageB: number;
+};
+
+export type SeriesResult = {
+  winner: string;
+  ticks: number;
+  checksum: string;
+  score: { A: number; B: number };
+  rounds: ArenaRoundSummary[];
+  chipsA: Record<string, number>;
+  chipsB: Record<string, number>;
+};
+
+export type ArenaRoundReplay = {
+  round: number;
+  seed: string;
+  winner: string;
+  ticks: number;
+  checksum: string;
+  frames: ReplayFrame[];
+  events: ReplayEvent[];
+};
+
+export type ReplayV3 = {
+  version: 3;
+  mode: "arena";
+  seed: string;
+  winner: string;
+  score: { A: number; B: number };
+  rounds: ArenaRoundReplay[];
+  ticks: number;
+  timeSec: number;
+  checksum: string;
+};
+
+// One round config. The seed and spawn rotate per round, so rounds
+// never replay the same opening twice in a row.
+function roundConfig(base: BattleConfig, seed: string, round: number): BattleConfig {
+  return { ...base, seed: `${seed}#r${round}`, mode: "arena" as const, spawnShift: (round - 1) % 3 };
+}
+
+// The helper hashes one series from its rounds. Settles and
+// replays share it, so identical stays exact.
+function seriesChecksum(rounds: ArenaRoundSummary[]): string {
+  return fnv1a(rounds.map((r) => `${r.round}:${r.winner}:${r.checksum}`).join("|"));
+}
+
+// The helper scores one finished series. Drawn rounds award
+// nothing. Leftover ties break on total damage, then stand.
+export function seriesWinner(scoreA: number, scoreB: number, rounds: ArenaRoundSummary[]): string {
+  if (scoreA > scoreB) return "A";
+  if (scoreB > scoreA) return "B";
+  const dmgA = rounds.reduce((n, r) => n + r.damageA, 0);
+  const dmgB = rounds.reduce((n, r) => n + r.damageB, 0);
+  return dmgA === dmgB ? "DRAW" : dmgA > dmgB ? "A" : "B";
+}
+
+// One arena round. Fresh positions, health, and energy. The chips
+// persist; the optional tallies count rule fires per side.
+function playRound(
+  a: AgentPolicy,
+  b: AgentPolicy,
+  seed: string,
+  base: BattleConfig,
+  round: number,
+  tallyA?: Map<string, number>,
+  tallyB?: Map<string, number>,
+): { summary: ArenaRoundSummary; frames: ReplayFrame[]; events: ReplayEvent[] } {
+  const cfg = roundConfig(base, seed, round);
+  let state = createBattle(cfg);
+  const frames: ReplayFrame[] = [snap(state)];
+  const events: ReplayEvent[] = [];
+  let guard = 0;
+  while (!state.over && guard < cfg.world.maxTicks) {
+    const before = snap(state);
+    state = stepBattle(
+      state,
+      { A: drive(state, a, "A", cfg, tallyA), B: drive(state, b, "B", cfg, tallyB) },
+      cfg,
+    );
+    guard += 1;
+    for (const [side, was, is] of [["A", before.ahp, state.agents.A.hp], ["B", before.bhp, state.agents.B.hp]] as const) {
+      if (is < was) events.push({ t: state.tick, side, type: is <= 0 ? "ko" : "hit" });
+    }
+    if (state.tick % REPLAY_EVERY_V1 === 0 || state.over) frames.push(snap(state));
+  }
+  const winner = state.winner ?? "DRAW";
+  return {
+    summary: {
+      round,
+      winner,
+      ticks: state.tick,
+      checksum: checksum(state),
+      damageA: state.agents.A.damageDealt,
+      damageB: state.agents.B.damageDealt,
+    },
+    frames,
+    events,
+  };
+}
+
+// The runner plays a best-of-3 series. First to 2 round wins
+// takes it, so series run 2 or 3 rounds. Same seed, same series.
+export function fightSeries(
+  a: AgentPolicy,
+  b: AgentPolicy,
+  seed: string,
+  base: BattleConfig = ARENA_1V1,
+): SeriesResult {
+  const tallyA = new Map<string, number>();
+  const tallyB = new Map<string, number>();
+  const rounds: ArenaRoundSummary[] = [];
+  let scoreA = 0;
+  let scoreB = 0;
+  for (let round = 1; round <= 3; round += 1) {
+    const played = playRound(a, b, seed, base, round, tallyA, tallyB);
+    rounds.push(played.summary);
+    if (played.summary.winner === "A") scoreA += 1;
+    if (played.summary.winner === "B") scoreB += 1;
+    if (scoreA === 2 || scoreB === 2) break;
+  }
+  return {
+    winner: seriesWinner(scoreA, scoreB, rounds),
+    ticks: rounds.reduce((n, r) => n + r.ticks, 0),
+    checksum: seriesChecksum(rounds),
+    score: { A: scoreA, B: scoreB },
+    rounds,
+    chipsA: Object.fromEntries(tallyA),
+    chipsB: Object.fromEntries(tallyB),
+  };
+}
+
+// The builder records a versioned arena replay. Same seed, same bytes.
+export function buildArenaReplay(
+  a: AgentPolicy,
+  b: AgentPolicy,
+  seed: string,
+  base: BattleConfig = ARENA_1V1,
+): ReplayV3 {
+  const summaries: ArenaRoundSummary[] = [];
+  const rounds: ArenaRoundReplay[] = [];
+  let scoreA = 0;
+  let scoreB = 0;
+  for (let round = 1; round <= 3; round += 1) {
+    const played = playRound(a, b, seed, base, round);
+    summaries.push(played.summary);
+    rounds.push({
+      round,
+      seed: `${seed}#r${round}`,
+      winner: played.summary.winner,
+      ticks: played.summary.ticks,
+      checksum: played.summary.checksum,
+      frames: played.frames,
+      events: played.events,
+    });
+    if (played.summary.winner === "A") scoreA += 1;
+    if (played.summary.winner === "B") scoreB += 1;
+    if (scoreA === 2 || scoreB === 2) break;
+  }
+  const ticks = summaries.reduce((n, r) => n + r.ticks, 0);
+  return {
+    version: 3,
+    mode: "arena",
+    seed,
+    winner: seriesWinner(scoreA, scoreB, summaries),
+    score: { A: scoreA, B: scoreB },
+    rounds,
+    ticks,
+    timeSec: r2(ticks / base.world.tickHz),
+    checksum: seriesChecksum(summaries),
   };
 }
 
@@ -728,7 +925,8 @@ export function drive(
   const f = state.agents[foeId];
   const center = { x: cfg.world.width / 2, y: cfg.world.height / 2 };
   const toFoe = dir(a.pos, f.pos);
-  const flip = (state.tick >> 6) % 2 === 1 ? -1 : 1;
+  const phase = cfg.mode === "arena" && me === "B" ? 32 : 0;
+  const flip = ((state.tick + phase) >> 6) % 2 === 1 ? -1 : 1;
   let move: Vec2;
   switch (want.move) {
     case "CONTEST_OVERSEER": {
@@ -804,7 +1002,8 @@ export function drive(
   // shoots whatever pickAim sees in range, so duel-era drafts with no
   // fire rule fight instead of standing still. The chip keeps full
   // authority over movement, dash, shield, and buys. Duel keeps
-  // rule-gated fire, so duel replays stay byte-identical.
+  // rule-gated fire, so duel replays stay byte-identical. Arena
+  // fires at the visible foe on its own; only target NONE holds it.
   let aim: Vec2;
   let fire = want.fire;
   if (cfg.mode === "moba" && state.moba) {
@@ -817,7 +1016,19 @@ export function drive(
       fire = false;
     }
   } else {
-    aim = obs.lineOfSight ? { ...toFoe } : move;
+    if (cfg.mode === "arena") {
+      if (want.target === "NONE") {
+        aim = move;
+        fire = false;
+      } else if (obs.lineOfSight) {
+        aim = { ...toFoe };
+        fire = true;
+      } else {
+        aim = move;
+      }
+    } else {
+      aim = obs.lineOfSight ? { ...toFoe } : move;
+    }
   }
   return {
     move,

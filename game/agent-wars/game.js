@@ -584,6 +584,7 @@ function showEnd() {
 
 function reset(seed) {
   stopMoba();
+  stopArena();
   const mirror = hashSeed(seed || "forge-001") % 2 === 1;
   const leftX = mirror ? W - 2 : 2;
   agents = { A: spawn("A", leftX), B: spawn("B", leftX) };
@@ -684,7 +685,12 @@ function playServerReplay(replay, meta) {
     playMobaReplay(replay, meta);
     return;
   }
+  if (replay && replay.version === 3 && replay.mode === "arena" && (replay.rounds || []).length) {
+    playArenaReplay(replay, meta);
+    return;
+  }
   stopMoba();
+  stopArena();
   replayFrames = replay.frames || [];
   replayIdx = 1;
   replayPrev = replayFrames[0] || null;
@@ -710,6 +716,10 @@ function playServerReplay(replay, meta) {
 function playStep() {
   if (moba) {
     mobaStep();
+    return;
+  }
+  if (arena) {
+    arenaStep();
     return;
   }
   if (paused || !replayFrames || !replayCurr) return;
@@ -944,6 +954,7 @@ function hideRecap() {
 }
 
 function playMobaReplay(replay, meta) {
+  stopArena();
   const frames = replay.frames || [];
   const lastTick = frames.length ? frames[frames.length - 1].t : 0;
   moba = {
@@ -1962,6 +1973,281 @@ function mobaRecap() {
       icons.appendChild(none);
     }
     row.appendChild(icons);
+    el.appendChild(row);
+  }
+  el.hidden = false;
+}
+
+// ---- Battle Arena 1v1 viewer (ReplayV3). Rounds play back to
+// back on the duel canvas. Nothing re-simulates. Perspective
+// mirrors the MOBA rule: the local side renders left and cyan.
+let arena = null;
+
+const arenaFlip = () => Boolean(arena && arena.flip);
+const arenaDS = (side) => (arenaFlip() ? (side === "A" ? "B" : "A") : side);
+const arenaName = (side) => (arenaDS(side) === "A" ? "Cyan" : "Crimson");
+
+function stopArena() {
+  arena = null;
+  const hud = document.getElementById("arena-series");
+  if (hud) hud.hidden = true;
+}
+
+// Score panels follow perspective: local agent left, foe right.
+// Names and portraits arrive in meta from the replay response.
+function arenaNames() {
+  const m = (arena && arena.meta) || {};
+  const names = m.names || {};
+  const ports = m.portraits || {};
+  const local = arenaFlip() ? "b" : "a";
+  const foe = arenaFlip() ? "a" : "b";
+  const set = (id, text) => {
+    const el = document.getElementById(id);
+    if (el && text) el.textContent = text;
+  };
+  set("score-a-name", names[local]);
+  set("score-b-name", names[foe]);
+  const img = (id, url) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (url) {
+      el.src = url;
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
+  };
+  img("score-a-img", ports[local]);
+  img("score-b-img", ports[foe]);
+}
+
+// Series HUD: current round, local-first score, per-round pips.
+function arenaSeriesHud() {
+  if (!arena) return;
+  const local = arenaFlip() ? "B" : "A";
+  const foe = arenaFlip() ? "A" : "B";
+  const lw = arena.score[local] || 0;
+  const fw = arena.score[foe] || 0;
+  const set = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  set("series-round", "ROUND " + Math.min(arena.rIdx + 1, arena.rounds.length) + "/" + arena.rounds.length + " · BEST OF 3");
+  set("series-score", lw + " — " + fw);
+  set("series-pips", arena.rounds.map((r, i) => {
+    if (i >= arena.decided) return "·";
+    if (r.winner === local) return "●";
+    if (r.winner === foe) return "○";
+    return "◐";
+  }).join(" "));
+  pillWinner.textContent = "series " + lw + " — " + fw;
+}
+
+function arenaCompact() {
+  const compact = document.getElementById("diag-compact");
+  if (compact && arena) compact.textContent = "arena replay · R" + (arena.rIdx + 1) + " · " + tick + " ticks";
+}
+
+function arenaLoadRound(i) {
+  const r = arena.rounds[i];
+  arena.frames = r.frames || [];
+  arena.idx = 1;
+  arena.prev = arena.frames[0] || null;
+  arena.curr = arena.frames[0] || null;
+  replayAlpha = 0;
+  note("Round " + r.round + " starts: " + arena.frames.length + " frames");
+  arenaSeriesHud();
+}
+
+function playArenaReplay(replay, meta) {
+  stopMoba();
+  const rounds = replay.rounds || [];
+  arena = {
+    replay,
+    rounds,
+    rIdx: 0,
+    frames: [],
+    idx: 1,
+    prev: null,
+    curr: null,
+    score: { A: 0, B: 0 },
+    decided: 0,
+    holdLeft: 0,
+    meta: meta || {},
+    flip: (meta && meta.perspective) === "B",
+  };
+  replayAlpha = 0;
+  shots = [];
+  sparks = [];
+  over = true;
+  paused = false;
+  winner = null;
+  pillSeed.textContent = "seed " + (replay.seed || "server");
+  pillState.textContent = "replay";
+  endcard.hidden = true;
+  hideRecap();
+  feed.innerHTML = "";
+  const mf = document.getElementById("moba-feed");
+  if (mf) mf.innerHTML = "";
+  const hud = document.getElementById("arena-series");
+  if (hud) hud.hidden = false;
+  const unit = document.getElementById("arena-clock-unit");
+  if (unit) unit.textContent = "s";
+  note("Arena series loads: " + rounds.length + " rounds at " + replaySpeed + "x");
+  pauseBtn.disabled = false;
+  pauseBtn.textContent = "Pause";
+  arenaNames();
+  arenaLoadRound(0);
+  arenaToAgents(1);
+  draw();
+  sync();
+  arenaCompact();
+  timer = setInterval(playStep, STEP_MS);
+}
+
+// One round frame mapped to [local, foe] robot reads.
+function arenaMap(f) {
+  if (!f) return null;
+  const a = { x: f.ax, y: f.ay, hp: f.ahp, en: f.aen };
+  const b = { x: f.bx, y: f.by, hp: f.bhp, en: f.ben };
+  return arenaFlip() ? [b, a] : [a, b];
+}
+
+// The mapper glides one round frame onto the duel canvas. The
+// local robot always drives the cyan unit and the left panels.
+function arenaToAgents(t) {
+  if (!arena.curr) return;
+  const p = arenaMap(arena.prev || arena.curr);
+  const f = arenaMap(arena.curr);
+  const glide = (a, b) => a + (b - a) * t;
+  const mk = (side, i) => {
+    const px = glide(p[i].x, f[i].x);
+    const py = glide(p[i].y, f[i].y);
+    let fx = faceDelta(f[i].x, p[i].x);
+    let fy = faceDelta(f[i].y, p[i].y);
+    if (fx === 0 && fy === 0) { fx = side === "A" ? 1 : -1; fy = 0; }
+    return {
+      side,
+      x: arenaFlip() ? W - px : px,
+      y: py,
+      hp: f[i].hp,
+      en: f[i].en,
+      ax: arenaFlip() ? -fx : fx,
+      ay: fy,
+      alive: f[i].hp > 0,
+    };
+  };
+  agents = { A: mk("A", 0), B: mk("B", 1) };
+  tick = arena.curr ? arena.curr.t : 0;
+  time = tick * TICK;
+}
+
+function arenaStep() {
+  if (paused || !arena || !arena.curr) return;
+  if (arena.holdLeft > 0) {
+    arena.holdLeft -= 1;
+    if (arena.holdLeft === 0) arenaAdvance();
+    else {
+      draw();
+      sync();
+      arenaCompact();
+    }
+    return;
+  }
+  if (arena.idx >= arena.frames.length && replayAlpha >= FRAME_MS) {
+    arenaRoundEnd();
+    return;
+  }
+  replayAlpha += STEP_MS * replaySpeed;
+  while (replayAlpha >= FRAME_MS && arena.idx < arena.frames.length) {
+    replayAlpha -= FRAME_MS;
+    arena.prev = arena.curr;
+    arena.curr = arena.frames[arena.idx];
+    arena.idx += 1;
+    const p = arenaMap(arena.prev);
+    const f = arenaMap(arena.curr);
+    if (f[0].hp < p[0].hp) flash("A");
+    if (f[1].hp < p[1].hp) flash("B");
+  }
+  const t = arena.frames.length ? Math.min(1, replayAlpha / FRAME_MS) : 1;
+  arenaToAgents(t);
+  draw();
+  sync();
+  arenaCompact();
+}
+
+function arenaRoundEnd() {
+  const r = arena.rounds[arena.rIdx];
+  if (r.winner === "A" || r.winner === "B") arena.score[r.winner] += 1;
+  arena.decided = arena.rIdx + 1;
+  const names = (arena.meta && arena.meta.names) || {};
+  const w = r.winner === "A" || r.winner === "B"
+    ? (names[r.winner.toLowerCase()] || arenaName(r.winner))
+    : "Draw";
+  note("Round " + r.round + " ends: " + w + " (" + r.ticks + " ticks)");
+  arenaSeriesHud();
+  arena.holdLeft = 45;
+}
+
+function arenaAdvance() {
+  if (arena.rIdx + 1 >= arena.rounds.length) {
+    clearInterval(timer);
+    finishArena();
+    return;
+  }
+  arena.rIdx += 1;
+  arenaLoadRound(arena.rIdx);
+}
+
+function finishArena() {
+  const m = (arena && arena.meta) || {};
+  const names = m.names || {};
+  winner = (arena.replay && arena.replay.winner) || m.winner || null;
+  const local = arenaFlip() ? "B" : "A";
+  const foe = arenaFlip() ? "A" : "B";
+  const lw = arena.score[local] || 0;
+  const fw = arena.score[foe] || 0;
+  const lname = names[local.toLowerCase()] || (local === "A" ? "Cyan" : "Crimson");
+  const fname = names[foe.toLowerCase()] || (foe === "A" ? "Cyan" : "Crimson");
+  hideRecap();
+  const ok = m.checksumOk ? "checksum verified" : "checksum MISMATCH";
+  endTitle.textContent = winner === local ? lname + " wins the series"
+    : winner === foe ? fname + " wins the series" : "Series drawn";
+  endStats.textContent = arena.rounds.map((r) => {
+    const w = r.winner === "A" || r.winner === "B"
+      ? (names[r.winner.toLowerCase()] || arenaName(r.winner)) : "Draw";
+    return "R" + r.round + " " + w + " " + r.ticks + "t";
+  }).join(" · ") + " · " + lw + " — " + fw + " · " + ok;
+  const econ = document.getElementById("end-econ");
+  if (econ) econ.textContent = m.econ ? String(m.econ) : "";
+  pillWinner.textContent = "series " + lw + " — " + fw;
+  pillState.textContent = "done";
+  const round = document.getElementById("series-round");
+  if (round) round.textContent = "FINAL · BEST OF 3";
+  arenaRecap();
+  endcard.hidden = false;
+  note("Arena series ends. " + endTitle.textContent + ". " + ok + ".");
+  arena.frames = [];
+}
+
+// Post-series recap. Round winners, ticks, and the end state:
+// knockout, judges decision, or even.
+function arenaRecap() {
+  const el = document.getElementById("end-builds");
+  if (!el || !arena) return;
+  el.innerHTML = "";
+  const names = (arena.meta && arena.meta.names) || {};
+  for (const r of arena.rounds) {
+    const last = r.frames && r.frames.length ? r.frames[r.frames.length - 1] : null;
+    const ko = last && (last.ahp <= 0 || last.bhp <= 0);
+    const w = r.winner === "A" || r.winner === "B"
+      ? (names[r.winner.toLowerCase()] || arenaName(r.winner)) : "Draw";
+    const row = document.createElement("div");
+    row.className = "recap-side";
+    const head = document.createElement("p");
+    head.className = "recap-head";
+    head.textContent = "Round " + r.round + " — " + w + " · " + r.ticks + " ticks · " + (ko ? "knockout" : r.winner === "DRAW" ? "even" : "decision");
+    row.appendChild(head);
     el.appendChild(row);
   }
   el.hidden = false;

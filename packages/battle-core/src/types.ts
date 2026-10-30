@@ -82,7 +82,7 @@ export type WorldConfig = {
   maxTicks: number;
 };
 
-export type BattleMode = "duel" | "moba";
+export type BattleMode = "duel" | "moba" | "arena";
 
 export type BattleConfig = {
   seed: string;
@@ -91,6 +91,7 @@ export type BattleConfig = {
   mode?: BattleMode;
   autoBuy?: boolean;
   rulesetVersion?: 1 | 2;
+  spawnShift?: number;
 };
 
 export type BattleState = {

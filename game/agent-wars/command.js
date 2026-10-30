@@ -118,7 +118,7 @@ async function cmdBoot() {
   if (autoEl) autoEl.textContent = autoLine;
   const dash = await cmdCall("GET", `/v1/agents/${me.data.agent.id}/dashboard`);
   const last = dash.status === 200 && dash.data.history && dash.data.history[0];
-  setText("lower-last", last ? `${last.winner} · ${last.ticks} TICKS` : "NO FIGHTS YET");
+  setText("lower-last", last ? `${last.mode === "arena" ? last.winner + " SERIES" : last.winner} · ${last.ticks} TICKS` : "NO FIGHTS YET");
 }
 
 cmdBoot();

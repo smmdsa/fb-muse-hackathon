@@ -21,6 +21,27 @@ export function forgeWorld(): WorldConfig {
   return { width, height, covers, control, tickHz: 30, maxTicks: 2700 };
 }
 
+// The builder returns the 1v1 battle arena. Two robots spawn on
+// opposite sides. No lanes, no minions, no towers. Each round caps
+// at 90 seconds. The viewer draws this same geometry.
+export function arenaWorld(): WorldConfig {
+  const width = 24;
+  const height = 16;
+  const covers: CoverBox[] = [
+    { minX: 6.5, minY: 3.5, maxX: 8.5, maxY: 5.5 },
+    { minX: 15.5, minY: 3.5, maxX: 17.5, maxY: 5.5 },
+    { minX: 6.5, minY: 10.5, maxX: 8.5, maxY: 12.5 },
+    { minX: 15.5, minY: 10.5, maxX: 17.5, maxY: 12.5 },
+  ];
+  const control: CoverBox = {
+    minX: width / 2 - 2,
+    minY: height / 2 - 2,
+    maxX: width / 2 + 2,
+    maxY: height / 2 + 2,
+  };
+  return { width, height, covers, control, tickHz: 30, maxTicks: 2700 };
+}
+
 // The builder returns the one-lane MOBA map.
 export function mobaWorld(): WorldConfig {
   const width = 48;

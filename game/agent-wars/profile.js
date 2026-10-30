@@ -399,7 +399,7 @@ async function renderAuto() {
   for (const h of d.recent || []) {
     const p = document.createElement("p");
     p.className = "sub";
-    p.textContent = `${h.winner} wins in ${h.ticks} ticks — AP ${h.myDelta >= 0 ? "+" : ""}${h.myDelta} · ${h.myPaid} AC `;
+    p.textContent = `${h.winner} ${h.mode === "arena" ? "takes the series" : "wins"} in ${h.ticks} ticks — AP ${h.myDelta >= 0 ? "+" : ""}${h.myDelta} · ${h.myPaid} AC `;
     const a = document.createElement("a");
     a.href = `./arena.html?replay=${h.matchId}`;
     a.className = "link-quiet";
@@ -425,7 +425,7 @@ function renderHist(d) {
       ? `AP ${h.myDelta >= 0 ? "+" : ""}${h.myDelta} · ${h.myPaid} AC`
       : `${h.myPaid} AC · unrated`;
     const foe = String(h.foe || "").startsWith("bot:") ? `sparring ${h.foe}` : `vs ${h.foe}`;
-    p.textContent = `${h.winner} wins in ${h.ticks} ticks ${foe} — ${econ} `;
+    p.textContent = `${h.winner} ${h.mode === "arena" ? "takes the series" : "wins"} in ${h.ticks} ticks ${foe} — ${econ} `;
     const a = document.createElement("a");
     a.href = `./arena.html?replay=${h.matchId}`;
     a.className = "link-quiet";
