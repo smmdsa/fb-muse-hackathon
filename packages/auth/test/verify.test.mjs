@@ -33,12 +33,17 @@ describe("wallet auth", () => {
     assert.equal(addressOfSecret(TEST_KEY), TEST_ADDRESS);
   });
 
-  it("builds a message with every challenge field", () => {
+  it("builds an EIP-4361 message with every challenge field", () => {
     const text = buildLoginMessage({ ...challenge, address: TEST_ADDRESS.toUpperCase().replace("0X", "0x") });
-    assert.ok(text.includes("Agent Wars login"));
-    assert.ok(text.includes("Domain: 127.0.0.1:8787"));
-    assert.ok(text.includes(`Address: ${TEST_ADDRESS}`));
+    assert.ok(text.startsWith("127.0.0.1:8787 wants you to sign in with your Ethereum account:"));
+    assert.ok(text.includes(TEST_ADDRESS));
+    assert.ok(text.includes("Sign in to Agent Wars. This signature is free and never moves funds."));
+    assert.ok(text.includes("URI: https://127.0.0.1:8787/auth.html"));
+    assert.ok(text.includes("Version: 1"));
+    assert.ok(text.includes("Chain ID: 1"));
     assert.ok(text.includes("Nonce: nonce_abc123"));
+    assert.ok(text.includes("Issued At: "));
+    assert.ok(text.includes("Expiration Time: "));
   });
 
   it("signs and recovers the signer", () => {
