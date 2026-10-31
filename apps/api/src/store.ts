@@ -107,6 +107,19 @@ export function openStore(path: string): Store {
       reason TEXT NOT NULL,
       at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS auth_nonces (
+      nonce TEXT PRIMARY KEY,
+      address TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      issued_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      token_hash TEXT PRIMARY KEY,
+      leader_id TEXT NOT NULL REFERENCES leaders(id),
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
   // Labels arrived late. Old files gain the column once, then never again.
   const cols = db.prepare("PRAGMA table_info(versions)").all() as Record<string, unknown>[];
@@ -117,6 +130,12 @@ export function openStore(path: string): Store {
   const matchCols = db.prepare("PRAGMA table_info(matches)").all() as Record<string, unknown>[];
   if (!matchCols.some((c) => c.name === "mode")) {
     db.exec("ALTER TABLE matches ADD COLUMN mode TEXT NOT NULL DEFAULT 'duel'");
+  }
+  // Wallet login arrived late. Old files gain the column once, then never again.
+  const leaderCols = db.prepare("PRAGMA table_info(leaders)").all() as Record<string, unknown>[];
+  if (!leaderCols.some((c) => c.name === "wallet_address")) {
+    db.exec("ALTER TABLE leaders ADD COLUMN wallet_address TEXT");
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_leaders_wallet ON leaders(wallet_address)");
   }
   return { db, close: () => db.close() };
 }

@@ -10,6 +10,7 @@ import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, battleConf
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 import { hasKey } from "@agent-wars/ai-provider";
+import { buildLoginMessage, buildClearCookie, buildSetCookie, hashToken, isAddress, normalizeAddress, NONCE_TTL_MS, readSessionCookie, SESSION_TTL_MS, verifyWalletSignature } from "@agent-wars/auth";
 
 // Per-route sliding windows. Memory-only; a restart clears history.
 const authHits = new Map<string, number[]>();
@@ -38,13 +39,14 @@ function reserveAi(ctx: Ctx, res: ServerResponse, leader: string): boolean {
   return false;
 }
 
-function send(res: ServerResponse, code: number, body: unknown): void {
+function send(res: ServerResponse, code: number, body: unknown, extraHeaders: Record<string, string> = {}): void {
   const text = JSON.stringify(body);
   res.writeHead(code, {
     "content-type": "application/json",
     "content-length": Buffer.byteLength(text),
     "access-control-allow-origin": "*",
     "access-control-allow-headers": "authorization, content-type, x-admin-key",
+    ...extraHeaders,
   });
   res.end(text);
 }
@@ -98,6 +100,19 @@ function bearer(req: IncomingMessage, ctx: Ctx): Record<string, unknown> | null 
   return getLeader(ctx.store, token);
 }
 
+// Cookie sessions ride first. Bearer [REDACTED] stay for scripts and old clients.
+function sessionLeader(req: IncomingMessage, ctx: Ctx): Record<string, unknown> | null {
+  const cookieToken = readSessionCookie(req.headers.cookie);
+  if (cookieToken) {
+    const session = ctx.store.db.prepare("SELECT leader_id FROM auth_sessions WHERE token_hash = ? AND expires_at > ?").get(hashToken(cookieToken), Date.now()) as { leader_id: string } | undefined;
+    if (session) {
+      const leader = ctx.store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(session.leader_id) as Record<string, unknown> | null;
+      if (leader) return leader;
+    }
+  }
+  return bearer(req, ctx);
+}
+
 // The router matches method plus path and answers with JSON.
 export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerResponse) => void {
   return async (req, res) => {
@@ -124,6 +139,68 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const token = newToken("demo");
         ctx.store.db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run(id, handle, token);
         send(res, 200, { token, leaderId: id });
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/auth/challenge") {
+        const raw = typeof body.address === "string" ? body.address.trim() : "";
+        if (!isAddress(raw)) {
+          send(res, 400, { error: "address must be 0x plus 40 hex chars" });
+          return;
+        }
+        const address = normalizeAddress(raw);
+        if (limited(res, authHits, `wallet:${address}`, 60_000, 10)) return;
+        const now = Date.now();
+        const domain = (req.headers.host ?? "local").slice(0, 120);
+        ctx.store.db.prepare("DELETE FROM auth_nonces WHERE expires_at <= ?").run(now);
+        const nonce = newToken("nonce");
+        const issuedAt = now;
+        const expiresAt = now + NONCE_TTL_MS;
+        ctx.store.db.prepare("INSERT INTO auth_nonces (nonce, address, domain, issued_at, expires_at) VALUES (?, ?, ?, ?, ?)").run(nonce, address, domain, issuedAt, expiresAt);
+        send(res, 200, { message: buildLoginMessage({ domain, address, nonce, issuedAt, expiresAt }), nonce, expiresAt });
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/auth/wallet") {
+        const raw = typeof body.address === "string" ? body.address.trim() : "";
+        const message = typeof body.message === "string" ? body.message : "";
+        const signature = typeof body.signature === "string" ? body.signature.trim() : "";
+        const nonce = typeof body.nonce === "string" ? body.nonce : "";
+        if (!isAddress(raw) || !message || !signature || !nonce) {
+          send(res, 400, { error: "address, message, signature, and nonce are required" });
+          return;
+        }
+        const address = normalizeAddress(raw);
+        if (limited(res, authHits, `wallet:${address}`, 60_000, 10)) return;
+        const now = Date.now();
+        const row = ctx.store.db.prepare("SELECT * FROM auth_nonces WHERE nonce = ?").get(nonce) as Record<string, unknown> | null;
+        ctx.store.db.prepare("DELETE FROM auth_nonces WHERE nonce = ? OR expires_at <= ?").run(nonce, now);
+        if (!row || row.address !== address || (row.expires_at as number) <= now) {
+          send(res, 401, { error: "challenge unknown or expired: request a fresh one" });
+          return;
+        }
+        const expected = buildLoginMessage({ domain: row.domain as string, address, nonce, issuedAt: row.issued_at as number, expiresAt: row.expires_at as number });
+        if (message !== expected || !verifyWalletSignature(message, signature, address)) {
+          send(res, 401, { error: "signature does not match the challenge" });
+          return;
+        }
+        let leader = ctx.store.db.prepare("SELECT * FROM leaders WHERE wallet_address = ?").get(address) as Record<string, unknown> | null;
+        if (!leader) {
+          const id = mintId("leader");
+          const token = newToken("demo");
+          let handle = address;
+          for (let n = 1; ctx.store.db.prepare("SELECT 1 FROM leaders WHERE handle = ?").get(handle); n += 1) handle = `${address}-${n}`;
+          ctx.store.db.prepare("INSERT INTO leaders (id, handle, token, wallet_address) VALUES (?, ?, ?, ?)").run(id, handle, token, address);
+          leader = ctx.store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(id) as Record<string, unknown>;
+        }
+        const sessionToken = newToken("sess");
+        const sessionExpires = now + SESSION_TTL_MS;
+        ctx.store.db.prepare("INSERT INTO auth_sessions (token_hash, leader_id, expires_at, created_at) VALUES (?, ?, ?, ?)").run(hashToken(sessionToken), leader.id as string, sessionExpires, now);
+        send(res, 200, { leaderId: leader.id, expiresAt: sessionExpires }, { "set-cookie": buildSetCookie(sessionToken) });
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/auth/logout") {
+        const sessionToken = readSessionCookie(req.headers.cookie);
+        if (sessionToken) ctx.store.db.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").run(hashToken(sessionToken));
+        send(res, 200, { ok: true }, { "set-cookie": buildClearCookie() });
         return;
       }
       if (req.method === "GET" && /^\/v1\/leaders\/[^/]+\/public$/.test(url.pathname)) {
@@ -164,7 +241,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         }
         return;
       }
-      const me = bearer(req, ctx);
+      const me = sessionLeader(req, ctx);
       if (!me) {
         send(res, 401, { error: "bearer token is required: call POST /v1/auth/session first" });
         return;

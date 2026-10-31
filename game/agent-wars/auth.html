@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Wars — Wallet</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="./style.css" />
+<link rel="stylesheet" href="./shell.css" />
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+<p class="logo">AGENT<span>///</span>WARS</p>
+<p class="micro">The robot combat league</p>
+<nav class="nav" aria-label="Navigation">
+<a href="./index.html"><b>⌂</b> COMMAND</a>
+<a href="./profile.html"><b>◇</b> BARRACKS</a>
+<a href="./chip.html"><b>▦</b> CHIP LAB</a>
+<a href="./arena.html"><b>◉</b> ARENA</a>
+<a href="./public.html"><b>⬡</b> RANKS</a>
+<a href="./tournaments.html"><b>⚑</b> CUP</a>
+<a href="./armory.html"><b>◈</b> ARMORY</a>
+<a class="on" href="./auth.html"><b>◍</b> WALLET</a>
+</nav>
+<div class="season"><span class="micro">Season 01</span><strong>The Forge</strong><small>Your strategy starts here.</small></div>
+</aside>
+<div>
+<div class="crumb"><span>AGENT WARS / <strong>WALLET</strong></span><span id="crumb-state">COMMANDER</span></div>
+<main class="shell content">
+<header class="top">
+<div>
+<p class="eyebrow">Real login, no passwords</p>
+<h1>WALLET SIGN-IN</h1>
+<p class="sub">Connect a wallet. Sign one message. Play.</p>
+</div>
+<div class="pills">
+<span class="pill" id="pill-who">signed out</span>
+</div>
+</header>
+<section class="panel" id="auth-card">
+<h2>Sign in with Ethereum</h2>
+<p class="sub" id="auth-status">No wallet connected.</p>
+<p><span class="pill" id="auth-address" hidden></span></p>
+<div class="next-actions">
+<button class="btn-primary" id="connect-btn">Connect wallet</button>
+<button class="btn-primary" id="sign-btn" hidden>Sign &amp; enter</button>
+<button class="btn-ghost" id="logout-btn" hidden>Sign out</button>
+<a class="btn-ghost" id="nowallet-link" href="https://metamask.io" hidden>Get a wallet</a>
+</div>
+<p class="sub">First signature creates the account. Sessions last 30 days on this device.</p>
+</section>
+</main>
+</div>
+</div>
+<script src="./auth.js"></script>
+</body>
+</html>

@@ -15,6 +15,7 @@ import type { Candidate, History } from "@agent-wars/matchmaker";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
 import { checkLimit } from "./ids.ts";
+import { buildLoginMessage, buildClearCookie, buildSetCookie, hashToken, isAddress, normalizeAddress, NONCE_TTL_MS, readSessionCookie, SESSION_TTL_MS, verifyWalletSignature } from "@agent-wars/auth";
 
 // Per-route sliding windows. Memory-only per isolate.
 const authHits = new Map<string, number[]>();
@@ -53,11 +54,12 @@ type D1Database = {
   };
 };
 
-function json(body: unknown, code = 200): Response {
+function json(body: unknown, code = 200, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status: code,
     headers: {
       "content-type": "application/json",
+      ...extraHeaders,
       "access-control-allow-origin": "*",
       "access-control-allow-headers": "authorization, content-type",
     },
@@ -108,6 +110,19 @@ async function bearer(request: Request, env: WorkerEnv): Promise<Record<string, 
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
   if (!token) return null;
   return env.DB.prepare("SELECT * FROM leaders WHERE token = ?").bind(token).first<Record<string, unknown>>();
+}
+
+// Cookie sessions ride first. Bearer [REDACTED] stay for scripts and old clients.
+async function sessionLeader(request: Request, env: WorkerEnv): Promise<Record<string, unknown> | null> {
+  const cookieToken = readSessionCookie(request.headers.get("cookie"));
+  if (cookieToken) {
+    const session = await env.DB.prepare("SELECT leader_id FROM auth_sessions WHERE token_hash = ? AND expires_at > ?").bind(hashToken(cookieToken), Date.now()).first<{ leader_id: string }>();
+    if (session) {
+      const leader = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(session.leader_id).first<Record<string, unknown>>();
+      if (leader) return leader;
+    }
+  }
+  return bearer(request, env);
 }
 
 // The leaderboard reads placed leaders for one season, best first.
@@ -882,6 +897,57 @@ export default {
       await env.DB.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").bind(id, handle, token).run();
       return json({ token, leaderId: id });
     }
+    if (request.method === "POST" && url.pathname === "/v1/auth/challenge") {
+      const body = await readBody(request);
+      if (body === null) return json({ error: "bad json" }, 400);
+      const raw = typeof body.address === "string" ? body.address.trim() : "";
+      if (!isAddress(raw)) return json({ error: "address must be 0x plus 40 hex chars" }, 400);
+      const address = normalizeAddress(raw);
+      if (limited(authHits, `wallet:${address}`, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);
+      const now = Date.now();
+      const domain = (request.headers.get("host") ?? "local").slice(0, 120);
+      await env.DB.prepare("DELETE FROM auth_nonces WHERE expires_at <= ?").bind(now).run();
+      const nonce = newToken("nonce");
+      const issuedAt = now;
+      const expiresAt = now + NONCE_TTL_MS;
+      await env.DB.prepare("INSERT INTO auth_nonces (nonce, address, domain, issued_at, expires_at) VALUES (?, ?, ?, ?, ?)").bind(nonce, address, domain, issuedAt, expiresAt).run();
+      return json({ message: buildLoginMessage({ domain, address, nonce, issuedAt, expiresAt }), nonce, expiresAt });
+    }
+    if (request.method === "POST" && url.pathname === "/v1/auth/wallet") {
+      const body = await readBody(request);
+      if (body === null) return json({ error: "bad json" }, 400);
+      const raw = typeof body.address === "string" ? body.address.trim() : "";
+      const message = typeof body.message === "string" ? body.message : "";
+      const signature = typeof body.signature === "string" ? body.signature.trim() : "";
+      const nonce = typeof body.nonce === "string" ? body.nonce : "";
+      if (!isAddress(raw) || !message || !signature || !nonce) return json({ error: "address, message, signature, and nonce are required" }, 400);
+      const address = normalizeAddress(raw);
+      if (limited(authHits, `wallet:${address}`, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);
+      const now = Date.now();
+      const row = await env.DB.prepare("SELECT * FROM auth_nonces WHERE nonce = ?").bind(nonce).first<Record<string, unknown>>();
+      await env.DB.prepare("DELETE FROM auth_nonces WHERE nonce = ? OR expires_at <= ?").bind(nonce, now).run();
+      if (!row || row.address !== address || (row.expires_at as number) <= now) return json({ error: "challenge unknown or expired: request a fresh one" }, 401);
+      const expected = buildLoginMessage({ domain: row.domain as string, address, nonce, issuedAt: row.issued_at as number, expiresAt: row.expires_at as number });
+      if (message !== expected || !verifyWalletSignature(message, signature, address)) return json({ error: "signature does not match the challenge" }, 401);
+      let leader = await env.DB.prepare("SELECT * FROM leaders WHERE wallet_address = ?").bind(address).first<Record<string, unknown>>();
+      if (!leader) {
+        const id = mintId("leader");
+        const token = newToken("demo");
+        let handle = address;
+        for (let n = 1; await env.DB.prepare("SELECT 1 FROM leaders WHERE handle = ?").bind(handle).first(); n += 1) handle = `${address}-${n}`;
+        await env.DB.prepare("INSERT INTO leaders (id, handle, token, wallet_address) VALUES (?, ?, ?, ?)").bind(id, handle, token, address).run();
+        leader = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(id).first<Record<string, unknown>>();
+      }
+      const sessionToken = newToken("sess");
+      const sessionExpires = now + SESSION_TTL_MS;
+      await env.DB.prepare("INSERT INTO auth_sessions (token_hash, leader_id, expires_at, created_at) VALUES (?, ?, ?, ?)").bind(hashToken(sessionToken), leader!.id as string, sessionExpires, now).run();
+      return json({ leaderId: leader!.id, expiresAt: sessionExpires }, 200, { "set-cookie": buildSetCookie(sessionToken) });
+    }
+    if (request.method === "POST" && url.pathname === "/v1/auth/logout") {
+      const sessionToken = readSessionCookie(request.headers.get("cookie"));
+      if (sessionToken) await env.DB.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").bind(hashToken(sessionToken)).run();
+      return json({ ok: true }, 200, { "set-cookie": buildClearCookie() });
+    }
     const adminOk = (given: string): boolean => {
       const expected = (env as WorkerEnv).ADMIN_KEY ?? "";
       if (!expected || given.length !== expected.length) return false;
@@ -952,7 +1018,7 @@ export default {
         games,
       }, 200);
     }
-    const me = await bearer(request, env);
+    const me = await sessionLeader(request, env);
     if (!me) return json({ error: "bearer token is required: call POST /v1/auth/session first" }, 401);
     if (request.method === "GET" && url.pathname === "/v1/ai/cooldown") return json(await cooldownStatus(env, me.id as string));
     if (request.method === "GET" && url.pathname === "/v1/me") {

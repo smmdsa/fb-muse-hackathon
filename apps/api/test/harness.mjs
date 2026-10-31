@@ -24,7 +24,7 @@ export function makeCaller(handler) {
         },
         end: (text) => {
           try {
-            resolve({ status: res.status, json: JSON.parse(text) });
+            resolve({ status: res.status, json: JSON.parse(text), headers: res.headers ?? {} });
           } catch (err) {
             reject(err);
           }
