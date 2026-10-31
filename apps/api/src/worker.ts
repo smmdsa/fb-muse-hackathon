@@ -125,6 +125,108 @@ async function sessionLeader(request: Request, env: WorkerEnv): Promise<Record<s
   return bearer(request, env);
 }
 
+// GDPR export. Same bundle as the dev server. No token hashes.
+async function exportAccountD1(env: WorkerEnv, leaderId: string, wallet: string | null): Promise<Record<string, unknown>> {
+  const leader = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>();
+  const sess = await env.DB.prepare("SELECT expires_at, created_at FROM auth_sessions WHERE leader_id = ?").bind(leaderId).all<Record<string, unknown>>();
+  const ag = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(leaderId).all<Record<string, unknown>>();
+  let versions: Record<string, unknown>[] = [];
+  let matches: Record<string, unknown>[] = [];
+  if (ag.results.length) {
+    const ids = ag.results.map((a) => a.id as string);
+    const marks = ids.map(() => "?").join(",");
+    const vr = await env.DB.prepare(`SELECT * FROM versions WHERE agent_id IN (${marks})`).bind(...ids).all<Record<string, unknown>>();
+    versions = vr.results;
+    const vids = versions.map((v) => v.id as string);
+    if (vids.length) {
+      const vm = vids.map(() => "?").join(",");
+      const mr = await env.DB.prepare(`SELECT * FROM matches WHERE a_version IN (${vm}) OR b_version IN (${vm})`).bind(...vids, ...vids).all<Record<string, unknown>>();
+      matches = mr.results;
+    }
+  }
+  const tk = await env.DB.prepare("SELECT * FROM tickets WHERE leader_id = ?").bind(leaderId).all<Record<string, unknown>>();
+  const tx = await env.DB.prepare("SELECT seq, wallet_id, idem_key, currency, delta, reason, at FROM wallet_txns WHERE wallet_id = ?").bind(leaderId).all<Record<string, unknown>>();
+  const nn = wallet
+    ? (await env.DB.prepare("SELECT nonce, domain, issued_at, expires_at FROM auth_nonces WHERE address = ?").bind(wallet).all<Record<string, unknown>>()).results
+    : [];
+  const tournaments: unknown[] = [];
+  const tr = await env.DB.prepare("SELECT id, name, event_json FROM tournaments").bind().all<Record<string, unknown>>();
+  for (const t of tr.results) {
+    try {
+      const event = JSON.parse(t.event_json as string) as { entries?: { leaderId: string }[] };
+      const mine = (event.entries ?? []).filter((e) => e.leaderId === leaderId);
+      if (mine.length) tournaments.push({ eventId: t.id, name: t.name, entries: mine });
+    } catch {
+      // A corrupt event row never blocks an export.
+    }
+  }
+  return { exportedAt: Date.now(), leader, sessions: sess.results, agents: ag.results, versions, matches, tickets: tk.results, walletTxns: tx.results, nonces: nn, tournaments };
+}
+
+// GDPR erasure. Same cascade as the dev server, in the same order.
+async function deleteAccountD1(env: WorkerEnv, leaderId: string, handle: string, wallet: string | null): Promise<Record<string, number>> {
+  const removed: Record<string, number> = { matches: 0, versions: 0 };
+  const ag = await env.DB.prepare("SELECT id FROM agents WHERE leader_id = ?").bind(leaderId).all<{ id: string }>();
+  if (ag.results.length) {
+    const ids = ag.results.map((a) => a.id);
+    const marks = ids.map(() => "?").join(",");
+    const vr = await env.DB.prepare(`SELECT id FROM versions WHERE agent_id IN (${marks})`).bind(...ids).all<{ id: string }>();
+    const vids = vr.results.map((v) => v.id);
+    if (vids.length) {
+      const vm = vids.map(() => "?").join(",");
+      const mr = await env.DB.prepare(`SELECT id FROM matches WHERE a_version IN (${vm}) OR b_version IN (${vm})`).bind(...vids, ...vids).all<{ id: string }>();
+      removed.matches = mr.results.length; // D1 omits change counts, so count first.
+      await env.DB.prepare(`DELETE FROM matches WHERE a_version IN (${vm}) OR b_version IN (${vm})`).bind(...vids, ...vids).run();
+    }
+    await env.DB.prepare(`DELETE FROM versions WHERE agent_id IN (${marks})`).bind(...ids).run();
+    removed.versions = vr.results.length;
+  }
+  await env.DB.prepare("DELETE FROM agents WHERE leader_id = ?").bind(leaderId).run();
+  removed.agents = ag.results.length;
+  const tk = await env.DB.prepare("SELECT id FROM tickets WHERE leader_id = ?").bind(leaderId).all<{ id: string }>();
+  await env.DB.prepare("DELETE FROM tickets WHERE leader_id = ?").bind(leaderId).run();
+  removed.tickets = tk.results.length;
+  const wk = await env.DB.prepare("SELECT key FROM wallet_keys WHERE wallet_id = ?").bind(leaderId).all<{ key: string }>();
+  await env.DB.prepare("DELETE FROM wallet_keys WHERE wallet_id = ?").bind(leaderId).run();
+  removed.walletKeys = wk.results.length;
+  const tx = await env.DB.prepare("SELECT seq FROM wallet_txns WHERE wallet_id = ?").bind(leaderId).all<{ seq: number }>();
+  await env.DB.prepare("DELETE FROM wallet_txns WHERE wallet_id = ?").bind(leaderId).run();
+  removed.walletTxns = tx.results.length;
+  const se = await env.DB.prepare("SELECT token_hash FROM auth_sessions WHERE leader_id = ?").bind(leaderId).all<{ token_hash: string }>();
+  await env.DB.prepare("DELETE FROM auth_sessions WHERE leader_id = ?").bind(leaderId).run();
+  removed.sessions = se.results.length;
+  removed.nonces = 0;
+  if (wallet) {
+    const nn = await env.DB.prepare("SELECT nonce FROM auth_nonces WHERE address = ?").bind(wallet).all<{ nonce: string }>();
+    removed.nonces = nn.results.length;
+    await env.DB.prepare("DELETE FROM auth_nonces WHERE address = ?").bind(wallet).run();
+  }
+  const cd = await env.DB.prepare("SELECT leader_id FROM ai_cooldowns WHERE leader_id = ?").bind(leaderId).all<{ leader_id: string }>();
+  await env.DB.prepare("DELETE FROM ai_cooldowns WHERE leader_id = ?").bind(leaderId).run();
+  removed.cooldowns = cd.results.length;
+  const rp = await env.DB.prepare("SELECT id FROM reports WHERE handle = ?").bind(handle).all<{ id: string }>();
+  await env.DB.prepare("DELETE FROM reports WHERE handle = ?").bind(handle).run();
+  removed.reports = rp.results.length;
+  removed.tournamentEntries = 0;
+  const tr = await env.DB.prepare("SELECT id, event_json FROM tournaments").bind().all<Record<string, unknown>>();
+  for (const t of tr.results) {
+    try {
+      const event = JSON.parse(t.event_json as string) as { entries?: { leaderId: string }[] };
+      const before = (event.entries ?? []).length;
+      event.entries = (event.entries ?? []).filter((e) => e.leaderId !== leaderId);
+      if (event.entries.length !== before) {
+        await env.DB.prepare("UPDATE tournaments SET event_json = ? WHERE id = ?").bind(JSON.stringify(event), t.id as string).run();
+        removed.tournamentEntries += before - event.entries.length;
+      }
+    } catch {
+      // A corrupt event row never blocks an erasure.
+    }
+  }
+  await env.DB.prepare("DELETE FROM leaders WHERE id = ?").bind(leaderId).run();
+  removed.leaders = 1;
+  return removed;
+}
+
 // The leaderboard reads placed leaders for one season, best first.
 async function leaderboard(env: WorkerEnv, seasonId: string): Promise<Response> {
   const { results } = await env.DB.prepare("SELECT * FROM leaders").bind().all<Record<string, unknown>>();
@@ -832,7 +934,7 @@ export default {
         headers: {
           "access-control-allow-origin": "*",
           "access-control-allow-headers": "authorization, content-type",
-          "access-control-allow-methods": "GET, POST, OPTIONS",
+          "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
         },
       });
     }
@@ -1053,6 +1155,15 @@ export default {
       const st = await energyFor(env, me.id as string);
       const energy = energyView(st, Date.now());
       return json({ leader: me, agent, energy, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran }, handleSet: (me.handle_set as number) === 1 }, 200);
+    }
+    if (request.method === "GET" && url.pathname === "/v1/me/export") {
+      if (limited(authHits, `gdpr:${me.id as string}`, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);
+      return json(await exportAccountD1(env, me.id as string, (me.wallet_address as string | null) ?? null));
+    }
+    if (request.method === "DELETE" && url.pathname === "/v1/me") {
+      if (limited(authHits, `gdpr:${me.id as string}`, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);
+      const removed = await deleteAccountD1(env, me.id as string, me.handle as string, (me.wallet_address as string | null) ?? null);
+      return json({ deleted: true, removed }, 200, { "set-cookie": buildClearCookie() });
     }
     if (request.method === "POST" && url.pathname === "/v1/autobattle/opt-in") {
       try {

@@ -14,11 +14,11 @@ export function hashToken(token: string): string {
 
 export function buildSetCookie(token: string): string {
   const maxAge = Math.floor(SESSION_TTL_MS / 1000);
-  return `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAge}`;
+  return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=${maxAge}`;
 }
 
 export function buildClearCookie(): string {
-  return `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`;
+  return `${SESSION_COOKIE}=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0`;
 }
 
 export function parseCookies(header: string | null | undefined): Record<string, string> {

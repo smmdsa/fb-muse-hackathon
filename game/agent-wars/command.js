@@ -1,12 +1,10 @@
 // Command deck. Same-origin API, token shared with the barracks page.
 // Queue and battle live in the arena page; this file only paints COMMAND.
 
-let cmdToken = localStorage.getItem("aw_token") || "";
-
 async function cmdCall(method, path, body) {
   const res = await fetch(path, {
     method,
-    headers: { "content-type": "application/json", authorization: `Bearer ${cmdToken}` },
+    headers: { "content-type": "application/json", ...window.AWSession.authHeaders() },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -57,20 +55,18 @@ function lobbySay(name, rank, energy) {
 }
 
 async function cmdBoot() {
-  const who = document.getElementById("pill-who");
-  if (who) who.textContent = cmdToken ? (localStorage.getItem("aw_handle") || "signed in") : "signed out";
-  if (!cmdToken) {
+  const sess = await window.AWSession.refreshIdentity();
+  if (!sess.ok) {
     lobbySay("No agent yet", "Breed an agent to enter the league.", "energy —");
     setText("lobby-chip", "No chip yet");
-    setText("lobby-chip-detail", "Sign in in the barracks. Then compile a chip.");
+    setText("lobby-chip-detail", "Sign in with your wallet. Then compile a chip.");
     setText("lobby-ap", "— AP");
     setText("rank-line", "Sign in to see your climb.");
     markSteps(false, false);
     primaryCta(false, false);
     return;
   }
-  const me = await cmdCall("GET", "/v1/me");
-  if (me.status !== 200) return;
+  const me = { status: 200, data: sess.me };
   const hasAgent = Boolean(me.data.agent);
   const hasChip = Boolean(me.data.agent && me.data.agent.active_version_id);
   setText("lower-energy", `${me.data.energy.energy}/${me.data.energy.energyMax}`);

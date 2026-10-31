@@ -14,20 +14,10 @@ let ready = false;
 let probeSeq = 0;
 let probeTimer = 0;
 
-function authHeaders() {
-  try {
-    const token = localStorage.getItem("aw_token");
-    if (token) return { authorization: `Bearer ${token}` };
-  } catch {
-    // Storage is closed. The cookie session still works.
-  }
-  return {};
-}
-
 async function call(method, path, body) {
   const res = await fetch(path, {
     method,
-    headers: { "content-type": "application/json", ...authHeaders() },
+    headers: { "content-type": "application/json", ...window.AWSession.authHeaders() },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));

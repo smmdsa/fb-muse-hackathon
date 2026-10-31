@@ -1,12 +1,8 @@
 // Organizer console. Key stays in tab memory: a closed tab forgets it.
 
 const $ = (id) => document.getElementById(id);
-const TOKEN_KEY = "aw_token";
-
-let token = localStorage.getItem(TOKEN_KEY) || "";
-
 function headers() {
-  return { "content-type": "application/json", authorization: `Bearer ${token}` };
+  return { "content-type": "application/json", ...window.AWSession.authHeaders() };
 }
 
 async function call(method, path, body) {
@@ -49,7 +45,7 @@ async function renderEvents() {
   box.textContent = "";
   const r = await call("GET", "/v1/tournaments");
   if (r.status !== 200) {
-    $("admin-msg").textContent = "Sign in in the barracks to list events.";
+    $("admin-msg").textContent = "Sign in with your wallet to list events.";
     return;
   }
   for (const t of r.data.tournaments || []) {
@@ -100,4 +96,5 @@ $("ev-create").addEventListener("click", async () => {
   await renderEvents();
 });
 
+window.AWSession.refreshIdentity();
 renderEvents();

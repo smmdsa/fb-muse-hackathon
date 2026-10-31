@@ -113,6 +113,92 @@ function sessionLeader(req: IncomingMessage, ctx: Ctx): Record<string, unknown> 
   return bearer(req, ctx);
 }
 
+// GDPR export. One JSON bundle: account row, sessions, game rows.
+// Token hashes stay out: expiry metadata answers the owner.
+function exportAccount(ctx: Ctx, leaderId: string, wallet: string | null): Record<string, unknown> {
+  const db = ctx.store.db;
+  const leader = db.prepare("SELECT * FROM leaders WHERE id = ?").get(leaderId);
+  const sessions = db.prepare("SELECT expires_at, created_at FROM auth_sessions WHERE leader_id = ?").all(leaderId);
+  const agents = db.prepare("SELECT * FROM agents WHERE leader_id = ?").all(leaderId) as Record<string, unknown>[];
+  let versions: unknown[] = [];
+  let matches: unknown[] = [];
+  if (agents.length) {
+    const ids = agents.map((a) => a.id as string);
+    const marks = ids.map(() => "?").join(",");
+    versions = db.prepare(`SELECT * FROM versions WHERE agent_id IN (${marks})`).all(...ids);
+    const vids = (versions as Record<string, unknown>[]).map((v) => v.id as string);
+    if (vids.length) {
+      const vm = vids.map(() => "?").join(",");
+      matches = db.prepare(`SELECT * FROM matches WHERE a_version IN (${vm}) OR b_version IN (${vm})`).all(...vids, ...vids);
+    }
+  }
+  const tickets = db.prepare("SELECT * FROM tickets WHERE leader_id = ?").all(leaderId);
+  const walletTxns = db.prepare("SELECT seq, wallet_id, idem_key, currency, delta, reason, at FROM wallet_txns WHERE wallet_id = ?").all(leaderId);
+  const nonces = wallet
+    ? db.prepare("SELECT nonce, domain, issued_at, expires_at FROM auth_nonces WHERE address = ?").all(wallet)
+    : [];
+  const tournaments: unknown[] = [];
+  for (const t of db.prepare("SELECT id, name, event_json FROM tournaments").all() as Record<string, unknown>[]) {
+    try {
+      const event = JSON.parse(t.event_json as string) as { entries?: { leaderId: string }[] };
+      const mine = (event.entries ?? []).filter((e) => e.leaderId === leaderId);
+      if (mine.length) tournaments.push({ eventId: t.id, name: t.name, entries: mine });
+    } catch {
+      // A corrupt event row never blocks an export.
+    }
+  }
+  return { exportedAt: Date.now(), leader, sessions, agents, versions, matches, tickets, walletTxns, nonces, tournaments };
+}
+
+// GDPR erasure. Cascade in order: shared bouts that name owned
+// versions, owned versions, owned agent, tickets, wallet rows,
+// sessions, nonces, cooldown, reports, tournament entries, leader.
+// Season archives keep aggregate history keyed by a retired id;
+// they hold no handle, wallet, or token, so nothing there names
+// the deleted account.
+function deleteAccount(ctx: Ctx, leaderId: string, handle: string, wallet: string | null): Record<string, number> {
+  const db = ctx.store.db;
+  const removed: Record<string, number> = {};
+  const agents = db.prepare("SELECT id FROM agents WHERE leader_id = ?").all(leaderId) as { id: string }[];
+  removed.matches = 0;
+  removed.versions = 0;
+  if (agents.length) {
+    const marks = agents.map(() => "?").join(",");
+    const vids = (db.prepare(`SELECT id FROM versions WHERE agent_id IN (${marks})`).all(...agents.map((a) => a.id)) as { id: string }[]).map((v) => v.id);
+    if (vids.length) {
+      const vm = vids.map(() => "?").join(",");
+      removed.matches = (db.prepare(`DELETE FROM matches WHERE a_version IN (${vm}) OR b_version IN (${vm})`).run(...vids, ...vids) as { changes: number }).changes;
+    }
+    removed.versions = (db.prepare(`DELETE FROM versions WHERE agent_id IN (${marks})`).run(...agents.map((a) => a.id)) as { changes: number }).changes;
+  }
+  removed.agents = (db.prepare("DELETE FROM agents WHERE leader_id = ?").run(leaderId) as { changes: number }).changes;
+  removed.tickets = (db.prepare("DELETE FROM tickets WHERE leader_id = ?").run(leaderId) as { changes: number }).changes;
+  removed.walletKeys = (db.prepare("DELETE FROM wallet_keys WHERE wallet_id = ?").run(leaderId) as { changes: number }).changes;
+  removed.walletTxns = (db.prepare("DELETE FROM wallet_txns WHERE wallet_id = ?").run(leaderId) as { changes: number }).changes;
+  removed.sessions = (db.prepare("DELETE FROM auth_sessions WHERE leader_id = ?").run(leaderId) as { changes: number }).changes;
+  removed.nonces = wallet
+    ? (db.prepare("DELETE FROM auth_nonces WHERE address = ?").run(wallet) as { changes: number }).changes
+    : 0;
+  removed.cooldowns = (db.prepare("DELETE FROM ai_cooldowns WHERE leader_id = ?").run(leaderId) as { changes: number }).changes;
+  removed.reports = (db.prepare("DELETE FROM reports WHERE handle = ?").run(handle) as { changes: number }).changes;
+  removed.tournamentEntries = 0;
+  for (const t of db.prepare("SELECT id, event_json FROM tournaments").all() as Record<string, unknown>[]) {
+    try {
+      const event = JSON.parse(t.event_json as string) as { entries?: { leaderId: string }[] };
+      const before = (event.entries ?? []).length;
+      event.entries = (event.entries ?? []).filter((e) => e.leaderId !== leaderId);
+      if (event.entries.length !== before) {
+        db.prepare("UPDATE tournaments SET event_json = ? WHERE id = ?").run(JSON.stringify(event), t.id as string);
+        removed.tournamentEntries += before - event.entries.length;
+      }
+    } catch {
+      // A corrupt event row never blocks an erasure.
+    }
+  }
+  removed.leaders = (db.prepare("DELETE FROM leaders WHERE id = ?").run(leaderId) as { changes: number }).changes;
+  return removed;
+}
+
 // The router matches method plus path and answers with JSON.
 export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerResponse) => void {
   return async (req, res) => {
@@ -294,6 +380,17 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const st = energyFor(ctx.store, me.id as string);
         const energy = energyView(st);
         send(res, 200, { leader: me, agent, energy, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran }, handleSet: (me.handle_set as number) === 1 });
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/v1/me/export") {
+        if (limited(res, authHits, `gdpr:${me.id as string}`, 60_000, 10)) return;
+        send(res, 200, exportAccount(ctx, me.id as string, (me.wallet_address as string | null) ?? null));
+        return;
+      }
+      if (req.method === "DELETE" && url.pathname === "/v1/me") {
+        if (limited(res, authHits, `gdpr:${me.id as string}`, 60_000, 10)) return;
+        const removed = deleteAccount(ctx, me.id as string, me.handle as string, (me.wallet_address as string | null) ?? null);
+        send(res, 200, { deleted: true, removed }, { "set-cookie": buildClearCookie() });
         return;
       }
       if (req.method === "POST" && url.pathname === "/v1/autobattle/opt-in") {

@@ -1,14 +1,10 @@
 // Championship page. Same-origin API, token lives in localStorage only.
 
 const $ = (id) => document.getElementById(id);
-const TOKEN_KEY = "aw_token";
-const HANDLE_KEY = "aw_handle";
 const CUP_ID = "s1-kickoff";
 
-let token = localStorage.getItem(TOKEN_KEY) || "";
-
 function headers() {
-  return { "content-type": "application/json", authorization: `Bearer ${token}` };
+  return { "content-type": "application/json", ...window.AWSession.authHeaders() };
 }
 
 async function call(method, path, body) {
@@ -30,8 +26,9 @@ function show(el, on) {
 }
 
 async function refresh() {
-  if (!token) {
-    $("cup-status").textContent = "Sign in in the barracks, then register.";
+  const sess = await window.AWSession.loadMe();
+  if (!sess.ok) {
+    $("cup-status").textContent = "Sign in with your wallet, then register.";
     show($("cup-empty"), true);
     return;
   }
@@ -103,12 +100,12 @@ function renderGames(cup) {
 }
 
 $("cup-register").addEventListener("click", async () => {
-  if (!token) {
-    $("cup-status").textContent = "Sign in in the barracks first.";
+  const sess = await window.AWSession.loadMe();
+  if (!sess.ok) {
+    $("cup-status").textContent = "Sign in with your wallet first.";
     return;
   }
-  const me = await call("GET", "/v1/me");
-  const version = me.data && me.data.agent && me.data.agent.active_version_id;
+  const version = sess.me && sess.me.agent && sess.me.agent.active_version_id;
   if (!version) {
     $("cup-status").textContent = "Install a version in the barracks first.";
     return;
@@ -138,6 +135,6 @@ $("cup-register").addEventListener("click", async () => {
   }
 });
 
-$("pill-who").textContent = token ? (localStorage.getItem(HANDLE_KEY) || "signed in") : "signed out";
+window.AWSession.refreshIdentity();
 
 refresh();

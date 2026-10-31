@@ -10,7 +10,7 @@ let latestVersion = "";
 let factoryFormOpen = false;
 
 function headers() {
-  return { "content-type": "application/json", authorization: `Bearer ${token}` };
+  return { "content-type": "application/json", ...window.AWSession.authHeaders() };
 }
 
 async function call(method, path, body) {
@@ -345,14 +345,12 @@ $("fight-btn").addEventListener("click", async () => {
 async function boot() {
   const handle = localStorage.getItem(HANDLE_KEY) || "";
   if (handle) $("handle").value = handle;
-  if (!token) return;
-  $("pill-who").textContent = localStorage.getItem(HANDLE_KEY) || "signed in";
-  const me = await call("GET", "/v1/me");
-  if (me.status !== 200) {
-    token = "";
-    localStorage.removeItem(TOKEN_KEY);
+  const sess = await window.AWSession.refreshIdentity();
+  if (!sess.ok) {
+    if (token) { token = ""; localStorage.removeItem(TOKEN_KEY); }
     return;
   }
+  const me = { status: 200, data: sess.me };
   show($("login-card"), false);
   if (!me.data.agent) {
     $("train-msg").textContent = "Breed a hero in the barracks first — chips need a mind to drive.";
