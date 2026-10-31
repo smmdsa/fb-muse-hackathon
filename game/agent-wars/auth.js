@@ -27,6 +27,11 @@ function show(el, on) {
   el.hidden = !on;
 }
 
+function safeNext(raw) {
+  if (typeof raw === "string" && /^[a-z0-9_-]+\.html(\?.*)?$/i.test(raw)) return `./${raw}`;
+  return "./arena.html";
+}
+
 async function refresh() {
   const r = await call("GET", "/v1/me");
   if (r.status !== 200) {
@@ -98,7 +103,13 @@ $("sign-btn").addEventListener("click", async () => {
     return;
   }
   toastSay("Signed in.");
-  window.location.href = "./arena.html";
+  const params = new URLSearchParams(location.search);
+  const me = await call("GET", "/v1/me");
+  if (me.status === 200 && me.data && me.data.handleSet === false) {
+    window.location.href = "./handle.html";
+    return;
+  }
+  window.location.href = safeNext(params.get("next")); // First logins pick a handle first.
 });
 
 $("logout-btn").addEventListener("click", async () => {

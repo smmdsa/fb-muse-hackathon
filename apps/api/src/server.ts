@@ -10,7 +10,7 @@ import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, battleConf
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 import { hasKey } from "@agent-wars/ai-provider";
-import { buildLoginMessage, buildClearCookie, buildSetCookie, hashToken, isAddress, normalizeAddress, NONCE_TTL_MS, readSessionCookie, SESSION_TTL_MS, verifyWalletSignature } from "@agent-wars/auth";
+import { buildLoginMessage, buildClearCookie, buildSetCookie, handleError, hashToken, isAddress, normalizeAddress, normalizeHandle, NONCE_TTL_MS, readSessionCookie, SESSION_TTL_MS, verifyWalletSignature } from "@agent-wars/auth";
 
 // Per-route sliding windows. Memory-only; a restart clears history.
 const authHits = new Map<string, number[]>();
@@ -137,7 +137,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         }
         const id = mintId("leader");
         const token = newToken("demo");
-        ctx.store.db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run(id, handle, token);
+        ctx.store.db.prepare("INSERT INTO leaders (id, handle, token, handle_set) VALUES (?, ?, ?, 1)").run(id, handle, token);
         send(res, 200, { token, leaderId: id });
         return;
       }
@@ -197,6 +197,22 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         send(res, 200, { leaderId: leader.id, expiresAt: sessionExpires }, { "set-cookie": buildSetCookie(sessionToken) });
         return;
       }
+      if (req.method === "GET" && url.pathname === "/v1/handles/available") {
+        const name = normalizeHandle(url.searchParams.get("name"));
+        if (limited(res, authHits, `handle:${name ?? "?"}`, 60_000, 60)) return;
+        if (!name) {
+          send(res, 200, { name: "", valid: false, available: false, error: "name is required" });
+          return;
+        }
+        const invalid = handleError(name);
+        if (invalid) {
+          send(res, 200, { name, valid: false, available: false, error: invalid });
+          return;
+        }
+        const taken = ctx.store.db.prepare("SELECT 1 FROM leaders WHERE handle = ?").get(name);
+        send(res, 200, taken ? { name, valid: true, available: false, error: "that name is taken" } : { name, valid: true, available: true });
+        return;
+      }
       if (req.method === "POST" && url.pathname === "/v1/auth/logout") {
         const sessionToken = readSessionCookie(req.headers.cookie);
         if (sessionToken) ctx.store.db.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").run(hashToken(sessionToken));
@@ -246,6 +262,28 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         send(res, 401, { error: "bearer token is required: call POST /v1/auth/session first" });
         return;
       }
+      if (req.method === "POST" && url.pathname === "/v1/me/handle") {
+        const name = normalizeHandle(body.handle);
+        if (limited(res, authHits, `claim:${me.id as string}`, 60_000, 10)) return;
+        if (!name) {
+          send(res, 422, { error: "handle is required" });
+          return;
+        }
+        const invalid = handleError(name);
+        if (invalid) {
+          send(res, 422, { error: invalid });
+          return;
+        }
+        try {
+          ctx.store.db.prepare("UPDATE leaders SET handle = ?, handle_set = 1 WHERE id = ?").run(name, me.id as string);
+        } catch (err) {
+          if (!/UNIQUE/i.test((err as Error).message)) throw err;
+          send(res, 409, { error: "that name is taken" });
+          return;
+        }
+        send(res, 200, { handle: name });
+        return;
+      }
       if (req.method === "GET" && url.pathname === "/v1/ai/cooldown") {
         send(res, 200, cooldownStatus(ctx, me.id as string));
         return;
@@ -255,7 +293,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const agent = ctx.store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(me.id as string);
         const st = energyFor(ctx.store, me.id as string);
         const energy = energyView(st);
-        send(res, 200, { leader: me, agent, energy, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran } });
+        send(res, 200, { leader: me, agent, energy, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran }, handleSet: (me.handle_set as number) === 1 });
         return;
       }
       if (req.method === "POST" && url.pathname === "/v1/autobattle/opt-in") {

@@ -45,7 +45,7 @@ const AGENTS = [
 // The seeder writes two leaders, agents, chips, and the golden match.
 export function seedE2E(store) {
   for (const l of LEADERS) {
-    store.db.prepare("INSERT INTO leaders (id, handle, token, ap) VALUES (?, ?, ?, ?)").run(l.id, l.handle, l.token, l.ap);
+    store.db.prepare("INSERT INTO leaders (id, handle, token, ap, handle_set) VALUES (?, ?, ?, ?, 1)").run(l.id, l.handle, l.token, l.ap);
   }
   const policies = { "e2e-va": POLICY_A, "e2e-vb": POLICY_B };
   for (const a of AGENTS) {

@@ -409,6 +409,11 @@ details.diag { border: 1px dashed var(--line); border-radius: 3px; padding: 8px 
 details.diag summary { cursor: pointer; font-family: var(--body); font-weight: 700; color: var(--dim); }
 .admin-note { border: 1px solid var(--warn); border-radius: 3px; padding: 10px 12px; background: #ffcf5d14; }
 .next-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.why { margin: 12px 0 0; padding-left: 22px; display: grid; gap: 8px; color: var(--dim); }
+.why li::marker { color: #8affec; }
+#handle-input { width: 100%; max-width: 340px; box-sizing: border-box; }
+#handle-input.ok { border-color: #3dff7a; }
+#handle-input.bad { border-color: #ff5d7a; }
 /* Arena: lobby views fade between queue and battle. */
 .view { transition: opacity 0.45s ease; }
 .view.fade-out { opacity: 0; }
