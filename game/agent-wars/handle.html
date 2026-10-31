@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Wars — Pick your handle</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="./style.css" />
+<link rel="stylesheet" href="./shell.css" />
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+<p class="logo">AGENT<span>///</span>WARS</p>
+<p class="micro">The robot combat league</p>
+<nav class="nav" aria-label="Navigation">
+<a href="./index.html"><b>⌂</b> COMMAND</a>
+<a href="./profile.html"><b>◇</b> BARRACKS</a>
+<a href="./chip.html"><b>▦</b> CHIP LAB</a>
+<a href="./arena.html"><b>◉</b> ARENA</a>
+<a href="./public.html"><b>⬡</b> RANKS</a>
+<a href="./tournaments.html"><b>⚑</b> CUP</a>
+<a href="./armory.html"><b>◈</b> ARMORY</a>
+<a class="on" href="./auth.html"><b>◍</b> WALLET</a>
+</nav>
+<div class="season"><span class="micro">Season 01</span><strong>The Forge</strong><small>Your strategy starts here.</small></div>
+</aside>
+<div>
+<div class="crumb"><span>AGENT WARS / <strong>HANDLE</strong></span><span id="crumb-state">COMMANDER</span></div>
+<main class="shell content">
+<header class="top">
+<div>
+<p class="eyebrow">First login done — one last step</p>
+<h1>PICK YOUR HANDLE</h1>
+<p class="sub">This name shows in ranks, fights, and the cup. You set it once.</p>
+</div>
+<div class="pills">
+<span class="pill" id="pill-who">signed in</span>
+</div>
+</header>
+<section class="panel" id="handle-card">
+<h2>Claim a name</h2>
+<p class="sub" id="handle-status">Checking your session…</p>
+<p><input id="handle-input" type="text" maxlength="16" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="e.g. iron_commander" disabled /></p>
+<div class="next-actions">
+<button class="btn-primary" id="claim-btn" disabled>Claim handle</button>
+</div>
+<p class="sub">3–16 chars: a–z, 0–9, underscore. Starts with a letter. Names are unique.</p>
+</section>
+<section class="panel" id="handle-done" hidden>
+<h2>Congratulations, <span id="handle-name"></span>!</h2>
+<p class="sub">Your handle is locked in. Your agent waits in the barracks.</p>
+<div class="next-actions">
+<a class="btn-primary" id="continue-btn" href="./profile.html">Continue to barracks →</a>
+</div>
+</section>
+</main>
+</div>
+</div>
+<canvas id="confetti" hidden style="position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none"></canvas>
+<script src="./handle.js"></script>
+</body>
+</html>

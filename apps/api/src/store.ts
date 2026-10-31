@@ -137,6 +137,12 @@ export function openStore(path: string): Store {
     db.exec("ALTER TABLE leaders ADD COLUMN wallet_address TEXT");
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_leaders_wallet ON leaders(wallet_address)");
   }
+  // Wallet handles arrived late. Old files gain the column once, then never again.
+  const handleCols = db.prepare("PRAGMA table_info(leaders)").all() as Record<string, unknown>[];
+  if (!handleCols.some((c) => c.name === "handle_set")) {
+    db.exec("ALTER TABLE leaders ADD COLUMN handle_set INTEGER NOT NULL DEFAULT 0");
+    db.exec("UPDATE leaders SET handle_set = 1 WHERE NOT (wallet_address IS NOT NULL AND substr(handle, 1, length(wallet_address)) = wallet_address)");
+  }
   return { db, close: () => db.close() };
 }
 

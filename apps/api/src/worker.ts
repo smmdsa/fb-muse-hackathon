@@ -15,7 +15,7 @@ import type { Candidate, History } from "@agent-wars/matchmaker";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
 import { checkLimit } from "./ids.ts";
-import { buildLoginMessage, buildClearCookie, buildSetCookie, hashToken, isAddress, normalizeAddress, NONCE_TTL_MS, readSessionCookie, SESSION_TTL_MS, verifyWalletSignature } from "@agent-wars/auth";
+import { buildLoginMessage, buildClearCookie, buildSetCookie, handleError, hashToken, isAddress, normalizeAddress, normalizeHandle, NONCE_TTL_MS, readSessionCookie, SESSION_TTL_MS, verifyWalletSignature } from "@agent-wars/auth";
 
 // Per-route sliding windows. Memory-only per isolate.
 const authHits = new Map<string, number[]>();
@@ -895,7 +895,7 @@ export default {
       if (limited(authHits, handle, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);
       const id = mintId("leader");
       const token = newToken("demo");
-      await env.DB.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").bind(id, handle, token).run();
+      await env.DB.prepare("INSERT INTO leaders (id, handle, token, handle_set) VALUES (?, ?, ?, 1)").bind(id, handle, token).run();
       return json({ token, leaderId: id });
     }
     if (request.method === "POST" && url.pathname === "/v1/auth/challenge") {
@@ -943,6 +943,15 @@ export default {
       const sessionExpires = now + SESSION_TTL_MS;
       await env.DB.prepare("INSERT INTO auth_sessions (token_hash, leader_id, expires_at, created_at) VALUES (?, ?, ?, ?)").bind(hashToken(sessionToken), leader!.id as string, sessionExpires, now).run();
       return json({ leaderId: leader!.id, expiresAt: sessionExpires }, 200, { "set-cookie": buildSetCookie(sessionToken) });
+    }
+    if (request.method === "GET" && url.pathname === "/v1/handles/available") {
+      const name = normalizeHandle(url.searchParams.get("name"));
+      if (limited(authHits, `handle:${name ?? "?"}`, 60_000, 60)) return json({ error: "rate limited, retry later" }, 429);
+      if (!name) return json({ name: "", valid: false, available: false, error: "name is required" });
+      const invalid = handleError(name);
+      if (invalid) return json({ name, valid: false, available: false, error: invalid });
+      const taken = await env.DB.prepare("SELECT 1 FROM leaders WHERE handle = ?").bind(name).first();
+      return json(taken ? { name, valid: true, available: false, error: "that name is taken" } : { name, valid: true, available: true });
     }
     if (request.method === "POST" && url.pathname === "/v1/auth/logout") {
       const sessionToken = readSessionCookie(request.headers.get("cookie"));
@@ -1021,13 +1030,29 @@ export default {
     }
     const me = await sessionLeader(request, env);
     if (!me) return json({ error: "bearer token is required: call POST /v1/auth/session first" }, 401);
+    if (request.method === "POST" && url.pathname === "/v1/me/handle") {
+      const body = await readBody(request);
+      if (body === null) return json({ error: "bad json" }, 400);
+      const name = normalizeHandle(body.handle);
+      if (limited(authHits, `claim:${me.id as string}`, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);
+      if (!name) return json({ error: "handle is required" }, 422);
+      const invalid = handleError(name);
+      if (invalid) return json({ error: invalid }, 422);
+      try {
+        await env.DB.prepare("UPDATE leaders SET handle = ?, handle_set = 1 WHERE id = ?").bind(name, me.id as string).run();
+      } catch (err) {
+        if (!/UNIQUE/i.test((err as Error).message)) throw err;
+        return json({ error: "that name is taken" }, 409);
+      }
+      return json({ handle: name });
+    }
     if (request.method === "GET" && url.pathname === "/v1/ai/cooldown") return json(await cooldownStatus(env, me.id as string));
     if (request.method === "GET" && url.pathname === "/v1/me") {
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(me.id as string).first<Record<string, unknown>>();
       const auto = await autoTickD1(env, me.id as string, Date.now());
       const st = await energyFor(env, me.id as string);
       const energy = energyView(st, Date.now());
-      return json({ leader: me, agent, energy, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran } }, 200);
+      return json({ leader: me, agent, energy, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran }, handleSet: (me.handle_set as number) === 1 }, 200);
     }
     if (request.method === "POST" && url.pathname === "/v1/autobattle/opt-in") {
       try {

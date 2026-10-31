@@ -118,6 +118,8 @@ describe("worker writes", () => {
     db.exec(readFileSync(new URL("../../../migrations/0011_version_labels.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0012_match_mode.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0013_ai_cooldowns.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0014_wallet_auth.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0015_handle_set.sql", import.meta.url), "utf8"));
     // Reuse the shared shim: it carries batch, like the real D1 binding.
     const wenv = { DB: shim(db), ASSETS: assetsStub, ADMIN_KEY: "test-admin" };
     const call = (method, path, body, token, extraHeaders) => {
@@ -627,7 +629,7 @@ describe("worker replay", () => {
 describe("worker ftue", () => {
   it("pays each guided stage once", async () => {
     const db = new DatabaseSync(":memory:");
-    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0010_reports", "0011_version_labels", "0012_match_mode", "0013_ai_cooldowns"]) {
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0010_reports", "0011_version_labels", "0012_match_mode", "0013_ai_cooldowns", "0014_wallet_auth", "0015_handle_set"]) {
       db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
     }
     const wenv = { DB: shim(db), ASSETS: assetsStub };
