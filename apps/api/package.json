@@ -6,6 +6,7 @@
   "main": "./src/index.ts",
   "dependencies": {
     "@agent-wars/ai-provider": "workspace:*",
+    "@agent-wars/auth": "workspace:*",
     "@agent-wars/autobattle": "workspace:*",
     "@agent-wars/battle-core": "workspace:*",
     "@agent-wars/behavior-dna": "workspace:*",
