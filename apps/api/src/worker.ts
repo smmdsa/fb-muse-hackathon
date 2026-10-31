@@ -824,6 +824,7 @@ export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
     // The viewer is a static asset. Anything outside /v1/ serves the game.
+    if (url.pathname === "/auth") return env.ASSETS.fetch(new Request(new URL("/auth.html", request.url), request));
     if (!url.pathname.startsWith("/v1/")) return env.ASSETS.fetch(request);
     if (request.method === "OPTIONS") {
       return new Response(null, {

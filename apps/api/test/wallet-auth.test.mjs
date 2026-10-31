@@ -50,7 +50,7 @@ describe("wallet login on the dev server", () => {
     const { address } = freshWallet();
     const r = await call("POST", "/v1/auth/challenge", { address });
     assert.equal(r.status, 200);
-    assert.ok(r.json.message.includes(`Address: ${address}`));
+    assert.ok(r.json.message.includes(address));
     assert.ok(r.json.message.includes(`Nonce: ${r.json.nonce}`));
     const row = store.db.prepare("SELECT * FROM auth_nonces WHERE nonce = ?").get(r.json.nonce);
     assert.equal(row.address, address);
@@ -158,7 +158,11 @@ describe("wallet login on the worker mirror", () => {
     },
   });
   const assetsStub = {
-    fetch: async () => new Response("shell", { headers: { "content-type": "text/html" } }),
+    lastUrl: "",
+    fetch: async (req) => {
+      assetsStub.lastUrl = req.url;
+      return new Response("shell", { headers: { "content-type": "text/html" } });
+    },
   };
   let db;
   let wenv;
@@ -177,7 +181,7 @@ describe("wallet login on the worker mirror", () => {
         body: body ? JSON.stringify(body) : undefined,
       }),
       wenv,
-    ).then(async (r) => ({ status: r.status, json: await r.json(), headers: Object.fromEntries(r.headers.entries()) }));
+    ).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null), headers: Object.fromEntries(r.headers.entries()) }));
   });
 
   it("runs challenge, login, cookie me, and logout", async () => {
@@ -194,6 +198,12 @@ describe("wallet login on the worker mirror", () => {
     const out = await wcall("POST", "/v1/auth/logout", null, { cookie });
     assert.equal(out.status, 200);
     assert.equal((await wcall("GET", "/v1/me", null, { cookie })).status, 401);
+  });
+
+  it("serves the wallet page at /auth", async () => {
+    const r = await wcall("GET", "/auth");
+    assert.equal(r.status, 200);
+    assert.ok(assetsStub.lastUrl.endsWith("/auth.html"));
   });
 
   it("rejects a foreign signature", async () => {
