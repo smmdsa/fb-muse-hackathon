@@ -1,7 +1,5 @@
 // Public fighter card. No auth to view. Auth to report.
 const $ = (id) => document.getElementById(id);
-const token = localStorage.getItem("aw_token") || "";
-
 function show(el, on) {
   el.hidden = !on;
 }
@@ -20,7 +18,7 @@ function silhouetteFor(id, skin) {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-async function renderStandings() {
+async function renderStandings(mine) {
   const empty = $("standings-empty");
   const table = $("standings-table");
   const body = $("standings-body");
@@ -41,7 +39,6 @@ async function renderStandings() {
     empty.textContent = "No placed leaders yet — be the first to climb.";
     return;
   }
-  const mine = token ? (localStorage.getItem("aw_handle") || "") : "";
   body.textContent = "";
   for (const r of rows) {
     const tr = document.createElement("tr");
@@ -71,9 +68,10 @@ async function renderStandings() {
 }
 
 async function main() {
+  const sess = await window.AWSession.refreshIdentity();
   const handle = new URLSearchParams(location.search).get("handle") || "";
   if (!handle) {
-    await renderStandings();
+    await renderStandings(window.AWSession.handleOf(sess));
     return;
   }
   show($("standings-card"), false);
@@ -95,8 +93,8 @@ async function main() {
   show(img, true);
   show($("card"), true);
   show($("report-card"), true);
-  show($("report-login"), !token);
-  show($("report-btn"), !!token);
+  show($("report-login"), !sess.ok);
+  show($("report-btn"), sess.ok);
   $("copy-btn").addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(location.href);
@@ -107,12 +105,12 @@ async function main() {
       show($("copy-msg"), true);
     }
   });
-  if (token) {
+  if (sess.ok) {
     $("report-btn").addEventListener("click", async () => {
       const reason = $("reason").value.trim();
       const r = await fetch(`/v1/leaders/${encodeURIComponent(handle)}/report`, {
         method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        headers: { "content-type": "application/json", ...window.AWSession.authHeaders() },
         body: JSON.stringify({ reason }),
       });
       const msg = $("report-msg");

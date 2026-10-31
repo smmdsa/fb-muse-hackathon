@@ -89,12 +89,14 @@ describe("wallet auth", () => {
     const set = buildSetCookie("sess_abc");
     assert.ok(set.startsWith(`${SESSION_COOKIE}=sess_abc`));
     assert.ok(set.includes("HttpOnly"));
+    assert.ok(set.includes("Secure"));
     assert.ok(set.includes("SameSite=Lax"));
     assert.ok(set.includes(`Max-Age=${SESSION_TTL_MS / 1000}`));
     assert.equal(readSessionCookie(`other=1; ${SESSION_COOKIE}=sess_abc`), "sess_abc");
     assert.equal(readSessionCookie(null), null);
     assert.deepEqual(parseCookies("a=1; a=2"), { a: "1" });
     assert.ok(buildClearCookie().includes("Max-Age=0"));
+    assert.ok(buildClearCookie().includes("Secure"));
   });
 
   it("validates addresses", () => {

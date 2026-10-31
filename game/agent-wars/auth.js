@@ -6,13 +6,7 @@ const $ = (id) => document.getElementById(id);
 let account = "";
 
 async function call(method, path, body) {
-  const res = await fetch(path, {
-    method,
-    headers: { "content-type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  return { status: res.status, data };
+  return window.AWSession.call(method, path, body);
 }
 
 function toastSay(msg) {
@@ -44,7 +38,8 @@ async function refresh() {
     return;
   }
   const addr = r.data.leader.wallet_address || "";
-  $("pill-who").textContent = addr ? short(addr) : (r.data.leader.handle || "signed in");
+  const handle = r.data.handleSet === true ? (r.data.leader.handle || "") : "";
+  $("pill-who").textContent = handle || (addr ? short(addr) : "signed in");
   $("auth-status").textContent = "Signed in. The arena awaits.";
   if (addr) {
     $("auth-address").textContent = short(addr);

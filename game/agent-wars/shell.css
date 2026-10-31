@@ -121,3 +121,23 @@
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; }
 }
+
+/* Legal footer. One line under every page, same links everywhere. */
+.legal-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 18px 4px 26px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.legal-foot a { color: var(--dim); }
+
+/* Identity pill. Signed out links to the wallet login. */
+.pill[data-state="out"] a { color: inherit; text-decoration: underline; }
+.pill[data-state="in"] { border-color: var(--a); color: var(--a); }
+
+/* Danger buttons. Delete paths only. */
+.btn-ghost.danger { border-color: #b0483e; color: #e88; }
+.btn-primary.danger { background: #5a2320; border-color: #b0483e; color: #ffd9d4; }

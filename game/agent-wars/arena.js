@@ -11,7 +11,6 @@ const lobbyView = document.getElementById("lobby-view");
 const battleView = document.getElementById("battle-view");
 
 let arenaMode = "casual";
-let arenaToken = localStorage.getItem("aw_token") || "";
 let arenaVersion = "";
 let arenaTicket = "";
 let arenaTimer = 0;
@@ -37,7 +36,7 @@ function toastSay(msg) {
 async function arenaCall(method, path, body) {
   const res = await fetch(path, {
     method,
-    headers: { "content-type": "application/json", authorization: `Bearer ${arenaToken}` },
+    headers: { "content-type": "application/json", ...window.AWSession.authHeaders() },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -77,16 +76,14 @@ function markMode(mode) {
 }
 
 async function arenaBoot() {
-  const who = document.getElementById("pill-who");
-  if (who) who.textContent = arenaToken ? (localStorage.getItem("aw_handle") || "signed in") : "signed out";
+  const sess = await window.AWSession.refreshIdentity();
   markMode(arenaMode);
-  if (!arenaToken) {
+  if (!sess.ok) {
     arenaEnergy.textContent = "energy —";
-    setText("qm-pick", "Sign in from the barracks. Then queue.");
+    setText("qm-pick", "Sign in with your wallet. Then queue.");
     return;
   }
-  const me = await arenaCall("GET", "/v1/me");
-  if (me.status !== 200) return;
+  const me = { status: 200, data: sess.me };
   arenaVersion = (me.data.agent && me.data.agent.active_version_id) || "";
   const hasAgent = Boolean(me.data.agent);
   const hasChip = Boolean(arenaVersion);
@@ -276,8 +273,9 @@ async function queue(mode) {
   arenaResult.hidden = true;
   arenaMode = mode;
   markMode(mode);
-  if (!arenaToken) {
-    arenaSay("Sign in in the barracks first.");
+  const sess = await window.AWSession.loadMe();
+  if (!sess.ok) {
+    arenaSay("Sign in with your wallet first.");
     return;
   }
   await arenaBoot();
@@ -368,7 +366,9 @@ arenaBoot();
 // Deep link from history rows: ?replay=<matchId> plays it straight away.
 (async function bootReplayParam() {
   const id = new URLSearchParams(location.search).get("replay");
-  if (!id || !arenaToken) return;
+  if (!id) return;
+  const sess = await window.AWSession.loadMe();
+  if (!sess.ok) return;
   await arenaBoot();
   const r = await arenaCall("GET", `/v1/matches/${id}/replay`);
   if (r.status !== 200 || !r.data.replay || (!r.data.replay.frames && !r.data.replay.rounds)) return;

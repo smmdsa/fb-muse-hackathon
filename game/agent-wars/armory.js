@@ -7,7 +7,7 @@ const HANDLE_KEY = "aw_handle";
 let token = localStorage.getItem(TOKEN_KEY) || "";
 
 function headers() {
-  return { "content-type": "application/json", authorization: `Bearer ${token}` };
+  return { "content-type": "application/json", ...window.AWSession.authHeaders() };
 }
 
 async function call(method, path, body) {
@@ -84,14 +84,12 @@ async function renderArmory() {
 async function boot() {
   const handle = localStorage.getItem(HANDLE_KEY) || "";
   if (handle) $("handle").value = handle;
-  if (!token) return;
-  $("pill-who").textContent = localStorage.getItem(HANDLE_KEY) || "signed in";
-  const me = await call("GET", "/v1/me");
-  if (me.status !== 200) {
-    token = "";
-    localStorage.removeItem(TOKEN_KEY);
+  const sess = await window.AWSession.refreshIdentity();
+  if (!sess.ok) {
+    if (token) { token = ""; localStorage.removeItem(TOKEN_KEY); }
     return;
   }
+  const me = { status: 200, data: sess.me };
   show($("login-card"), false);
   await renderArmory();
 }

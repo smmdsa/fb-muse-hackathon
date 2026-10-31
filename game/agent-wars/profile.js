@@ -9,12 +9,13 @@ const TOUR_KEY = "aw_tour_seen";
 const STEP_IDS = { 1: "w-agent", 2: "w-chip", 3: "w-arena" };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
+let authed = token !== "";
 let agentId = "";
 let latestDash = null;
 let justBred = false;
 
 function headers() {
-  return { "content-type": "application/json", authorization: `Bearer ${token}` };
+  return { "content-type": "application/json", ...window.AWSession.authHeaders() };
 }
 
 async function call(method, path, body) {
@@ -74,7 +75,7 @@ function silhouetteFor(id, skin) {
 }
 
 async function refresh() {
-  if (!token || !agentId) return;
+  if (!authed || !agentId) return;
   const r = await call("GET", `/v1/agents/${agentId}/dashboard`);
   if (r.status !== 200) {
     toastSay(`Dashboard unavailable: ${r.data.error || r.status}.`);
@@ -133,12 +134,12 @@ function markWelcome(d) {
     const box = $(STEP_IDS[s.stage]);
     if (!box) continue;
     box.classList.toggle("done", Boolean(s.done));
-    box.classList.toggle("next", Boolean(firstOpen && firstOpen.stage === s.stage && token));
+    box.classList.toggle("next", Boolean(firstOpen && firstOpen.stage === s.stage && authed));
     box.classList.toggle("claimed", Boolean(s.claimed));
     const prize = box.querySelector(".prize");
     if (prize) prize.textContent = s.claimed ? "✓ +200 AC" : s.done ? "Ready to claim" : "200 AC";
     const btn = $(`claim-${s.stage}`);
-    if (btn) show(btn, Boolean(token && s.done && !s.claimed));
+    if (btn) show(btn, Boolean(authed && s.done && !s.claimed));
   }
   const next = $("hero-next");
   const link = $("hero-next-link");
@@ -195,7 +196,7 @@ function tourSteps() {
       body: "Three acts take you from rookie to ranked. Each act pays 200 AC. This tour shows where each act lives.",
     },
   ];
-  if (!token) {
+  if (!authed) {
     steps.push(
       {
         target: "#login-card",
@@ -457,7 +458,7 @@ const GATED = { "#hist-card": "Fight history" };
 // then point at the login card instead of a blank scroll.
 function gatedHashNote() {
   const hit = GATED[location.hash];
-  if (!hit || token) return;
+  if (!hit || authed) return;
   if (typeof window.toast === "function") window.toast(`Sign in to unlock the ${hit}.`);
   const login = $("login-card");
   if (login) login.scrollIntoView();
@@ -466,19 +467,17 @@ function gatedHashNote() {
 async function boot() {
   const handle = localStorage.getItem(HANDLE_KEY) || "";
   if (handle) $("handle").value = handle;
-  if (!token) {
+  const sess = await window.AWSession.refreshIdentity();
+  if (!sess.ok) {
+    if (token) { token = ""; localStorage.removeItem(TOKEN_KEY); }
     gatedHashNote();
     return;
   }
-  $("pill-who").textContent = localStorage.getItem(HANDLE_KEY) || "signed in";
-  const me = await call("GET", "/v1/me");
-  if (me.status !== 200) {
-    token = "";
-    localStorage.removeItem(TOKEN_KEY);
-    return;
-  }
+  authed = true;
+  const me = { status: 200, data: sess.me };
   show($("login-card"), false);
   show($("hero-card"), true);
+  show($("gdpr-card"), true);
   if (me.data.agent) {
     agentId = me.data.agent.id;
     paintBreedState(true);
@@ -573,8 +572,60 @@ $("retry-btn").addEventListener("click", async () => {
   await refresh();
 });
 
+// GDPR self-service. Export downloads the bundle. Delete needs
+// DELETE typed plus a second press, then wipes the account.
+function gdprSay(msg) {
+  $("gdpr-msg").textContent = msg;
+  show($("gdpr-msg"), true);
+}
+
+$("export-btn").addEventListener("click", async () => {
+  gdprSay("Packing your data…");
+  const r = await call("GET", "/v1/me/export");
+  if (r.status !== 200) {
+    gdprSay(`Export failed: ${r.data.error || r.status}.`);
+    return;
+  }
+  const blob = new Blob([JSON.stringify(r.data, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "agent-wars-export.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  gdprSay("Export downloaded.");
+});
+
+$("delete-btn").addEventListener("click", () => {
+  show($("delete-confirm"), true);
+  $("delete-btn").disabled = true;
+  $("delete-input").focus();
+});
+
+$("delete-input").addEventListener("input", () => {
+  $("delete-final").disabled = $("delete-input").value.trim() !== "DELETE";
+});
+
+$("delete-final").addEventListener("click", async () => {
+  if ($("delete-input").value.trim() !== "DELETE") return;
+  $("delete-final").disabled = true;
+  gdprSay("Deleting…");
+  const r = await call("DELETE", "/v1/me");
+  if (r.status !== 200) {
+    gdprSay(`Delete failed: ${r.data.error || r.status}.`);
+    $("delete-final").disabled = false;
+    return;
+  }
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(HANDLE_KEY);
+  } catch {
+    // Storage is closed. The server already forgot the session.
+  }
+  location.href = "./auth.html";
+});
+
 $("share-btn").addEventListener("click", async () => {
-  const handle = localStorage.getItem(HANDLE_KEY) || "";
+  const handle = localStorage.getItem(HANDLE_KEY) || window.AWSession.handleOf(await window.AWSession.loadMe()) || "";
   if (!handle) return;
   const link = `${location.origin}/public.html?handle=${encodeURIComponent(handle)}`;
   try {

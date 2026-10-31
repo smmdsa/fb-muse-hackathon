@@ -47,13 +47,13 @@
   }
 
   async function sync() {
-    const token = localStorage.getItem('aw_token');
-    if (!token) { mode = 'ready'; render(); return; }
+    // Cookie sessions ride without a header. Bearer [REDACTED] stays for old clients.
+    const headers = window.AWSession ? window.AWSession.authHeaders() : {};
     const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = ctrl ? setTimeout(() => ctrl.abort(), SYNC_TIMEOUT_MS) : 0;
     try {
       const res = await fetch('/v1/ai/cooldown', {
-        headers: { authorization: `Bearer ${token}` },
+        headers,
         signal: ctrl ? ctrl.signal : undefined,
       });
       if (res.status === 401) { mode = 'signed-out'; render(); return; }
