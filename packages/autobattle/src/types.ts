@@ -4,7 +4,7 @@ export type AutoBattleState =
   | "OFFLINE_DRAFT"
   | "ACTIVE_READY"
   | "IN_MATCH"
-  | "IDLE_ENERGY"
+  | "IDLE_ENERGY" // Legacy: stored rows heal to a live state on refresh.
   | "IDLE_EXPIRED"
   | "PAUSED_MANUAL"
   | "TOURNAMENT_LOCKED";

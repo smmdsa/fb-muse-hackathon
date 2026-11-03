@@ -103,17 +103,9 @@ async function refresh() {
   show($("hero-shield"), true);
   $("hero-ap").textContent = `${d.leader.ap} AP — ${d.leader.tier}${d.leader.division ? " " + d.leader.division : ""}`;
   $("hero-ac").textContent = `${d.leader.ac} AC`;
-  const mins = Math.ceil(d.energy.nextRegenMs / 60000);
-  const full = d.energy.energy >= d.energy.energyMax;
-  $("hero-energy").textContent = `${d.energy.energy}/${d.energy.energyMax}`;
-  $("hero-energy-sub").textContent = full ? "energy — full" : `energy — +1 in ${mins || 1} min`;
-  renderPips($("hero-energy-pips"), d.energy.energy, d.energy.energyMax);
-  const versions = d.versions || [];
-  const hasActive = Boolean(d.agent && d.agent.activeVersionId);
   markWelcome(d);
   latestDash = d;
   paintBreedState(true);
-  paintHeroActions(versions.length > 0, hasActive);
   renderChipSlot(d);
   renderHist(d);
   await renderAuto();
@@ -287,40 +279,6 @@ function paintBreedState(hasAgent) {
   justBred = false;
 }
 
-function paintHeroActions(hasDraft, hasActive) {
-  const p = $("hero-primary");
-  const s = $("hero-secondary");
-  if (!hasDraft) {
-    p.textContent = "Program first chip";
-    p.href = "./chip.html";
-    s.textContent = "Enter arena";
-    s.href = "./arena.html";
-  } else if (!hasActive) {
-    p.textContent = "Install a chip";
-    p.href = "./chip.html";
-    s.textContent = "Enter arena";
-    s.href = "./arena.html";
-  } else {
-    p.textContent = "Enter arena";
-    p.href = "./arena.html";
-    s.textContent = "Open Chip Lab";
-    s.href = "./chip.html";
-  }
-}
-
-function renderPips(box, have, max) {
-  if (!box) return;
-  box.textContent = "";
-  const n = Math.max(1, Math.min(12, max));
-  const lit = Math.max(0, Math.min(n, have));
-  for (let i = 0; i < n; i += 1) {
-    const p = document.createElement("span");
-    p.className = i < lit ? "pip on" : "pip";
-    box.appendChild(p);
-    window.factoryCooldown?.render();
-  }
-}
-
 function renderChipSlot(d) {
   const slot = $("chip-slot");
   const label = $("chip-slot-label");
@@ -393,7 +351,7 @@ async function renderAuto() {
   const d = r.data;
   const lease = d.leaseExpiresAt ? `lease ends ${new Date(d.leaseExpiresAt).toLocaleString()}` : "no lease";
   $("auto-status").textContent = d.optIn
-    ? `Running — ${d.state}, energy ${d.energy.energy}/${d.energy.energyMax}, ${lease}, ${d.stopReason}.`
+    ? `Running — ${d.state}, ${lease}, ${d.stopReason}. Free fights, stop anytime.`
     : `Off — ${d.stopReason}. Press start for a 24h lease.`;
   const box = $("auto-recent");
   box.textContent = "";
@@ -468,8 +426,11 @@ async function boot() {
   const handle = localStorage.getItem(HANDLE_KEY) || "";
   if (handle) $("handle").value = handle;
   const sess = await window.AWSession.refreshIdentity();
+  show($("session-loading"), false);
+  show($("welcome-card"), true);
   if (!sess.ok) {
     if (token) { token = ""; localStorage.removeItem(TOKEN_KEY); }
+  show($("login-card"), true);
     gatedHashNote();
     return;
   }
@@ -485,8 +446,6 @@ async function boot() {
   } else {
     paintBreedState(false);
     show($("breed-msg"), true);
-    $("hero-primary").textContent = "Breed your hero";
-    $("hero-primary").href = "#breed-row";
     const ftue = await call("GET", "/v1/ftue");
     if (ftue.status === 200) markWelcome({ agent: null, versions: [], ftue: ftue.data.stages });
   }

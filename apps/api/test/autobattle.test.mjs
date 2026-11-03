@@ -40,24 +40,25 @@ describe("autobattle scheduler", () => {
       assert.equal(tick.ran, 3);
       assert.equal(tick.matches.length, 3);
       const spent = db.db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get(d.id);
-      assert.equal(JSON.parse(spent.autobattle_json).stamina, 7);
+      assert.equal(JSON.parse(spent.autobattle_json).stamina, 10);
+      assert.equal(JSON.parse(spent.autobattle_json).attackAt.length, 0);
       db.close();
     })();
   });
 
-  it("stops at empty energy and names the reason", () => {
+  it("runs past the old daily cap while leased", () => {
     const db = openStore(":memory:");
     const t0 = 2_000_000;
     return (async () => {
-      const d = await leader(db, "tired",);
+      const d = await leader(db, "restless",);
       optInAutobattle(db, d.id, t0);
-      const tick = autobattleTick(db, d.id, t0 + 1, 10);
-      assert.equal(tick.ran, 10);
-      assert.equal(tick.stopped, "energy depleted");
+      const tick = autobattleTick(db, d.id, t0 + 1, 25);
+      assert.equal(tick.ran, 25);
+      assert.equal(tick.stopped, "ready");
       const digest = autobattleDigest(db, d.id, t0 + 2);
-      assert.equal(digest.energy.energy, 0);
-      assert.equal(digest.stopReason, "energy depleted");
+      assert.equal(digest.stopReason, "ready");
       assert.equal(digest.recent.length, 10);
+      assert.equal("energy" in digest, false);
       db.close();
     })();
   });

@@ -107,7 +107,7 @@ describe("accounts", () => {
     assert.equal(r.status, 404);
   });
 
-  it("cancels a queued ticket over HTTP and refunds the charge", async () => {
+  it("cancels a queued ticket over HTTP and frees the daily slot", async () => {
     const solo = openStore(":memory:");
     const soloCall = makeCaller(buildRouter({ store: solo }));
     try {
@@ -118,13 +118,13 @@ describe("accounts", () => {
       const q = await soloCall("POST", "/v1/matchmaking/request", { versionId: v.json.versionId, mode: "ranked" }, s.json.token);
       assert.equal(q.status, 201);
       assert.equal(q.json.status, "queued");
-      const spent = await soloCall("GET", "/v1/me", null, s.json.token);
-      assert.equal(spent.json.energy.energy, 9);
+      const spent = solo.db.prepare("SELECT autobattle_json FROM leaders WHERE handle = ?").get("quitter");
+      assert.equal(JSON.parse(spent.autobattle_json).attackAt.length, 1);
       const out = await soloCall("POST", `/v1/matchmaking/${q.json.id}/cancel`, {}, s.json.token);
       assert.equal(out.status, 200);
       assert.equal(out.json.status, "canceled");
-      const back = await soloCall("GET", "/v1/me", null, s.json.token);
-      assert.equal(back.json.energy.energy, 10);
+      const back = solo.db.prepare("SELECT autobattle_json FROM leaders WHERE handle = ?").get("quitter");
+      assert.equal(JSON.parse(back.autobattle_json).attackAt.length, 0);
       const twice = await soloCall("POST", `/v1/matchmaking/${q.json.id}/cancel`, {}, s.json.token);
       assert.equal(twice.status, 404);
     } finally {
@@ -225,7 +225,7 @@ describe("accounts", () => {
     const r = await call("GET", "/v1/me", null, keys.commander);
     assert.equal(r.status, 200);
     assert.ok(r.json.agent);
-    assert.equal(r.json.energy.energy, 10);
+    assert.equal("energy" in r.json, false);
   });
 
   it("denies compiling on a stranger's agent", async () => {

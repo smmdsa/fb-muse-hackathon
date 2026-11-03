@@ -265,6 +265,17 @@ textarea {
 .pill.live { border-color: var(--good); color: var(--good); }
 
 .hero { display: flex; gap: 16px; align-items: start; margin-top: 12px; }
+.card-frame { display: grid; grid-template-columns: minmax(160px, 220px) 1fr; gap: 16px; margin-top: 12px; align-items: start; }
+#card-img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border: 1px solid var(--line); background: var(--panel-low); }
+.card-stats { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.card-stat { border: 1px solid var(--line); border-radius: 3px; padding: 8px 12px; text-align: center; }
+.card-stat b { display: block; font-size: 17px; }
+.card-stat span { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; }
+#card-history { display: grid; margin-top: 4px; }
+.hist-row { display: flex; gap: 10px; align-items: baseline; border-bottom: 1px solid var(--line); padding: 8px 0; margin: 0; }
+.r-w { color: #3dff7a; }
+.r-l { color: #ff5d7a; }
+.r-d { color: var(--dim); }
 
 #hero-img {
   width: 160px;
@@ -323,6 +334,10 @@ textarea {
 .pip { width: 8px; height: 18px; transform: skewX(-12deg); background: #22333c; }
 .pip.on { background: var(--a); }
 .forge-chip { width: 100%; margin-top: 14px; padding: 14px 16px; font-size: 13px; justify-content: flex-start; }
+.forge-auto { margin-top: 14px; border: 1px solid var(--line); border-radius: 3px; background: var(--panel-low); padding: 14px 16px; }
+.forge-auto h3 { margin: 0 0 6px; font-size: 15px; letter-spacing: 0.12em; }
+#hero-card .forge-stats { grid-template-columns: 1fr; }
+.forge-auto .row { margin-top: 10px; }
 .forge-status { margin-top: 10px; }
 .forge-cta { display: flex; gap: 10px; margin-top: 14px; }
 .forge-cta #hero-next { margin: 0; flex: 1; display: flex; }

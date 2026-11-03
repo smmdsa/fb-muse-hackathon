@@ -88,6 +88,43 @@ async function main() {
   $("card-skin").textContent = card.agent && card.agent.equippedSkin
     ? `marches in ${card.agent.equippedSkin}`
     : "marches in stock steel";
+  const stats = $("card-stats");
+  stats.textContent = "";
+  const st = card.stats || { wins: 0, losses: 0, winRate: 0, rankedWins: 0, rankedLosses: 0 };
+  const tiles = [
+    [`${st.wins}W – ${st.losses}L`, "record"],
+    [`${Math.round((st.winRate || 0) * 100)}%`, "win rate"],
+    [`${st.rankedWins}W – ${st.rankedLosses}L`, "ranked"],
+  ];
+  for (const [value, label] of tiles) {
+    const tile = document.createElement("div");
+    tile.className = "card-stat";
+    const b = document.createElement("b");
+    b.textContent = value;
+    const s = document.createElement("span");
+    s.textContent = label;
+    tile.append(b, s);
+    stats.appendChild(tile);
+  }
+  const hist = $("card-history");
+  hist.textContent = "";
+  const rows = Array.isArray(card.history) ? card.history : [];
+  if (!rows.length) hist.innerHTML = "<p class='sub'>No fights yet — the arena waits.</p>";
+  for (const h of rows) {
+    const p = document.createElement("p");
+    p.className = "sub hist-row";
+    const badge = document.createElement("b");
+    badge.className = h.result === "W" ? "r-w" : h.result === "L" ? "r-l" : "r-d";
+    badge.textContent = h.result;
+    const when = h.at ? new Date(h.at).toLocaleDateString() : "";
+    p.append(badge, document.createTextNode(` vs ${h.foe} — ${h.mode}${h.rated ? " ranked" : ""} · ${h.ticks} ticks ${when} `));
+    const a = document.createElement("a");
+    a.href = `./arena.html?replay=${h.matchId}`;
+    a.className = "link-quiet";
+    a.textContent = "replay";
+    p.appendChild(a);
+    hist.appendChild(p);
+  }
   const img = $("card-img");
   img.src = (card.agent && card.agent.portraitUrl) || silhouetteFor(card.handle, card.agent && card.agent.equippedSkin);
   show(img, true);

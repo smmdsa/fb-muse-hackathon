@@ -6,7 +6,7 @@ import { timingSafeEqual } from "node:crypto";
 import { openStore, mintId } from "./store.ts";
 import type { Store } from "./store.ts";
 import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies, fightSeries } from "@agent-wars/battle-core";
-import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, battleConfigFor, board, buyItem, cancelTicket, compileAndPublish, claimFtue, createAgent, createTournament, dashboard, deleteVersion, energyFor, energyView, equipItem, forceDeleteVersion, ftueStatus, getLeader, getTournament, getVersion, installVersion, listTournaments, matchMode, MAX_PROMPT, openTicket, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, renameVersion, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, settledResult, transitionTournament, validateRanked, withMatch } from "./flow.ts";
+import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, battleConfigFor, board, buyItem, cancelTicket, compileAndPublish, claimFtue, createAgent, createTournament, dashboard, deleteVersion, energyFor, equipItem, forceDeleteVersion, ftueStatus, getLeader, getTournament, getVersion, installVersion, listTournaments, matchMode, MAX_PROMPT, openTicket, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, renameVersion, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, settledResult, transitionTournament, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 import { hasKey } from "@agent-wars/ai-provider";
@@ -26,6 +26,9 @@ function limited(res: ServerResponse, log: Map<string, number[]>, key: string, w
 
 type Ctx = { store: Store };
 
+// One chip build per leader per day. Think it through.
+const AI_COOLDOWN_MS = 86_400_000;
+
 function cooldownStatus(ctx: Ctx, leader: string, now = Date.now()) {
   const row = ctx.store.db.prepare("SELECT next_allowed_at FROM ai_cooldowns WHERE leader_id = ?").get(leader) as { next_allowed_at: number } | undefined;
   const nextAllowedAt = row?.next_allowed_at ?? 0;
@@ -33,7 +36,7 @@ function cooldownStatus(ctx: Ctx, leader: string, now = Date.now()) {
 }
 function reserveAi(ctx: Ctx, res: ServerResponse, leader: string): boolean {
   const now = Date.now();
-  const row = ctx.store.db.prepare("INSERT INTO ai_cooldowns (leader_id, next_allowed_at) VALUES (?, ?) ON CONFLICT(leader_id) DO UPDATE SET next_allowed_at = excluded.next_allowed_at WHERE ai_cooldowns.next_allowed_at <= ? RETURNING next_allowed_at").get(leader, now + 300_000, now);
+  const row = ctx.store.db.prepare("INSERT INTO ai_cooldowns (leader_id, next_allowed_at) VALUES (?, ?) ON CONFLICT(leader_id) DO UPDATE SET next_allowed_at = excluded.next_allowed_at WHERE ai_cooldowns.next_allowed_at <= ? RETURNING next_allowed_at").get(leader, now + AI_COOLDOWN_MS, now);
   if (row) return true;
   send(res, 429, { error: "The AI factory is recharging. Your next build will be ready soon.", ...cooldownStatus(ctx, leader, now) });
   return false;
@@ -378,8 +381,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         const auto = autobattleTick(ctx.store, me.id as string);
         const agent = ctx.store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(me.id as string);
         const st = energyFor(ctx.store, me.id as string);
-        const energy = energyView(st);
-        send(res, 200, { leader: me, agent, energy, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran }, handleSet: (me.handle_set as number) === 1 });
+        send(res, 200, { leader: me, agent, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran }, handleSet: (me.handle_set as number) === 1 });
         return;
       }
       if (req.method === "GET" && url.pathname === "/v1/me/export") {

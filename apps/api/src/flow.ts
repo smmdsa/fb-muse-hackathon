@@ -9,7 +9,7 @@ import { applyRanked, createLedger, ratingFor } from "@agent-wars/ranking";
 import { rankFor } from "@agent-wars/ranking";
 import { buildStandings } from "@agent-wars/leaderboard";
 import { explainerFromEnv, hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
-import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, DAY_MS, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
+import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, DAY_MS } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
 import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket, transition as transitionEvent } from "@agent-wars/tournaments";
 import type { EventPhase } from "@agent-wars/tournaments";
@@ -438,8 +438,8 @@ export function installVersion(
   return { activeVersionId: input.versionId };
 }
 
-// Energy reads the persisted machine, refreshes regen, and saves it back.
-// The machine is the single source: stamina, caps, and next recharge.
+// Status reads the persisted machine, refreshes it, and saves it back.
+// The machine is the single source: lease, pause, and daily caps.
 export function energyFor(store: Store, leaderId: string, now = Date.now()): Status {
   const row = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown> | null;
   if (!row) throw new Error("unknown leader");
@@ -451,12 +451,7 @@ export function energyFor(store: Store, leaderId: string, now = Date.now()): Sta
   return st;
 }
 
-export function energyView(st: Status, now = Date.now()): { energy: number; energyMax: number; nextRegenMs: number } {
-  const nextRegenMs = st.stamina >= st.staminaMax ? 0 : Math.max(0, st.lastStaminaAt + REGEN_MS - now);
-  return { energy: st.stamina, energyMax: st.staminaMax ?? STAMINA_MAX, nextRegenMs };
-}
-
-// A canceled or expired ticket returns its charge. Settled fights keep it.
+// A canceled or expired ticket leaves the daily count. Settled fights keep it.
 export function refundEnergy(store: Store, leaderId: string, now = Date.now()): Status {
   const cur = energyFor(store, leaderId, now);
   const next = refundManualMatch(cur, now);
@@ -464,7 +459,7 @@ export function refundEnergy(store: Store, leaderId: string, now = Date.now()): 
   return next;
 }
 
-// A manual match spends one charge. Training never calls this function.
+// A manual match takes one daily slot. Training never calls this function.
 export function spendEnergy(store: Store, leaderId: string, now = Date.now()): { ok: boolean; reason?: string; status: Status } {
   const cur = energyFor(store, leaderId, now);
   const r = spendManualMatch(cur, now);
@@ -568,7 +563,6 @@ export function dashboard(store: Store, agentId: string, leaderId: string): Reco
   return {
     agent: { id: agent.id, name: agent.name ?? null, concept: agent.concept ?? null, portraitUrl: agent.portrait_url ?? null, portraitStatus: agent.portrait_status ?? "faceless", activeVersionId: agent.active_version_id ?? null },
     leader: { handle: leader.handle, ap: leader.ap, ac: leader.ac, tier: rank.tier, division: rank.division },
-    energy: energyView(energyFor(store, leaderId)),
     versions,
     history: fightHistory(store, versionRows.map((v) => v.id as string)),
     ftue: ftueStatus(store, leaderId).stages,
@@ -852,6 +846,9 @@ export function pauseAutobattle(store: Store, leaderId: string, now = Date.now()
 
 // One background pass. Ranked vs a live published foe, bot sparring
 // alone. Bounded per call so one read never drains the day.
+// Auto ticks never touch the manual daily count, so the seed takes a
+// process counter. The ab- prefix stays: the digest finds rows by it.
+let abSeq = 0;
 export function autobattleTick(
   store: Store,
   leaderId: string,
@@ -866,7 +863,7 @@ export function autobattleTick(
     store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(go.status), leaderId);
     if (!go.guard.ok) break;
     const agent = store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(leaderId) as Record<string, unknown> | null;
-    const seed = `ab-${leaderId}-${go.status.attackAt.length}`;
+    const seed = `ab-${leaderId}-${now}-${(abSeq += 1)}`;
     const foe = findHumanOpponent(store, leaderId, now);
     const match = foe
       ? runRanked(store, { aVersionId: agent?.active_version_id as string, bVersionId: foe.versionId, seed, key: `abm-${seed}` })
@@ -885,13 +882,11 @@ export function autobattleStop(store: Store, leaderId: string, now = Date.now())
   if (st.state === "PAUSED_MANUAL" || (st.optIn === false && st.leaseExpiresAt !== null)) return "paused";
   if (!st.optIn) return "opted out";
   if (st.state === "IDLE_EXPIRED" || (st.leaseExpiresAt !== null && now >= st.leaseExpiresAt)) return "lease expired";
-  if (st.stamina < 1) return "energy depleted";
-  if (st.attackAt.length >= MAX_ATTACK_PER_DAY) return "daily cap reached";
   if (!st.published) return "no published version";
   return "ready";
 }
 
-// The return digest: lease, energy, reason, and recent auto fights.
+// The return digest: lease, reason, and recent auto fights.
 export function autobattleDigest(store: Store, leaderId: string, now = Date.now()): Record<string, unknown> {
   const st = energyFor(store, leaderId, now);
   const safe = leaderId.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -906,7 +901,6 @@ export function autobattleDigest(store: Store, leaderId: string, now = Date.now(
     optIn: st.optIn,
     leaseExpiresAt: st.leaseExpiresAt,
     state: st.state,
-    energy: energyView(st, now),
     defense: {
       used: st.defenseAt.filter((t) => now - t < DAY_MS).length,
       max: MAX_DEFENSE_PER_DAY,
@@ -1246,6 +1240,36 @@ export function seasonHistory(store: Store): Record<string, unknown>[] {
 }
 
 // Public cards show the career, never the wallet. Allowlist, not filter.
+// Public fight history. Newest first, ten rows, foe names only.
+// Version ids resolve to handles; policy text never leaves the store.
+function publicHistory(store: Store, agent: Record<string, unknown> | null): { rows: Record<string, unknown>[]; rankedWins: number; rankedLosses: number } {
+  if (!agent) return { rows: [], rankedWins: 0, rankedLosses: 0 };
+  const vrows = store.db.prepare("SELECT id FROM versions WHERE agent_id = ?").all(agent.id as string) as Record<string, unknown>[];
+  const ids = vrows.map((v) => v.id as string);
+  if (!ids.length) return { rows: [], rankedWins: 0, rankedLosses: 0 };
+  const marks = ids.map(() => "?").join(",");
+  const bouts = store.db.prepare(`SELECT id, a_version, b_version, winner, ticks, rated, mode, created_at FROM matches WHERE a_version IN (${marks}) OR b_version IN (${marks}) ORDER BY created_at DESC LIMIT 10`).all(...ids, ...ids) as Record<string, unknown>[];
+  const owned = new Set(ids);
+  let rankedWins = 0;
+  let rankedLosses = 0;
+  const rows = bouts.map((m) => {
+    const mine = owned.has(m.a_version as string) ? "A" : "B";
+    const foeVersion = (mine === "A" ? m.b_version : m.a_version) as string;
+    let foe = "sparring bot";
+    if (!foeVersion.startsWith("bot:")) {
+      const fa = store.db.prepare("SELECT agents.name AS aname, leaders.handle AS h FROM versions JOIN agents ON agents.id = versions.agent_id JOIN leaders ON leaders.id = agents.leader_id WHERE versions.id = ?").get(foeVersion) as { aname: string | null; h: string } | undefined;
+      foe = fa ? `${fa.h} · ${fa.aname ?? "unnamed"}` : "retired fighter";
+    }
+    const result = m.winner === "DRAW" ? "D" : m.winner === mine ? "W" : "L";
+    if (m.rated === 1) {
+      if (result === "W") rankedWins += 1;
+      else if (result === "L") rankedLosses += 1;
+    }
+    return { matchId: m.id, foe, result, mode: matchMode(m), rated: m.rated, ticks: m.ticks, at: m.created_at };
+  });
+  return { rows, rankedWins, rankedLosses };
+}
+
 export function publicProfile(store: Store, handle: string): Record<string, unknown> {
   const leader = store.db.prepare("SELECT * FROM leaders WHERE handle = ?").get(handle) as Record<string, unknown> | null;
   if (!leader) throw new Error("unknown handle");
@@ -1270,11 +1294,14 @@ export function publicProfile(store: Store, handle: string): Record<string, unkn
   }
   const rank = rankFor(leader.ap as number);
   const equipped = JSON.parse((leader.equipped_json as string) ?? "{}") as Record<string, string | null>;
+  const hist = publicHistory(store, agent);
   return {
     handle: leader.handle,
     ap: leader.ap,
     tier: rank.tier,
     division: rank.division,
+    stats: { wins, losses, winRate: wins + losses ? wins / (wins + losses) : 0, rankedWins: hist.rankedWins, rankedLosses: hist.rankedLosses },
+    history: hist.rows,
     agent: agent ? {
       name: agent.name,
       portraitUrl: agent.portrait_url,

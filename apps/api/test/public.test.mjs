@@ -47,8 +47,14 @@ describe("public profiles", () => {
     // Draws count for neither side, so the card sums decisive bouts only.
     const row = store.db.prepare("SELECT winner FROM matches WHERE id = ?").get("pub-1");
     assert.equal(r.json.agent.wins + r.json.agent.losses, row.winner === "DRAW" ? 0 : 1);
+    assert.equal(r.json.stats.wins + r.json.stats.losses, row.winner === "DRAW" ? 0 : 1);
+    assert.equal(r.json.history.length, 1);
+    assert.equal(r.json.history[0].matchId, "pub-1");
+    assert.ok(r.json.history[0].foe.startsWith("pub-bravo"));
+    assert.ok(["W", "L", "D"].includes(r.json.history[0].result));
+    assert.equal(r.json.history[0].rated, 1);
     const raw = JSON.stringify(r.json);
-    for (const banned of ["token", "energy", "lease", "wallet", "autobattle", "ac\"", "rp\""]) {
+    for (const banned of ["token", "energy", "lease", "wallet", "autobattle", "ac\"", "rp\"", "prompt", "policy_json"]) {
       assert.ok(!raw.includes(banned), `leaked ${banned}`);
     }
   });
