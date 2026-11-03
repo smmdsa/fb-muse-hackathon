@@ -34,7 +34,7 @@ describe("matches", () => {
     assert.ok(r.json.checksum);
     const me = await call("GET", "/v1/me", null, keys.a.token);
     assert.equal(me.json.leader.ap, 500);
-    assert.equal(me.json.energy.energy, 10);
+    assert.equal(JSON.parse(store.db.prepare("SELECT autobattle_json FROM leaders WHERE handle = ?").get("alpha").autobattle_json).attackAt.length, 0);
   });
 
   it("settles ranked with AP, pay, and replay", async () => {
@@ -98,9 +98,9 @@ describe("matches", () => {
     assert.equal(row.latency_ms, v.json.latencyMs);
   });
 
-  it("spends one energy per ranked fight", async () => {
-    const me = await call("GET", "/v1/me", null, keys.a.token);
-    assert.equal(me.json.energy.energy, 9);
+  it("takes one daily slot per ranked fight", async () => {
+    const row = store.db.prepare("SELECT autobattle_json FROM leaders WHERE handle = ?").get("alpha");
+    assert.equal(JSON.parse(row.autobattle_json).attackAt.length, 1);
   });
 
   it("stores payouts and lists recent fights with replay links", async () => {
@@ -118,7 +118,7 @@ describe("matches", () => {
     assert.equal(typeof first.replay, "string");
   });
 
-  it("denies ranked at zero energy", async () => {
+  it("denies ranked past the daily cap", async () => {
     for (let i = 2; i <= 10; i += 1) {
       const r = await call(
         "POST",
@@ -135,6 +135,6 @@ describe("matches", () => {
       keys.a.token,
     );
     assert.equal(out.status, 409);
-    assert.match(out.json.error, /energy empty/);
+    assert.match(out.json.error, /daily match cap reached/);
   });
 });

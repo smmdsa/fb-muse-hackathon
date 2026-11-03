@@ -13,7 +13,6 @@ import {
   spendManualMatch,
   startOwnerMatch,
   LEASE_MS,
-  REGEN_MS,
   DAY_MS,
 } from "../src/index.ts";
 
@@ -60,58 +59,43 @@ describe("lease", () => {
   });
 });
 
-describe("stamina", () => {
-  it("spends one charge per owner match", () => {
+describe("free fights", () => {
+  it("runs owner matches at no cost and off the daily count", () => {
     let s = live(0);
     s = startOwnerMatch(s, 0).status;
-    assert.equal(s.stamina, 9);
+    assert.equal(s.stamina, 10);
+    assert.equal(s.attackAt.length, 0);
     s = finishMatch(s, 0);
     assert.equal(s.state, "ACTIVE_READY");
   });
 
-  it("blocks at zero and refills 1 per 2 hours", () => {
+  it("runs past 10 owner matches a day inside the lease", () => {
     let s = live(0);
-    for (let i = 0; i < 10; i += 1) {
-      s = startOwnerMatch(s, i).status;
-      s = finishMatch(s, i);
-    }
-    assert.equal(s.stamina, 0);
-    const denied = startOwnerMatch(s, 10);
-    assert.equal(denied.guard.ok, false);
-    assert.equal(denied.status.state, "IDLE_ENERGY");
-    s = refresh(denied.status, 10 + 4 * H);
-    assert.equal(s.stamina, 2);
-    assert.equal(s.state, "ACTIVE_READY");
-  });
-
-  it("caps at 10 and never resumes after expiry", () => {
-    let s = live(0);
-    s = refresh(s, 30 * H);
-    assert.equal(s.stamina, 10);
-    assert.equal(s.state, "IDLE_EXPIRED");
-    const attempt = startOwnerMatch(s, 30 * H);
-    assert.equal(attempt.guard.ok, false);
-  });
-
-  it("caps attacks at 10 per day", () => {
-    let s = live(0);
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 25; i += 1) {
       const r = startOwnerMatch(s, i * 1000);
       assert.equal(r.guard.ok, true);
       s = finishMatch(r.status, i * 1000);
     }
-    const over = startOwnerMatch(s, 11 * 1000);
-    assert.equal(over.guard.ok, false);
+    assert.equal(s.state, "ACTIVE_READY");
+  });
+
+  it("still blocks after expiry", () => {
+    let s = live(0);
+    s = refresh(s, 30 * H);
+    assert.equal(s.state, "IDLE_EXPIRED");
+    const attempt = startOwnerMatch(s, 30 * H);
+    assert.equal(attempt.guard.ok, false);
   });
 });
 
 describe("manual matches", () => {
-  it("spends energy with no lease or opt-in", () => {
+  it("runs free with no lease or opt-in", () => {
     const d = draft("leader-1", 0);
     d.published = true;
     const r = spendManualMatch(d, 1000);
     assert.equal(r.guard.ok, true);
-    assert.equal(r.status.stamina, 9);
+    assert.equal(r.status.stamina, 10);
+    assert.equal(r.status.attackAt.length, 1);
   });
 
   it("denies drafts with no published version", () => {
@@ -122,23 +106,17 @@ describe("manual matches", () => {
   it("refunds a reservation without starting a fight", () => {
     const d = { ...draft("leader-1", 0), published: true };
     const spent = spendManualMatch(d, 1000).status;
-    assert.equal(spent.stamina, 9);
     assert.equal(spent.attackAt.length, 1);
     const back = refundManualMatch(spent, 2000);
-    assert.equal(back.stamina, 10);
     assert.equal(back.attackAt.length, 0);
   });
 
-  it("denies empty energy and caps the day", () => {
-    const d = draft("leader-1", 0);
-    d.published = true;
-    d.stamina = 0;
-    const empty = spendManualMatch(d, 1000);
-    assert.equal(empty.guard.ok, false);
-    assert.equal(empty.status.state, "IDLE_ENERGY");
+  it("caps manual fights at 10 per day", () => {
     let s = { ...draft("leader-1", 0), published: true };
     for (let i = 0; i < 10; i += 1) s = spendManualMatch(s, i * 1000).status;
-    assert.equal(spendManualMatch(s, 11 * 1000).guard.ok, false);
+    const over = spendManualMatch(s, 11 * 1000);
+    assert.equal(over.guard.ok, false);
+    assert.equal(over.guard.reason, "daily match cap reached");
   });
 });
 
@@ -168,26 +146,22 @@ describe("defense and flags", () => {
     assert.equal(s.state, "PAUSED_MANUAL");
   });
 
-  it("freezes for tournaments without stamina", () => {
+  it("freezes for tournaments and costs nothing", () => {
     let s = live(0);
-    const before = s.stamina;
     s = enterTournament(s, H);
     assert.equal(s.state, "TOURNAMENT_LOCKED");
     s = exitTournament(s, 2 * H);
     assert.equal(s.state, "ACTIVE_READY");
-    assert.equal(s.stamina, before);
+    assert.equal(s.stamina, 10);
   });
 
   it("prunes day windows with rolling time", () => {
     let s = live(0);
     for (let i = 0; i < 10; i += 1) {
-      const r = startOwnerMatch(s, i * 1000);
-      s = finishMatch(r.status, i * 1000);
+      s = spendManualMatch(s, i * 1000).status;
     }
+    assert.equal(spendManualMatch(s, 11 * 1000).guard.ok, false);
     s = refresh(s, 2 * DAY_MS);
     assert.equal(s.attackAt.length, 0);
-    s = activate(s, 2 * DAY_MS);
-    const r = startOwnerMatch(s, 2 * DAY_MS);
-    assert.equal(r.guard.ok, true);
   });
 });

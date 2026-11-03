@@ -59,7 +59,7 @@ function updateFactoryGate() {
     const s = st.seconds;
     msg.textContent = `Assembly bay cooling down. Next build in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}.`;
   } else {
-    msg.textContent = "One build per 5 minutes. The assembly bay cools down after each build.";
+    msg.textContent = "One build per 24 hours. Think your chip through — the next bay opens tomorrow.";
   }
 }
 
@@ -315,7 +315,10 @@ $("compile-btn").addEventListener("click", async () => {
       factoryFormOpen = false;
       updateFactoryGate();
       const s = Math.max(0, Number(r.data.retryAfterSeconds) || 0);
-      $("train-msg").textContent = `Factory recharging — next build in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}.`;
+      const hh = Math.floor(s / 3600);
+      const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+      const ss = String(s % 60).padStart(2, "0");
+      $("train-msg").textContent = `Factory recharging — next build in ${hh}:${mm}:${ss}.`;
     } else {
       $("train-msg").textContent = `Compile failed: ${(r.data.errors || [r.data.error]).join("; ")}`;
     }

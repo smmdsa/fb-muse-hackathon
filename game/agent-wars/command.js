@@ -57,7 +57,7 @@ function lobbySay(name, rank, energy) {
 async function cmdBoot() {
   const sess = await window.AWSession.refreshIdentity();
   if (!sess.ok) {
-    lobbySay("No agent yet", "Breed an agent to enter the league.", "energy —");
+    lobbySay("No agent yet", "Breed an agent to enter the league.", "signed out");
     setText("lobby-chip", "No chip yet");
     setText("lobby-chip-detail", "Sign in with your wallet. Then compile a chip.");
     setText("lobby-ap", "— AP");
@@ -69,14 +69,12 @@ async function cmdBoot() {
   const me = { status: 200, data: sess.me };
   const hasAgent = Boolean(me.data.agent);
   const hasChip = Boolean(me.data.agent && me.data.agent.active_version_id);
-  setText("lower-energy", `${me.data.energy.energy}/${me.data.energy.energyMax}`);
-  const lowerBar = document.getElementById("lower-energybar");
-  if (lowerBar) lowerBar.style.width = `${(me.data.energy.energy / Math.max(1, me.data.energy.energyMax)) * 100}%`;
+  setText("lower-auto", me.data.auto && me.data.auto.optIn ? "ON" : "OFF");
   const autoLine = me.data.auto && me.data.auto.optIn
     ? `AutoBattle on — ${me.data.auto.state}.`
     : "AutoBattle off — start it in the barracks.";
   if (!hasAgent) {
-    lobbySay("No agent yet", "Breed one in the barracks, then queue.", `energy ${me.data.energy.energy}/${me.data.energy.energyMax}`);
+    lobbySay("No agent yet", "Breed one in the barracks, then queue.", autoLine);
     const autoEl = document.getElementById("lobby-auto");
     if (autoEl) autoEl.textContent = autoLine;
     markSteps(false, false);
@@ -92,7 +90,7 @@ async function cmdBoot() {
   lobbySay(
     me.data.agent.name || "Unnamed hero",
     `${me.data.leader.ap} AP — ${me.data.leader.tier || "PROTOTYPE"}.`,
-    `energy ${me.data.energy.energy}/${me.data.energy.energyMax} — one per fight.`,
+    `Free fights — ${autoLine}`,
   );
   setText("lobby-chip", hasChip ? `Chip v${String(me.data.agent.active_version_id).slice(0, 8)}` : "No chip yet");
   setText("lobby-chip-detail", hasChip ? "Active version fights. Change it in the barracks." : "Compile and install a chip in the barracks.");

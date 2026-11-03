@@ -1,10 +1,12 @@
 // AutoBattle state machine. Pure transitions on an injected clock.
+// Fights cost nothing: the 24h lease plus the manual daily cap
+// bound play. Stamina fields stay on Status so old stored rows
+// still parse; the machine never reads them.
 
 import type { AutoBattleState, Guard, Status } from "./types.ts";
 
 export const LEASE_MS = 24 * 60 * 60 * 1000;
 export const STAMINA_MAX = 10;
-export const REGEN_MS = 2 * 60 * 60 * 1000;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const MAX_ATTACK_PER_DAY = 10;
 export const MAX_DEFENSE_PER_DAY = 3;
@@ -49,7 +51,6 @@ export function refresh(status: Status, now: number): Status {
     attackAt: prune(status.attackAt, now),
     defenseAt: prune(status.defenseAt, now),
   };
-  regen(next, now);
   if (next.state !== "IN_MATCH" && next.state !== "PAUSED_MANUAL" && next.state !== "TOURNAMENT_LOCKED") {
     next.state = restState(next, now);
   } else if (next.state === "TOURNAMENT_LOCKED" && !next.lockedTournament) {
@@ -58,7 +59,8 @@ export function refresh(status: Status, now: number): Status {
   return next;
 }
 
-// Owner-initiated match. It spends one stamina charge.
+// Owner-initiated match. Free while the lease runs: no stamina,
+// no daily cap. Manual matches keep their own cap elsewhere.
 export function startOwnerMatch(status: Status, now: number): { status: Status; guard: Guard } {
   const cur = refresh(status, now);
   if (!cur.published) {
@@ -67,49 +69,29 @@ export function startOwnerMatch(status: Status, now: number): { status: Status; 
   if (cur.state !== "ACTIVE_READY") {
     return { status: cur, guard: { ok: false, reason: `state ${cur.state} blocks matches` } };
   }
-  if (cur.stamina < 1) {
-    return { status: { ...cur, state: "IDLE_ENERGY" }, guard: { ok: false, reason: "stamina empty" } };
-  }
-  if (cur.attackAt.length >= MAX_ATTACK_PER_DAY) {
-    return { status: cur, guard: { ok: false, reason: "daily attack cap reached" } };
-  }
-  const next: Status = {
-    ...cur,
-    stamina: cur.stamina - 1,
-    attackAt: [...cur.attackAt, now],
-    state: "IN_MATCH",
-  };
+  const next: Status = { ...cur, state: "IN_MATCH" };
   return { status: next, guard: { ok: true } };
 }
 
-// Manual match. It spends one energy charge with no lease or opt-in gates.
-// The player sits at the screen, so only stamina and the daily cap guard.
+// Manual match. Free too, but the daily cap still guards live play.
+// Auto ticks never append here, so the cap counts manual fights only.
 export function spendManualMatch(status: Status, now: number): { status: Status; guard: Guard } {
   const cur = refresh(status, now);
   if (!cur.published) {
     return { status: cur, guard: { ok: false, reason: "no published version" } };
   }
-  if (cur.stamina < 1) {
-    return { status: { ...cur, state: "IDLE_ENERGY" }, guard: { ok: false, reason: "energy empty" } };
-  }
   if (cur.attackAt.length >= MAX_ATTACK_PER_DAY) {
     return { status: cur, guard: { ok: false, reason: "daily match cap reached" } };
   }
-  const next: Status = {
-    ...cur,
-    stamina: cur.stamina - 1,
-    attackAt: [...cur.attackAt, now],
-  };
+  const next: Status = { ...cur, attackAt: [...cur.attackAt, now] };
   return { status: next, guard: { ok: true } };
 }
 
-// Refund. A reservation that never started returns one charge.
-// One attack slot leaves with it, so the daily count stays honest.
+// Refund. A reservation that never started leaves the daily count.
 export function refundManualMatch(status: Status, now: number): Status {
   const cur = refresh(status, now);
   const attackAt = cur.attackAt.slice(0, -1);
-  const stamina = Math.min(cur.staminaMax, cur.stamina + 1);
-  return { ...cur, attackAt, stamina };
+  return { ...cur, attackAt };
 }
 
 // Match end. Expiry wins over a return to ready.
@@ -129,7 +111,7 @@ export function recordDefense(status: Status, now: number): { status: Status; cr
   return { status: next, credited };
 }
 
-// Tournament freeze and release. Tournaments skip stamina.
+// Tournament freeze and release. Tournaments skip the daily cap.
 export function enterTournament(status: Status, now: number): Status {
   const cur = refresh(status, now);
   return { ...cur, lockedTournament: true, state: "TOURNAMENT_LOCKED" };
@@ -143,22 +125,12 @@ export function exitTournament(status: Status, now: number): Status {
   return cur;
 }
 
-// The rest state derives from lease, stamina, and flags.
+// The rest state derives from lease, opt-in, and flags.
 function restState(status: Status, now: number): AutoBattleState {
   if (!status.optIn || !status.published) return "OFFLINE_DRAFT";
   if (status.lockedTournament) return "TOURNAMENT_LOCKED";
   if (status.leaseExpiresAt === null || now >= status.leaseExpiresAt) return "IDLE_EXPIRED";
-  if (status.stamina < 1) return "IDLE_ENERGY";
   return "ACTIVE_READY";
-}
-
-// Regen adds one charge per full 2-hour block and moves the marker.
-function regen(status: Status, now: number): void {
-  if (now <= status.lastStaminaAt) return;
-  const blocks = Math.floor((now - status.lastStaminaAt) / REGEN_MS);
-  if (blocks < 1) return;
-  status.stamina = Math.min(status.staminaMax, status.stamina + blocks);
-  status.lastStaminaAt += blocks * REGEN_MS;
 }
 
 function prune(marks: number[], now: number): number[] {

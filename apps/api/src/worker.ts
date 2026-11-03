@@ -1,7 +1,7 @@
 // Cloudflare Worker entry. Full API on D1: auth, publish, fights, replay.
 
 import { explainerFromEnv, hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
-import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, DAY_MS, MAX_ATTACK_PER_DAY, REGEN_MS, STAMINA_MAX } from "@agent-wars/autobattle";
+import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, DAY_MS } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
 import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket, transition as transitionEvent } from "@agent-wars/tournaments";
 import type { EventPhase } from "@agent-wars/tournaments";
@@ -66,7 +66,7 @@ function json(body: unknown, code = 200, extraHeaders: Record<string, string> = 
   });
 }
 
-const AI_COOLDOWN_MS = 300_000;
+const AI_COOLDOWN_MS = 86_400_000;
 async function cooldownStatus(env: WorkerEnv, leader: string, now = Date.now()) {
   const row = await env.DB.prepare("SELECT next_allowed_at FROM ai_cooldowns WHERE leader_id = ?").bind(leader).first<{ next_allowed_at: number }>();
   const nextAllowedAt = row?.next_allowed_at ?? 0;
@@ -330,7 +330,7 @@ async function planPay(
   return { stmts, credited: res.credited };
 }
 
-// Energy reads the persisted machine, refreshes regen, and saves it back.
+// Status reads the persisted machine, refreshes it, and saves it back.
 async function energyFor(env: WorkerEnv, leaderId: string, now = Date.now()): Promise<Status> {
   const row = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>();
   if (!row) throw new Error("unknown leader");
@@ -342,11 +342,6 @@ async function energyFor(env: WorkerEnv, leaderId: string, now = Date.now()): Pr
   return st;
 }
 
-function energyView(st: Status, now = Date.now()): { energy: number; energyMax: number; nextRegenMs: number } {
-  const nextRegenMs = st.stamina >= st.staminaMax ? 0 : Math.max(0, st.lastStaminaAt + REGEN_MS - now);
-  return { energy: st.stamina, energyMax: st.staminaMax ?? STAMINA_MAX, nextRegenMs };
-}
-
 async function spendEnergy(env: WorkerEnv, leaderId: string, now = Date.now()): Promise<{ ok: boolean; reason?: string }> {
   const cur = await energyFor(env, leaderId, now);
   const r = spendManualMatch(cur, now);
@@ -354,7 +349,7 @@ async function spendEnergy(env: WorkerEnv, leaderId: string, now = Date.now()): 
   return r.guard.ok ? { ok: true } : { ok: false, reason: (r.guard as { reason: string }).reason };
 }
 
-// A canceled or expired ticket returns its charge. Settled fights keep it.
+// A canceled or expired ticket leaves the daily count. Settled fights keep it.
 async function refundEnergy(env: WorkerEnv, leaderId: string, now = Date.now()): Promise<void> {
   const cur = await energyFor(env, leaderId, now);
   const next = refundManualMatch(cur, now);
@@ -378,6 +373,9 @@ async function pauseAutoD1(env: WorkerEnv, leaderId: string, now: number): Promi
 }
 
 // One background pass. Ranked vs a live published foe, bot sparring alone.
+// Auto ticks never touch the manual daily count, so the seed takes a
+// process counter. The ab- prefix stays: the digest finds rows by it.
+let abSeqD1 = 0;
 async function autoTickD1(
   env: WorkerEnv,
   leaderId: string,
@@ -392,7 +390,7 @@ async function autoTickD1(
     await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(go.status), leaderId).run();
     if (!go.guard.ok) break;
     const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(leaderId).first<Record<string, unknown>>();
-    const seed = `ab-${leaderId}-${go.status.attackAt.length}`;
+    const seed = `ab-${leaderId}-${now}-${(abSeqD1 += 1)}`;
     const foe = await findHumanOpponent(env, leaderId, now);
     if (foe) {
       const settled = await settleRankedD1(env, { aVersionId: agent?.active_version_id as string, bVersionId: foe.versionId, seed, key: `abm-${seed}` });
@@ -415,13 +413,11 @@ async function autoStopD1(env: WorkerEnv, leaderId: string, now: number): Promis
   if (st.state === "PAUSED_MANUAL" || (st.optIn === false && st.leaseExpiresAt !== null)) return "paused";
   if (!st.optIn) return "opted out";
   if (st.state === "IDLE_EXPIRED" || (st.leaseExpiresAt !== null && now >= st.leaseExpiresAt)) return "lease expired";
-  if (st.stamina < 1) return "energy depleted";
-  if (st.attackAt.length >= MAX_ATTACK_PER_DAY) return "daily cap reached";
   if (!st.published) return "no published version";
   return "ready";
 }
 
-// The return digest: lease, energy, reason, and recent auto fights.
+// The return digest: lease, reason, and recent auto fights.
 async function autoDigestD1(env: WorkerEnv, leaderId: string, now: number): Promise<Record<string, unknown>> {
   const st = await energyFor(env, leaderId, now);
   const safe = leaderId.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -436,7 +432,6 @@ async function autoDigestD1(env: WorkerEnv, leaderId: string, now: number): Prom
     optIn: st.optIn,
     leaseExpiresAt: st.leaseExpiresAt,
     state: st.state,
-    energy: energyView(st, now),
     defense: {
       used: st.defenseAt.filter((t) => now - t < DAY_MS).length,
       max: MAX_DEFENSE_PER_DAY,
@@ -586,7 +581,6 @@ async function agentDashboard(env: WorkerEnv, agentId: string, leaderId: string)
   return {
     agent: { id: agent.id, name: agent.name ?? null, concept: agent.concept ?? null, portraitUrl: agent.portrait_url ?? null, portraitStatus: agent.portrait_status ?? "faceless", activeVersionId: agent.active_version_id ?? null },
     leader: { handle: leader.handle, ap: leader.ap, ac: leader.ac, tier: rank.tier, division: rank.division },
-    energy: energyView(await energyFor(env, leaderId)),
     versions,
     history,
     ftue: await ftueStages(env, leaderId),
@@ -948,6 +942,36 @@ export default {
     if (request.method === "GET" && replayMatch) {
       return replay(env, decodeURIComponent(replayMatch[0].split("/")[3]));
     }
+    // Public fight history. Newest first, ten rows, foe names only.
+    // Version ids resolve to handles; policy text never leaves the store.
+    async function publicHistoryD1(agent: Record<string, unknown> | null): Promise<{ rows: Record<string, unknown>[]; rankedWins: number; rankedLosses: number }> {
+      if (!agent) return { rows: [], rankedWins: 0, rankedLosses: 0 };
+      const { results: vrows } = await env.DB.prepare("SELECT id FROM versions WHERE agent_id = ?").bind(agent.id as string).all<Record<string, unknown>>();
+      const ids = vrows.map((v) => v.id as string);
+      if (!ids.length) return { rows: [], rankedWins: 0, rankedLosses: 0 };
+      const marks = ids.map(() => "?").join(",");
+      const { results: bouts } = await env.DB.prepare(`SELECT id, a_version, b_version, winner, ticks, rated, mode, created_at FROM matches WHERE a_version IN (${marks}) OR b_version IN (${marks}) ORDER BY created_at DESC LIMIT 10`).bind(...ids, ...ids).all<Record<string, unknown>>();
+      const owned = new Set(ids);
+      let rankedWins = 0;
+      let rankedLosses = 0;
+      const rows: Record<string, unknown>[] = [];
+      for (const m of bouts) {
+        const mine = owned.has(m.a_version as string) ? "A" : "B";
+        const foeVersion = (mine === "A" ? m.b_version : m.a_version) as string;
+        let foe = "sparring bot";
+        if (!foeVersion.startsWith("bot:")) {
+          const fa = await env.DB.prepare("SELECT agents.name AS aname, leaders.handle AS h FROM versions JOIN agents ON agents.id = versions.agent_id JOIN leaders ON leaders.id = agents.leader_id WHERE versions.id = ?").bind(foeVersion).first<{ aname: string | null; h: string }>();
+          foe = fa ? `${fa.h} · ${fa.aname ?? "unnamed"}` : "retired fighter";
+        }
+        const result = m.winner === "DRAW" ? "D" : m.winner === mine ? "W" : "L";
+        if (m.rated === 1) {
+          if (result === "W") rankedWins += 1;
+          else if (result === "L") rankedLosses += 1;
+        }
+        rows.push({ matchId: m.id, foe, result, mode: matchMode(m), rated: m.rated, ticks: m.ticks, at: m.created_at });
+      }
+      return { rows, rankedWins, rankedLosses };
+    }
     const pubMatch = /^\/v1\/leaders\/[^/]+\/public$/.exec(url.pathname);
     if (request.method === "GET" && pubMatch) {
       const leader = await env.DB.prepare("SELECT * FROM leaders WHERE handle = ?").bind(decodeURIComponent(pubMatch[0].split("/")[3])).first<Record<string, unknown>>();
@@ -973,11 +997,14 @@ export default {
       }
       const rank = rankFor(leader.ap as number);
       const equipped = JSON.parse((leader.equipped_json as string) ?? "{}") as Record<string, string | null>;
+      const hist = await publicHistoryD1(agent);
       return json({
         handle: leader.handle,
         ap: leader.ap,
         tier: rank.tier,
         division: rank.division,
+        stats: { wins, losses, winRate: wins + losses ? wins / (wins + losses) : 0, rankedWins: hist.rankedWins, rankedLosses: hist.rankedLosses },
+        history: hist.rows,
         agent: agent ? {
           name: agent.name,
           portraitUrl: agent.portrait_url,
@@ -1153,8 +1180,7 @@ export default {
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(me.id as string).first<Record<string, unknown>>();
       const auto = await autoTickD1(env, me.id as string, Date.now());
       const st = await energyFor(env, me.id as string);
-      const energy = energyView(st, Date.now());
-      return json({ leader: me, agent, energy, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran }, handleSet: (me.handle_set as number) === 1 }, 200);
+      return json({ leader: me, agent, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran }, handleSet: (me.handle_set as number) === 1 }, 200);
     }
     if (request.method === "GET" && url.pathname === "/v1/me/export") {
       if (limited(authHits, `gdpr:${me.id as string}`, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);

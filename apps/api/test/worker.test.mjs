@@ -173,7 +173,7 @@ describe("worker writes", () => {
     const me = await entry.fetch(new Request("http://local/v1/me", {
       headers: { authorization: `Bearer ${sa.json.token}` },
     }), wenv);
-    assert.equal((await me.json()).energy.energy, 9);
+    assert.equal(JSON.parse(db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get(sa.json.leaderId).autobattle_json).attackAt.length, 1);
     const replay = await entry.fetch(new Request("http://local/v1/matches/wr-1/replay"), wenv);
     assert.equal(replay.status, 200);
     assert.equal((await replay.json()).identical, true);
@@ -193,7 +193,7 @@ describe("worker writes", () => {
       headers: { authorization: `Bearer ${sa.json.token}` },
     }), wenv)).json();
     assert.equal(meAfter.leader.ap, meBefore.leader.ap);
-    assert.equal(meAfter.energy.energy, meBefore.energy.energy - 1);
+    assert.equal(JSON.parse(db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get(sa.json.leaderId).autobattle_json).attackAt.length, 2);
     const badMode = await call("POST", "/v1/matchmaking/request", { versionId: va.json.versionId, mode: "arena" }, sa.json.token);
     assert.equal(badMode.status, 400);
     const foreign = await entry.fetch(new Request(`http://local/v1/matchmaking/${q.json.id}`, {
@@ -369,13 +369,13 @@ describe("worker writes", () => {
     const me = await entry.fetch(new Request("http://local/v1/me", {
       headers: { authorization: "Bearer t7" },
     }), wenv);
-    assert.equal((await me.json()).energy.energy, 9);
+    assert.equal(JSON.parse(db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get("l7").autobattle_json).attackAt.length, 1);
     const cancelOther = await post(`/v1/matchmaking/${other.json.id}/cancel`, {});
     assert.equal(cancelOther.status, 200);
     const full = await entry.fetch(new Request("http://local/v1/me", {
       headers: { authorization: "Bearer t7" },
     }), wenv);
-    assert.equal((await full.json()).energy.energy, 10);
+    assert.equal(JSON.parse(db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get("l7").autobattle_json).attackAt.length, 0);
   });
 
   it("settles a ranked ticket the moment a human foe stands by", async () => {
@@ -430,7 +430,7 @@ describe("worker writes", () => {
     assert.equal(opt.json.matches.length, 3);
     const me = await call("GET", "/v1/me");
     assert.equal(me.json.auto.optIn, true);
-    assert.equal(me.json.auto.ran, 7);
+    assert.equal(me.json.auto.ran, 10);
     const pause = await call("POST", "/v1/autobattle/pause");
     assert.equal(pause.json.state, "PAUSED_MANUAL");
     const before = await call("GET", "/v1/autobattle/digest");

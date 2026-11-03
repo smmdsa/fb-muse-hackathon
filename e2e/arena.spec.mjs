@@ -75,7 +75,7 @@ test("arena lobby loads and a live queue settles into battle", async ({ browser,
     const page = await context.newPage();
     await page.goto(`${base}/arena.html`);
     await expect(page.locator("#queue-normal")).toBeVisible();
-    await expect(page.locator("#qm-energy")).toContainText("energy 10/10");
+    await expect(page.locator("#qm-free")).toContainText("free fights");
     // Bob waits first, so Alice pairs at once instead of 30 seconds.
     const wait = await request.post(`${base}/v1/matchmaking/request`, {
       headers: { authorization: `Bearer ${users.bob.token}` },
@@ -89,7 +89,7 @@ test("arena lobby loads and a live queue settles into battle", async ({ browser,
     const size = await page.locator("#arena").evaluate((c) => ({ w: c.width, h: c.height }));
     expect(size).toEqual({ w: 960, h: 640 });
     await expect(page.locator("#feed")).toContainText("Round 1 starts", { timeout: 20_000 });
-    await expect(page.locator("#qm-energy")).toContainText("energy 9/10", { timeout: 20_000 });
+    await expect(page.locator("#qm-free")).toBeVisible({ timeout: 20_000 });
   } finally {
     await context.close();
   }

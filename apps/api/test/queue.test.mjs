@@ -103,7 +103,7 @@ describe("matchmaking queue", () => {
     assert.equal(q.status, "queued");
     assert.equal(q.settle_at, t0 + BOT_SETTLE_MS);
     const me = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(solo.id);
-    assert.equal(JSON.parse(me.autobattle_json).stamina, 9);
+    assert.equal(JSON.parse(me.autobattle_json).attackAt.length, 1);
     const early = readTicket(store, { ticketId: q.id, leaderId: solo.id }, t0 + 10_000);
     assert.equal(early.status, "queued");
     assert.equal(early.match, undefined);
@@ -150,10 +150,10 @@ describe("matchmaking queue", () => {
     const late = readTicket(alone, { ticketId: q.id, leaderId: "l-alone" }, t0 + 10 * 60_000 + 1);
     assert.equal(late.status, "expired");
     const kept = alone.db.prepare("SELECT * FROM leaders WHERE id = ?").get("l-alone");
-    assert.equal(JSON.parse(kept.autobattle_json).stamina, 10);
+    assert.equal(JSON.parse(kept.autobattle_json).attackAt.length, 0);
   });
 
-  it("cancels a queued ticket and returns the charge", () => {
+  it("cancels a queued ticket and frees the daily slot", () => {
     const arena = openStore(":memory:");
     const t0 = 980_000;
     arena.db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l-quit", "quitter", "t-quit");
@@ -165,20 +165,20 @@ describe("matchmaking queue", () => {
     const q = requestMatch(arena, { leaderId: "l-quit", versionId: "v-quit", mode: "ranked" }, t0);
     assert.equal(q.status, "queued");
     const spent = arena.db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get("l-quit");
-    assert.equal(JSON.parse(spent.autobattle_json).stamina, 9);
+    assert.equal(JSON.parse(spent.autobattle_json).attackAt.length, 1);
     const out = cancelTicket(arena, { ticketId: q.id, leaderId: "l-quit" }, t0 + 1);
     assert.equal(out.status, "canceled");
     const back = arena.db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get("l-quit");
-    assert.equal(JSON.parse(back.autobattle_json).stamina, 10);
+    assert.equal(JSON.parse(back.autobattle_json).attackAt.length, 0);
     assert.throws(() => cancelTicket(arena, { ticketId: q.id, leaderId: "l-quit" }, t0 + 2), /nothing to cancel/);
     arena.close();
   });
 
-  it("denies the queue at zero energy", async () => {
+  it("denies the queue past the daily cap", async () => {
     const t0 = 4_000_000;
     const c = await leader("spent", "hold the center patiently");
     installVersion(store, { leaderId: c.id, agentId: c.agentId, versionId: c.version });
     for (let i = 0; i < 10; i += 1) spendEnergy(store, c.id, t0 + i);
-    assert.throws(() => requestMatch(store, { leaderId: c.id, versionId: c.version, mode: "casual" }, t0), /energy empty/);
+    assert.throws(() => requestMatch(store, { leaderId: c.id, versionId: c.version, mode: "casual" }, t0), /daily match cap reached/);
   });
 });

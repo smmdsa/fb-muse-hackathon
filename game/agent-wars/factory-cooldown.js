@@ -42,7 +42,7 @@
     else if (mode === 'offline') message.textContent = 'AI FACTORY · Status unreachable — the server decides on submit. Retrying…';
     else if (mode === 'signed-out') message.textContent = 'AI FACTORY · Sign in to build.';
     else if (mode === 'checking') message.textContent = 'AI FACTORY · Checking the assembly bay…';
-    else if (mode === 'cooling') message.textContent = `AI FACTORY · Assembly bay cooling down. Next build in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}.`;
+    else if (mode === 'cooling') message.textContent = `AI FACTORY · Assembly bay cooling down. Next build in ${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}.`;
     else message.textContent = 'AI FACTORY · Assembly bay ready.';
   }
 

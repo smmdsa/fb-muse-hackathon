@@ -3,7 +3,6 @@
 
 const arenaStatus = document.getElementById("qm-status");
 const arenaResult = document.getElementById("qm-result");
-const arenaEnergy = document.getElementById("qm-energy");
 const arenaCancel = document.getElementById("qm-cancel");
 const queueNormal = document.getElementById("queue-normal");
 const queueRanked = document.getElementById("queue-ranked");
@@ -79,7 +78,6 @@ async function arenaBoot() {
   const sess = await window.AWSession.refreshIdentity();
   markMode(arenaMode);
   if (!sess.ok) {
-    arenaEnergy.textContent = "energy —";
     setText("qm-pick", "Sign in with your wallet. Then queue.");
     return;
   }
@@ -87,7 +85,6 @@ async function arenaBoot() {
   arenaVersion = (me.data.agent && me.data.agent.active_version_id) || "";
   const hasAgent = Boolean(me.data.agent);
   const hasChip = Boolean(arenaVersion);
-  arenaEnergy.textContent = `energy ${me.data.energy.energy}/${me.data.energy.energyMax}`;
   if (!hasAgent) {
     setText("qm-pick", "Breed an agent in the barracks first.");
     return;
