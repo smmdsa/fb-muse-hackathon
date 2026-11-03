@@ -2,9 +2,10 @@
 
 const $ = (id) => document.getElementById(id);
 const TOKEN_KEY = "aw_token";
-const HANDLE_KEY = "aw_handle";
+
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
+let authed = token !== "";
 let agentId = "";
 let latestVersion = "";
 let factoryFormOpen = false;
@@ -57,7 +58,7 @@ function updateFactoryGate() {
     msg.textContent = "Building your request…";
   } else if (cooling) {
     const s = st.seconds;
-    msg.textContent = `Assembly bay cooling down. Next build in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}.`;
+    msg.textContent = `Assembly bay cooling down. Next build in ${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}.`;
   } else {
     msg.textContent = "One build per 24 hours. Think your chip through — the next bay opens tomorrow.";
   }
@@ -85,7 +86,7 @@ function versionTitle(v) {
 }
 
 async function refresh() {
-  if (!token || !agentId) return;
+  if (!authed || !agentId) return;
   const r = await call("GET", `/v1/agents/${agentId}/dashboard`);
   if (r.status !== 200) {
     $("train-msg").textContent = `Dashboard unavailable: ${r.data.error || r.status}. Retry in a bit.`;
@@ -346,13 +347,14 @@ $("fight-btn").addEventListener("click", async () => {
 });
 
 async function boot() {
-  const handle = localStorage.getItem(HANDLE_KEY) || "";
-  if (handle) $("handle").value = handle;
   const sess = await window.AWSession.refreshIdentity();
+  show($("session-loading"), false);
   if (!sess.ok) {
     if (token) { token = ""; localStorage.removeItem(TOKEN_KEY); }
+    show($("login-card"), true);
     return;
   }
+  authed = true;
   const me = { status: 200, data: sess.me };
   show($("login-card"), false);
   if (!me.data.agent) {
@@ -372,22 +374,5 @@ async function boot() {
   await refresh();
 }
 
-$("login-btn").addEventListener("click", async () => {
-  const handle = $("handle").value.trim();
-  if (!handle) {
-    $("login-msg").textContent = "Type a handle first.";
-    return;
-  }
-  $("login-msg").textContent = "Signing in…";
-  const r = await call("POST", "/v1/auth/session", { handle });
-  if (r.status !== 200) {
-    $("login-msg").textContent = "Sign in failed. Run the API and retry.";
-    return;
-  }
-  token = r.data.token;
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(HANDLE_KEY, handle);
-  await boot();
-});
 
 boot();

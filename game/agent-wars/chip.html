@@ -22,7 +22,7 @@
 <a href="./public.html"><b>⬡</b> RANKS</a>
 <a href="./tournaments.html"><b>⚑</b> CUP</a>
 <a href="./armory.html"><b>◈</b> ARMORY</a>
-<a href="./auth.html"><b>◍</b> WALLET</a>
+<a href="./auth.html"><b>◍</b> ACCOUNT</a>
 </nav>
 <div class="season"><span class="micro">Season 01</span><strong>The Forge</strong><small>Your strategy starts here.</small></div>
 </aside>
@@ -39,14 +39,16 @@
 <span class="pill" id="pill-who">signed out</span>
 </div>
 </header>
-<section class="panel" id="login-card">
-<h2>Leader</h2>
-<div class="row">
-<label for="handle">Handle</label>
-<input id="handle" name="handle" value="" maxlength="40" placeholder="your callsign" />
-<button id="login-btn" class="btn-primary" type="button">Sign in</button>
+<section class="panel" id="session-loading">
+<h2>Loading�</h2>
+<p class="sub">Getting user data.</p>
+</section>
+<section class="panel" id="login-card" hidden>
+<h2>Sign in to build</h2>
+<p class="sub">Chip Lab needs an account. Sign in with your wallet � one free signature, no password.</p>
+<div class="next-actions">
+<a class="btn-primary" href="./auth.html?next=chip.html">Sign in</a>
 </div>
-<p class="sub" id="login-msg">One handle owns one hero. New leaders start at 500 AP in CIRCUIT I.</p>
 </section>
 <section class="panel" id="train-card" hidden>
 <h2>01 / Battle plan</h2>
