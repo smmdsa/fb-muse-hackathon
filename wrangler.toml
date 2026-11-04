@@ -15,3 +15,6 @@ migrations_dir = "migrations"
 [assets]
 directory = "./game/agent-wars"
 binding = "ASSETS"
+
+[triggers]
+crons = ["*/5 * * * *"]

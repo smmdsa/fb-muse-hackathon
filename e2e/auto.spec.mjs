@@ -73,6 +73,66 @@ test("start swaps the mode section to a starting line", async ({ browser }) => {
   }
 });
 
+test("auto deeplink shows matchmaking loading before the session resolves", async ({ browser }) => {
+  const srv = await startE2EServer();
+  const users = seedE2E(srv.store);
+  const ctx = await browser.newContext();
+  await loginAs(ctx, users.alice);
+  const page = await ctx.newPage();
+  const bad = [];
+  page.on("pageerror", (e) => bad.push(String(e).slice(0, 160)));
+  try {
+    await page.route("**/v1/me", async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+    await page.goto(`${srv.url}/arena.html?auto=ranked`);
+    await expect(page.locator("#lobby-view")).toBeHidden();
+    await expect(page.locator("#auto-queue")).toBeVisible();
+    await expect(page.locator("#auto-queue-text")).toContainText("Contacting matchmaking");
+    await expect(page.locator("#auto-banner")).toContainText("RANKED MODE");
+    await expect(page.locator("#auto-queue-text")).toContainText("Waiting for opponent", { timeout: 15000 });
+    expect(bad).toEqual([]);
+  } finally {
+    await ctx.close();
+    await srv.close();
+  }
+});
+
+test("arena resumes a live lease without the deeplink", async ({ browser, request }) => {
+  const srv = await startE2EServer();
+  const users = seedE2E(srv.store);
+  const ctx = await browser.newContext();
+  await loginAs(ctx, users.alice);
+  const page = await ctx.newPage();
+  const bad = [];
+  page.on("pageerror", (e) => bad.push(String(e).slice(0, 160)));
+  try {
+    const opt = await request.post(`${srv.url}/v1/autobattle/opt-in`, {
+      headers: { authorization: `Bearer ${users.alice.token}` },
+      data: { mode: "ranked" },
+    });
+    expect(opt.status()).toBe(200);
+    const q = await request.post(`${srv.url}/v1/matchmaking/request`, {
+      headers: { authorization: `Bearer ${users.alice.token}` },
+      data: { versionId: users.alice.versionId, mode: "ranked" },
+    });
+    expect(q.status()).toBe(201);
+    await page.goto(`${srv.url}/arena.html`);
+    await expect(page.locator("#lobby-view")).toBeHidden({ timeout: 15000 });
+    await expect(page.locator("#battle-view")).toBeVisible();
+    await expect(page.locator("#auto-banner")).toContainText("RANKED MODE");
+    await expect(page.locator("#auto-queue-text")).toContainText("Waiting for opponent");
+    await page.click("#auto-queue-lobby");
+    await expect(page.locator("#lobby-view")).toBeVisible();
+    await expect(page.locator("#auto-banner")).toBeHidden();
+    expect(bad).toEqual([]);
+  } finally {
+    await ctx.close();
+    await srv.close();
+  }
+});
+
 test("endcard starts the 10s cooldown and pause halts requeue", async ({ browser, request }) => {
   const srv = await startE2EServer();
   const users = seedE2E(srv.store);

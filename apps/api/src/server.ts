@@ -383,10 +383,11 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         return;
       }
       if (req.method === "GET" && url.pathname === "/v1/me") {
-        const auto = autobattleTick(ctx.store, me.id as string);
+        // Reads never fight: the scheduler accrues background bouts, so
+        // this read stays at a few queries and every page loads fast.
         const agent = ctx.store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(me.id as string);
         const st = energyFor(ctx.store, me.id as string);
-        send(res, 200, { leader: me, agent, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran }, handleSet: (me.handle_set as number) === 1 });
+        send(res, 200, { leader: me, agent, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: 0 }, handleSet: (me.handle_set as number) === 1 });
         return;
       }
       if (req.method === "GET" && url.pathname === "/v1/me/export") {

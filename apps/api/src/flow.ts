@@ -17,7 +17,7 @@ import type { Championship } from "@agent-wars/tournaments";
 import { CATALOG } from "@agent-wars/economy";
 import { pickBot } from "@agent-wars/battle-core";
 import { MAX_DEFENSE_PER_DAY, recordDefense } from "@agent-wars/autobattle";
-import { pickOpponent } from "@agent-wars/matchmaker";
+import { PAIR_WINDOW_MS, pickOpponent } from "@agent-wars/matchmaker";
 import type { Candidate, History } from "@agent-wars/matchmaker";
 import type { Store } from "./store.ts";
 import { mintId } from "./store.ts";
@@ -580,33 +580,29 @@ export function findHumanOpponent(
   leaderId: string,
   now: number,
 ): { leaderId: string; versionId: string; ap: number } | null {
-  const me = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown> | null;
+  const me = store.db.prepare("SELECT rating_milli FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown> | null;
   if (!me) return null;
+  // Pair caps only count the last week, so the history scan stops there.
   const rows = store.db.prepare(
     `SELECT m.created_at AS at, aa.leader_id AS a, ab.leader_id AS b FROM matches m
      JOIN versions va ON va.id = m.a_version JOIN agents aa ON aa.id = va.agent_id
      JOIN versions vb ON vb.id = m.b_version JOIN agents ab ON ab.id = vb.agent_id
-     WHERE m.rated = 1`
-  ).all() as Record<string, unknown>[];
+     WHERE m.rated = 1 AND m.created_at > ? ORDER BY m.created_at DESC`
+  ).all(now - PAIR_WINDOW_MS) as Record<string, unknown>[];
   const history: History = { marks: rows.map((m) => ({ a: m.a as string, b: m.b as string, at: m.at as number })) };
-  const seeker = store.db.prepare("SELECT rating_milli FROM leaders WHERE id = ?").get(leaderId) as Record<string, unknown>;
-  const seekers: Candidate = {
-    leaderId,
-    ratingMilli: seeker.rating_milli as number,
-    optIn: true,
-    published: true,
-    leaseExpiresAt: now + 1,
-  };
-  const agents = store.db.prepare("SELECT * FROM agents WHERE active_version_id IS NOT NULL").all() as Record<string, unknown>[];
+  // One joined read builds the whole pool: no query per leader.
+  const cands = store.db.prepare(
+    `SELECT l.id, l.rating_milli, l.ap, l.autobattle_json, a.active_version_id FROM agents a
+     JOIN leaders l ON l.id = a.leader_id WHERE a.active_version_id IS NOT NULL AND l.id != ?`
+  ).all(leaderId) as Record<string, unknown>[];
   const pool: Candidate[] = [];
-  for (const a of agents) {
-    const other = a.leader_id as string;
-    if (other === leaderId) continue;
-    const row = store.db.prepare("SELECT * FROM leaders WHERE id = ?").get(other) as Record<string, unknown> | null;
-    if (!row) continue;
+  const gear = new Map<string, { versionId: string; ap: number }>();
+  for (const row of cands) {
+    const other = row.id as string;
     const st: Record<string, unknown> = row.autobattle_json ? JSON.parse(row.autobattle_json as string) : {};
     const defenses = Array.isArray(st.defenseAt) ? (st.defenseAt as number[]).length : 0;
     if (defenses >= MAX_DEFENSE_PER_DAY) continue;
+    gear.set(other, { versionId: row.active_version_id as string, ap: row.ap as number });
     pool.push({
       leaderId: other,
       ratingMilli: row.rating_milli as number,
@@ -615,14 +611,19 @@ export function findHumanOpponent(
       leaseExpiresAt: typeof st.leaseExpiresAt === "number" ? (st.leaseExpiresAt as number) : null,
     });
   }
-  const foe = pickOpponent(history, seekers, pool, now);
+  const foe = pickOpponent(history, {
+    leaderId,
+    ratingMilli: me.rating_milli as number,
+    optIn: true,
+    published: true,
+    leaseExpiresAt: now + 1,
+  }, pool, now);
   if (!foe) return null;
   // The picked foe takes one defense stamp. Caps turn later foes away.
   const stamped = recordDefense(energyFor(store, foe.leaderId, now), now);
   store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(stamped.status), foe.leaderId);
-  const picked = store.db.prepare("SELECT ap FROM leaders WHERE id = ?").get(foe.leaderId) as Record<string, unknown>;
-  const agent = store.db.prepare("SELECT active_version_id FROM agents WHERE leader_id = ?").get(foe.leaderId) as Record<string, unknown>;
-  return { leaderId: foe.leaderId, versionId: agent.active_version_id as string, ap: picked.ap as number };
+  const g = gear.get(foe.leaderId) as { versionId: string; ap: number };
+  return { leaderId: foe.leaderId, versionId: g.versionId, ap: g.ap };
 }
 
 // Casual unrated fight: no AP moves, AC still pays the human side.
@@ -909,8 +910,8 @@ export function autobattleTick(
 }
 
 // The stop reason in plain words. Reads never change the lease.
-export function autobattleStop(store: Store, leaderId: string, now = Date.now()): string {
-  const st = energyFor(store, leaderId, now);
+export function autobattleStop(store: Store, leaderId: string, now = Date.now(), known?: Status): string {
+  const st = known ?? energyFor(store, leaderId, now);
   if (st.state === "PAUSED_MANUAL" || (st.optIn === false && st.leaseExpiresAt !== null)) return "paused";
   if (!st.optIn) return "opted out";
   if (st.state === "IDLE_EXPIRED" || (st.leaseExpiresAt !== null && now >= st.leaseExpiresAt)) return "lease expired";
@@ -946,7 +947,7 @@ export function autobattleDigest(store: Store, leaderId: string, now = Date.now(
       used: st.defenseAt.filter((t) => now - t < DAY_MS).length,
       max: MAX_DEFENSE_PER_DAY,
     },
-    stopReason: autobattleStop(store, leaderId, now),
+    stopReason: autobattleStop(store, leaderId, now, st),
     recent: rows.map((m) => {
       const mine = owned.has(m.a_version as string) ? "a" : "b";
       return {
