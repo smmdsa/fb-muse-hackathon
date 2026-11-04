@@ -15,6 +15,9 @@ let arenaTicket = "";
 let arenaTimer = 0;
 let arenaClock = 0;
 let arenaClockTimer = 0;
+let autoMode = "";
+let autoCooldownTick = 0;
+let autoEndObserver = null;
 
 const ARENA_REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const FADE_MS = ARENA_REDUCED ? 0 : 450;
@@ -173,10 +176,12 @@ async function playSettled(match) {
   const r = await arenaCall("GET", `/v1/matches/${match.id}/replay`);
   if (r.status !== 200 || !r.data.replay || (!r.data.replay.frames && !r.data.replay.rounds)) {
     arenaSay("Replay unavailable — the result stands.");
+    if (autoMode) startCooldown();
     return;
   }
   if (r.data.replay.checksum !== match.checksum) {
     arenaSay("Replay checksum differs — the result stands.");
+    if (autoMode) startCooldown();
     return;
   }
   if (r.data.replay.version === 3 && r.data.replay.rounds) {
@@ -209,12 +214,18 @@ function onSettled(m, instant) {
   queueBusy(false);
   clockStop();
   showBattle();
+  paintAutoBanner();
   playSettled(m);
   arenaBoot();
 }
 
 async function pollTicket(ticketId, left, fails = 0) {
   if (left <= 0) {
+    if (autoMode) {
+      arenaSay("AUTO BATTLE ON — still waiting for a foe.");
+      arenaTimer = setTimeout(() => pollTicket(ticketId, 40, 0), 5000);
+      return;
+    }
     arenaSay("Still waiting. The ticket stays open — check back soon.");
     arenaTicket = "";
     queueBusy(false);
@@ -241,7 +252,12 @@ async function pollTicket(ticketId, left, fails = 0) {
     return;
   }
   if (r.data.status === "expired") {
-    arenaSay("No humans queued in ten minutes. Ticket expired — the charge is refunded.");
+    if (autoMode) {
+      arenaSay("Ticket expired — auto battle requeues.");
+      await requeueAuto();
+      return;
+    }
+    arenaSay("No humans queued in ten minutes. Ticket expired — the slot is freed.");
     arenaTicket = "";
     queueBusy(false);
     clockStop();
@@ -249,7 +265,8 @@ async function pollTicket(ticketId, left, fails = 0) {
     return;
   }
   if (r.data.status === "canceled") {
-    arenaSay("Ticket canceled — the charge is refunded. Queue again when ready.");
+    haltAuto();
+    arenaSay("Ticket canceled. The slot is freed. Queue again when ready.");
     arenaTicket = "";
     queueBusy(false);
     clockStop();
@@ -258,14 +275,15 @@ async function pollTicket(ticketId, left, fails = 0) {
   }
   if (arenaMode === "casual" && r.data.settle_at) {
     const secs = Math.max(0, Math.ceil((r.data.settle_at - Date.now()) / 1000));
-    arenaSay(`Waiting for a same-ELO foe… sparring bot in ${secs}s. Cancel keeps your energy.`);
+    arenaSay(`${autoMode ? "AUTO BATTLE ON — " : ""}Waiting for a same-ELO foe… sparring bot in ${secs}s. Cancel frees the slot.`);
   } else {
-    arenaSay("Waiting for a same-ELO human… Cancel keeps your energy.");
+    arenaSay(`${autoMode ? "AUTO BATTLE ON — " : ""}Waiting for a same-ELO human… Cancel frees the slot.`);
   }
   arenaTimer = setTimeout(() => pollTicket(ticketId, left - 1, 0), 5000);
 }
 
-async function queue(mode) {
+async function queue(mode, viaAuto = false) {
+  if (!viaAuto) haltAuto();
   clearTimeout(arenaTimer);
   arenaResult.hidden = true;
   arenaMode = mode;
@@ -281,11 +299,16 @@ async function queue(mode) {
     return;
   }
   queueBusy(true);
-  arenaSay("Queueing… one energy.");
+  arenaSay(viaAuto ? `AUTO BATTLE ON — queueing ${mode === "ranked" ? "RANKED" : "NORMAL"}.` : "Queueing…");
+  if (viaAuto) paintAutoBanner();
   clockStart();
   const r = await arenaCall("POST", "/v1/matchmaking/request", { versionId: arenaVersion, mode: arenaMode });
   if (r.status !== 201 && r.status !== 200) {
-    arenaSay(`Queue refused: ${r.data.error || r.status}.`);
+    if (viaAuto) {
+      haltAuto(`Auto battle stopped: ${r.data.error || r.status}.`);
+    } else {
+      arenaSay(`Queue refused: ${r.data.error || r.status}.`);
+    }
     queueBusy(false);
     clockStop();
     return;
@@ -307,12 +330,13 @@ if (arenaCancel) {
   arenaCancel.addEventListener("click", async () => {
     if (!arenaTicket) return;
     clearTimeout(arenaTimer);
+    haltAuto();
     const r = await arenaCall("POST", `/v1/matchmaking/${arenaTicket}/cancel`);
     arenaTicket = "";
     queueBusy(false);
     clockStop();
     if (r.status === 200) {
-      arenaSay("Ticket canceled — the charge is refunded. Queue again when ready.");
+      arenaSay("Ticket canceled. The slot is freed. Queue again when ready.");
       arenaBoot();
     } else {
       arenaSay(`Cancel failed: ${r.data.error || r.status}.`);
@@ -343,6 +367,7 @@ if (endBtn) {
   const fresh = endBtn.cloneNode(true);
   endBtn.replaceWith(fresh);
   fresh.addEventListener("click", () => {
+    haltAuto();
     hideArenaOverlay();
     showLobby();
     arenaBoot();
@@ -357,8 +382,102 @@ for (const id of ["start-btn", "restart-btn"]) {
   });
 }
 
+// Auto battle loop. The barracks deeplinks here with ?auto=<mode>.
+// Tickets settle, the replay plays, the endcard fires a 10s cooldown,
+// then the loop requeues while the 24h lease stays live.
+function autoBannerText(mode) {
+  return `${mode === "ranked" ? "RANKED" : "NORMAL"} MODE · AUTO BATTLE ON`;
+}
+
+function paintAutoBanner(extra) {
+  const b = document.getElementById("auto-banner");
+  if (!b) return;
+  if (!autoMode) {
+    b.hidden = true;
+    return;
+  }
+  b.hidden = false;
+  b.textContent = extra || autoBannerText(autoMode);
+}
+
+function haltAuto(msg) {
+  autoMode = "";
+  clearInterval(autoCooldownTick);
+  clearTimeout(arenaTimer);
+  paintAutoBanner();
+  if (msg) arenaSay(msg);
+}
+
+async function requeueAuto() {
+  if (!autoMode) return;
+  const d = await arenaCall("GET", "/v1/autobattle/digest");
+  const live = d.status === 200 && d.data.optIn && d.data.state !== "PAUSED_MANUAL"
+    && (!d.data.leaseExpiresAt || Date.now() < d.data.leaseExpiresAt);
+  if (!live) {
+    haltAuto("Auto battle stopped — lease paused or expired.");
+    showLobby();
+    await arenaBoot();
+    return;
+  }
+  showLobby();
+  await queue(autoMode, true);
+}
+
+function startCooldown() {
+  if (!autoMode) return;
+  let left = 10;
+  const tick = () => {
+    if (!autoMode) return;
+    paintAutoBanner(`${autoBannerText(autoMode)} · NEXT QUEUE IN ${left}`);
+    arenaSay(`Result stands. Next queue in ${left}s.`);
+  };
+  tick();
+  clearInterval(autoCooldownTick);
+  autoCooldownTick = setInterval(() => {
+    left -= 1;
+    if (!autoMode) {
+      clearInterval(autoCooldownTick);
+      return;
+    }
+    if (left <= 0) {
+      clearInterval(autoCooldownTick);
+      requeueAuto();
+      return;
+    }
+    tick();
+  }, 1000);
+}
+
+function watchEndcard() {
+  const ec = document.getElementById("endcard");
+  if (!ec || autoEndObserver) return;
+  let wasHidden = ec.hidden;
+  autoEndObserver = new MutationObserver(() => {
+    const shown = !ec.hidden;
+    if (autoMode && shown && wasHidden) startCooldown();
+    wasHidden = !shown;
+  });
+  autoEndObserver.observe(ec, { attributes: true, attributeFilter: ["hidden"] });
+}
+
 markMode("casual");
 arenaBoot();
+
+// Deep link from the barracks: ?auto=casual|ranked starts the loop.
+(async function bootAutoParam() {
+  const params = new URLSearchParams(location.search);
+  const mode = params.get("auto");
+  if (mode !== "casual" && mode !== "ranked") return;
+  if (params.get("replay")) return;
+  const sess = await window.AWSession.loadMe();
+  if (!sess.ok) return;
+  await arenaBoot();
+  if (!arenaVersion) return;
+  autoMode = mode;
+  markMode(mode);
+  watchEndcard();
+  await queue(mode, true);
+})();
 
 // Deep link from history rows: ?replay=<matchId> plays it straight away.
 (async function bootReplayParam() {

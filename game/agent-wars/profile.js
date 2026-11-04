@@ -501,15 +501,18 @@ $("breed-btn").addEventListener("click", async () => {
   await refresh();
 });
 
-$("auto-opt").addEventListener("click", async () => {
-  $("auto-status").textContent = "Starting the 24h lease…";
+async function startAuto(mode) {
+  $("auto-status").textContent = "Starting the 24h lease...";
   const r = await call("POST", "/v1/autobattle/opt-in");
   if (r.status !== 200) {
     $("auto-status").textContent = `Start failed: ${r.data.error || r.status}.`;
     return;
   }
-  await refresh();
-});
+  location.href = `./arena.html?auto=${mode}`;
+}
+
+$("auto-opt").addEventListener("click", () => startAuto("casual"));
+$("auto-opt-ranked").addEventListener("click", () => startAuto("ranked"));
 
 $("auto-pause").addEventListener("click", async () => {
   await call("POST", "/v1/autobattle/pause");
