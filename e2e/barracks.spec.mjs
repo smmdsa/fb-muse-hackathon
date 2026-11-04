@@ -70,6 +70,43 @@ test("auto buttons toggle per running mode", async ({ browser, request }) => {
   }
 });
 
+test("stop clears the queue line and frees the slot", async ({ browser, request }) => {
+  const srv = await startE2EServer();
+  const users = seedE2E(srv.store);
+  const ctx = await browser.newContext();
+  await loginAs(ctx, users.alice);
+  const page = await ctx.newPage();
+  const bad = [];
+  page.on("pageerror", (e) => bad.push(String(e).slice(0, 160)));
+  try {
+    const opt = await request.post(`${srv.url}/v1/autobattle/opt-in`, {
+      headers: { authorization: `Bearer ${users.alice.token}` },
+      data: { mode: "ranked" },
+    });
+    expect(opt.status()).toBe(200);
+    const q = await request.post(`${srv.url}/v1/matchmaking/request`, {
+      headers: { authorization: `Bearer ${users.alice.token}` },
+      data: { versionId: users.alice.versionId, mode: "ranked" },
+    });
+    expect(q.status()).toBe(201);
+    await page.goto(`${srv.url}/profile.html`);
+    await expect(page.locator("#auto-live")).toContainText("IN QUEUE - RANKED", { timeout: 15000 });
+    await expect(page.locator("#auto-opt-ranked")).toHaveText("Stop auto-battle");
+    await page.click("#auto-opt-ranked");
+    await expect(page.locator("#auto-opt-ranked")).toHaveText("Start auto-battle", { timeout: 15000 });
+    await expect(page.locator("#auto-live")).toBeHidden();
+    const digest = await request.get(`${srv.url}/v1/autobattle/digest`, {
+      headers: { authorization: `Bearer ${users.alice.token}` },
+    });
+    expect(digest.ok()).toBe(true);
+    expect((await digest.json()).queue).toBe(null);
+    expect(bad).toEqual([]);
+  } finally {
+    await ctx.close();
+    await srv.close();
+  }
+});
+
 test("history splits normal and ranked tabs", async ({ browser, request }) => {
   const srv = await startE2EServer();
   const users = seedE2E(srv.store);

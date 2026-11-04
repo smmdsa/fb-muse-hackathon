@@ -132,6 +132,27 @@ describe("accounts", () => {
     }
   });
 
+  it("replays the same open ticket instead of a 409 dead end", async () => {
+    const solo = openStore(":memory:");
+    const soloCall = makeCaller(buildRouter({ store: solo }));
+    try {
+      const s = await soloCall("POST", "/v1/auth/session", { handle: "resumer" });
+      const a = await soloCall("POST", "/v1/agents", { name: "R", concept: "retries" }, s.json.token);
+      const v = await soloCall("POST", `/v1/agents/${a.json.agentId}/policies/compile`, { prompt: "hold the center patiently" }, s.json.token);
+      await soloCall("POST", `/v1/agents/${a.json.agentId}/policies/install`, { versionId: v.json.versionId }, s.json.token);
+      const first = await soloCall("POST", "/v1/matchmaking/request", { versionId: v.json.versionId, mode: "casual" }, s.json.token);
+      assert.equal(first.status, 201);
+      const retry = await soloCall("POST", "/v1/matchmaking/request", { versionId: v.json.versionId, mode: "casual" }, s.json.token);
+      assert.equal(retry.status, 200);
+      assert.equal(retry.json.id, first.json.id);
+      assert.equal(retry.json.status, "queued");
+      const rows = solo.db.prepare("SELECT id FROM tickets WHERE status = 'queued'").all();
+      assert.deepEqual(rows.map((r) => r.id), [first.json.id]);
+    } finally {
+      solo.close();
+    }
+  });
+
   it("opts in, digests, and pauses autobattle", async () => {
     const solo = openStore(":memory:");
     const soloCall = makeCaller(buildRouter({ store: solo }));

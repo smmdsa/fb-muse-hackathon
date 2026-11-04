@@ -369,6 +369,13 @@ async function pauseAutoD1(env: WorkerEnv, leaderId: string, now: number): Promi
   const cur = await energyFor(env, leaderId, now);
   const next = pause(cur);
   await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(next), leaderId).run();
+  // Stop frees the queue slot too: every open ticket cancels and
+  // refunds, so the digest never reports a queue behind a paused lease.
+  const open = await env.DB.prepare("SELECT id FROM tickets WHERE leader_id = ? AND status = 'queued'").bind(leaderId).all<{ id: string }>();
+  for (const t of open.results) {
+    await env.DB.prepare("UPDATE tickets SET status = 'canceled' WHERE id = ?").bind(t.id).run();
+    await refundEnergy(env, leaderId, now);
+  }
   return { state: next.state };
 }
 
@@ -845,9 +852,21 @@ async function requestMatchD1(
   if (!spent.ok) throw new Error(spent.reason ?? "energy empty");
   const id = mintId("t");
   const wait = input.mode === "casual" ? BOT_SETTLE_MS : RANKED_TICKET_MS;
-  await env.DB.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)").bind(
-    id, input.leaderId, input.versionId, input.mode, now, now + wait,
-  ).run();
+  // The partial unique index admits one queued row per leader and mode.
+  // A rival request that wins the insert race leaves its row behind,
+  // so the loser refunds its charge and resumes that row.
+  try {
+    await env.DB.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)").bind(
+      id, input.leaderId, input.versionId, input.mode, now, now + wait,
+    ).run();
+  } catch (err) {
+    const winner = await env.DB.prepare("SELECT * FROM tickets WHERE leader_id = ? AND mode = ? AND status = 'queued'").bind(input.leaderId, input.mode).first<Record<string, unknown>>();
+    if (winner && String((err as Error).message || "").includes("tickets.leader_id")) {
+      await refundEnergy(env, input.leaderId, now);
+      return winner;
+    }
+    throw err;
+  }
   const row = (await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(id).first<Record<string, unknown>>()) as Record<string, unknown>;
   const live = await findLiveTicketD1(env, { mode: input.mode, leaderId: input.leaderId }, now);
   if (live) return settlePairD1(env, row, live);
@@ -1500,6 +1519,12 @@ export default {
         const ticket = await requestMatchD1(env, { leaderId: me.id as string, versionId, mode }, Date.now());
         return json(await withMatchD1(env, ticket), 201);
       } catch (err) {
+        // A lost insert race still tracks the same row: the winner's
+        // ticket resumes with 200 instead of a 409 dead end.
+        if (String((err as Error).message || "").includes("ticket already open")) {
+          const again = await env.DB.prepare("SELECT * FROM tickets WHERE leader_id = ? AND mode = ? AND status = 'queued'").bind(me.id as string, mode).first<Record<string, unknown>>();
+          if (again) return json(await withMatchD1(env, again), 200);
+        }
         return json({ error: (err as Error).message }, 409);
       }
     }

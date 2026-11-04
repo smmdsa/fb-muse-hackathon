@@ -343,6 +343,7 @@ describe("worker writes", () => {
     db.exec(readFileSync(new URL("../../../migrations/0009_season_archives.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0012_match_mode.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../../migrations/0013_ai_cooldowns.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../../migrations/0016_ticket_single.sql", import.meta.url), "utf8"));
     db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l7", "solo7", "t7");
     db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a7", "l7", "v7");
     db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
@@ -380,7 +381,7 @@ describe("worker writes", () => {
 
   it("settles a ranked ticket the moment a human foe stands by", async () => {
     const db = new DatabaseSync(":memory:");
-    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0012_match_mode", "0013_ai_cooldowns"]) {
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0012_match_mode", "0013_ai_cooldowns", "0016_ticket_single"]) {
       db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
     }
     const policy = (id) => JSON.stringify({ schemaVersion: 1, agentVersionId: id, dna: { aggression: 80, evasion: 40, preferredDistance: 25, energyConservation: 50 }, rules: [{ id: "r", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true }] });
@@ -438,6 +439,37 @@ describe("worker writes", () => {
     assert.equal(before.json.leaseExpiresAt, after.json.leaseExpiresAt);
     assert.equal(after.json.stopReason, "paused");
     assert.equal(after.json.recent.length, 10);
+  });
+
+  it("stop cancels open tickets and clears the queue on D1", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0012_match_mode", "0013_ai_cooldowns", "0016_ticket_single"]) {
+      db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
+    }
+    db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l30", "stop30", "t30");
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a30", "l30", "v30");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v30", "a30", JSON.stringify({ schemaVersion: 1, agentVersionId: "v30", dna: { aggression: 80, evasion: 40, preferredDistance: 25, energyConservation: 50 }, rules: [{ id: "r", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true }] }), "shim", Date.now(),
+    );
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
+    const call = (method, path, body) => entry.fetch(new Request(`http://local${path}`, {
+      method,
+      headers: { "content-type": "application/json", authorization: "Bearer t30" },
+      body: body ? JSON.stringify(body) : undefined,
+    }), wenv).then(async (r) => ({ status: r.status, json: await r.json() }));
+    const opt = await call("POST", "/v1/autobattle/opt-in", { mode: "ranked" });
+    assert.equal(opt.status, 200);
+    const q = await call("POST", "/v1/matchmaking/request", { versionId: "v30", mode: "ranked" });
+    assert.equal(q.status, 201);
+    assert.equal(q.json.status, "queued");
+    const live = await call("GET", "/v1/autobattle/digest");
+    assert.equal(live.json.queue.mode, "ranked");
+    const pause = await call("POST", "/v1/autobattle/pause");
+    assert.equal(pause.json.state, "PAUSED_MANUAL");
+    assert.equal(db.prepare("SELECT status FROM tickets WHERE id = ?").get(q.json.id).status, "canceled");
+    const after = await call("GET", "/v1/autobattle/digest");
+    assert.equal(after.json.queue, null);
+    assert.equal(after.json.stopReason, "paused");
   });
 
   it("lists the cup and registers one hero", async () => {

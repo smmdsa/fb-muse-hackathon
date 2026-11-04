@@ -9,6 +9,7 @@ import {
   findHumanOpponent,
   installVersion,
   optInAutobattle,
+  pauseAutobattle,
   readTicket,
   requestMatch,
   spendEnergy,
@@ -180,5 +181,43 @@ describe("matchmaking queue", () => {
     installVersion(store, { leaderId: c.id, agentId: c.agentId, versionId: c.version });
     for (let i = 0; i < 10; i += 1) spendEnergy(store, c.id, t0 + i);
     assert.throws(() => requestMatch(store, { leaderId: c.id, versionId: c.version, mode: "casual" }, t0), /daily match cap reached/);
+  });
+
+  it("holds one queued row per mode at the database level", async () => {
+    const arena = openStore(":memory:");
+    const t0 = 5_000_000;
+    const idx = arena.db.prepare("SELECT name FROM sqlite_master WHERE name = 'tickets_open_single'").get();
+    assert.equal(idx.name, "tickets_open_single");
+    const d = await leader("raced", "rush them down up close", arena);
+    installVersion(arena, { leaderId: d.id, agentId: d.agentId, versionId: d.version });
+    const first = requestMatch(arena, { leaderId: d.id, versionId: d.version, mode: "casual" }, t0);
+    assert.equal(first.status, "queued");
+    assert.throws(() => arena.db.prepare(
+      "INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)",
+    ).run("t-race-loser", d.id, d.version, "casual", t0 + 1, t0 + 31001), /UNIQUE constraint failed: tickets\.leader_id/);
+    const rows = arena.db.prepare("SELECT id FROM tickets WHERE leader_id = ? AND mode = ? AND status = 'queued'").all(d.id, "casual");
+    assert.deepEqual(rows.map((r) => r.id), [first.id]);
+    arena.close();
+  });
+
+  it("stop cancels open tickets and clears the queue line", async () => {
+    const arena = openStore(":memory:");
+    const t0 = 6_000_000;
+    const d = await leader("stopper", "rush them down up close", arena);
+    installVersion(arena, { leaderId: d.id, agentId: d.agentId, versionId: d.version });
+    optInAutobattle(arena, d.id, t0, "ranked");
+    const q = requestMatch(arena, { leaderId: d.id, versionId: d.version, mode: "ranked" }, t0 + 1);
+    assert.equal(q.status, "queued");
+    assert.equal(autobattleDigest(arena, d.id, t0 + 2).queue.mode, "ranked");
+    const out = pauseAutobattle(arena, d.id, t0 + 3);
+    assert.equal(out.state, "PAUSED_MANUAL");
+    const row = arena.db.prepare("SELECT status FROM tickets WHERE id = ?").get(q.id);
+    assert.equal(row.status, "canceled");
+    const digest = autobattleDigest(arena, d.id, t0 + 4);
+    assert.equal(digest.queue, null);
+    assert.equal(digest.stopReason, "paused");
+    const back = arena.db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get(d.id);
+    assert.equal(JSON.parse(back.autobattle_json).attackAt.length, 0);
+    arena.close();
   });
 });

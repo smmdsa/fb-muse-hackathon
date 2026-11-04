@@ -782,9 +782,21 @@ export function requestMatch(
   if (!spent.ok) throw new Error((spent as { reason: string }).reason);
   const id = mintId("t");
   const wait = input.mode === "casual" ? BOT_SETTLE_MS : RANKED_TICKET_MS;
-  store.db.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)").run(
-    id, input.leaderId, input.versionId, input.mode, now, now + wait,
-  );
+  // The partial unique index admits one queued row per leader and mode.
+  // A rival request that wins the insert race leaves its row behind,
+  // so the loser refunds its charge and resumes that row.
+  try {
+    store.db.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)").run(
+      id, input.leaderId, input.versionId, input.mode, now, now + wait,
+    );
+  } catch (err) {
+    const winner = openTicket(store, { leaderId: input.leaderId, mode: input.mode });
+    if (winner && String((err as Error).message || "").includes("tickets.leader_id")) {
+      refundEnergy(store, input.leaderId, now);
+      return winner;
+    }
+    throw err;
+  }
   const row = store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(id) as Record<string, unknown>;
   const live = findLiveTicket(store, { mode: input.mode, leaderId: input.leaderId }, now);
   if (live) return settlePair(store, row, live);
@@ -841,6 +853,10 @@ export function pauseAutobattle(store: Store, leaderId: string, now = Date.now()
   const cur = energyFor(store, leaderId, now);
   const next = pause(cur);
   store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(next), leaderId);
+  // Stop frees the queue slot too: every open ticket cancels and
+  // refunds, so the digest never reports a queue behind a paused lease.
+  const open = store.db.prepare("SELECT id FROM tickets WHERE leader_id = ? AND status = 'queued'").all(leaderId) as { id: string }[];
+  for (const t of open) cancelTicket(store, { ticketId: t.id, leaderId }, now);
   return { state: next.state };
 }
 
