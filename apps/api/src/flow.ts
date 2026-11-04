@@ -828,10 +828,10 @@ export function readTicket(
 
 // Explicit opt-in only. Reads never call this function: the lease renews
 // on a button press, never on a visit.
-export function optInAutobattle(store: Store, leaderId: string, now = Date.now()): { leaseExpiresAt: number; state: string } {
+export function optInAutobattle(store: Store, leaderId: string, now = Date.now(), mode: "casual" | "ranked" = "casual"): { leaseExpiresAt: number; state: string } {
   const cur = energyFor(store, leaderId, now);
   if (!cur.published) throw new Error("install a published version first");
-  const next = activate({ ...cur, optIn: true }, now);
+  const next = activate({ ...cur, optIn: true }, now, mode);
   store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(next), leaderId);
   return { leaseExpiresAt: next.leaseExpiresAt as number, state: next.state };
 }
@@ -887,6 +887,13 @@ export function autobattleStop(store: Store, leaderId: string, now = Date.now())
 }
 
 // The return digest: lease, reason, and recent auto fights.
+// The open ticket, if the leader queues right now. Null otherwise.
+function queueStatus(store: Store, leaderId: string, now: number): Record<string, unknown> | null {
+  const t = store.db.prepare("SELECT mode, created_at FROM tickets WHERE leader_id = ? AND status = 'queued' ORDER BY created_at DESC LIMIT 1").get(leaderId) as { mode: string; created_at: number } | undefined;
+  if (!t) return null;
+  return { mode: t.mode, ageSec: Math.max(0, Math.floor((now - t.created_at) / 1000)) };
+}
+
 export function autobattleDigest(store: Store, leaderId: string, now = Date.now()): Record<string, unknown> {
   const st = energyFor(store, leaderId, now);
   const safe = leaderId.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -899,6 +906,8 @@ export function autobattleDigest(store: Store, leaderId: string, now = Date.now(
   );
   return {
     optIn: st.optIn,
+    autoMode: st.autoMode ?? null,
+    queue: queueStatus(store, leaderId, now),
     leaseExpiresAt: st.leaseExpiresAt,
     state: st.state,
     defense: {

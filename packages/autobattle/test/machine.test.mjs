@@ -50,6 +50,15 @@ describe("lease", () => {
     assert.equal(s.state, "IDLE_EXPIRED");
   });
 
+  it("stores the mode and keeps it past pause", () => {
+    let s = activate({ ...draft("leader-1", 0), published: true }, 0, "ranked");
+    assert.equal(s.autoMode, "ranked");
+    s = pause(s);
+    assert.equal(s.autoMode, "ranked");
+    s = activate(s, 1000);
+    assert.equal(s.autoMode, "casual");
+  });
+
   it("reactivation renews the lease", () => {
     let s = refresh(live(0), 30 * H);
     assert.equal(s.state, "IDLE_EXPIRED");

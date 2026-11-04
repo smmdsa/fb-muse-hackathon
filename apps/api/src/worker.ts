@@ -357,10 +357,10 @@ async function refundEnergy(env: WorkerEnv, leaderId: string, now = Date.now()):
 }
 
 // Explicit opt-in only. Reads never renew the lease.
-async function optInAutoD1(env: WorkerEnv, leaderId: string, now: number): Promise<{ leaseExpiresAt: number; state: string }> {
+async function optInAutoD1(env: WorkerEnv, leaderId: string, now: number, mode: "casual" | "ranked" = "casual"): Promise<{ leaseExpiresAt: number; state: string }> {
   const cur = await energyFor(env, leaderId, now);
   if (!cur.published) throw new Error("install a published version first");
-  const next = activate({ ...cur, optIn: true }, now);
+  const next = activate({ ...cur, optIn: true }, now, mode);
   await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(next), leaderId).run();
   return { leaseExpiresAt: next.leaseExpiresAt as number, state: next.state };
 }
@@ -418,6 +418,13 @@ async function autoStopD1(env: WorkerEnv, leaderId: string, now: number): Promis
 }
 
 // The return digest: lease, reason, and recent auto fights.
+// The open ticket, if the leader queues right now. Null otherwise.
+async function queueStatusD1(env: WorkerEnv, leaderId: string, now: number): Promise<Record<string, unknown> | null> {
+  const t = await env.DB.prepare("SELECT mode, created_at FROM tickets WHERE leader_id = ? AND status = 'queued' ORDER BY created_at DESC LIMIT 1").bind(leaderId).first<{ mode: string; created_at: number }>();
+  if (!t) return null;
+  return { mode: t.mode, ageSec: Math.max(0, Math.floor((now - t.created_at) / 1000)) };
+}
+
 async function autoDigestD1(env: WorkerEnv, leaderId: string, now: number): Promise<Record<string, unknown>> {
   const st = await energyFor(env, leaderId, now);
   const safe = leaderId.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -430,6 +437,8 @@ async function autoDigestD1(env: WorkerEnv, leaderId: string, now: number): Prom
   const owned = new Set(vrows.map((v) => v.id as string));
   return {
     optIn: st.optIn,
+    autoMode: st.autoMode ?? null,
+    queue: await queueStatusD1(env, leaderId, now),
     leaseExpiresAt: st.leaseExpiresAt,
     state: st.state,
     defense: {
@@ -1197,7 +1206,10 @@ export default {
     }
     if (request.method === "POST" && url.pathname === "/v1/autobattle/opt-in") {
       try {
-        const opt = await optInAutoD1(env, me.id as string, Date.now());
+        const optBody = (await readBody(request)) ?? {};
+      const optMode = optBody.mode ?? "casual";
+      if (optMode !== "casual" && optMode !== "ranked") return json({ error: "mode must be casual or ranked" }, 422);
+      const opt = await optInAutoD1(env, me.id as string, Date.now(), optMode);
         const tick = await autoTickD1(env, me.id as string, Date.now(), 3);
         return json({ ...opt, ran: tick.ran, matches: tick.matches }, 200);
       } catch (err) {
