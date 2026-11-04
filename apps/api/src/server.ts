@@ -9,7 +9,7 @@ import { BENCH_POLICY, BOT_PRESETS, buildReplay, fightPolicies, fightSeries } fr
 import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, battleConfigFor, board, buyItem, cancelTicket, compileAndPublish, claimFtue, createAgent, createTournament, dashboard, deleteVersion, energyFor, equipItem, forceDeleteVersion, ftueStatus, getLeader, getTournament, getVersion, installVersion, listTournaments, matchMode, MAX_PROMPT, openTicket, optInAutobattle, pauseAutobattle, publicProfile, readTicket, registerTournament, renameVersion, reportLeader, requestMatch, retryPortrait, runRanked, runTraining, seasonHistory, spendEnergy, settledResult, transitionTournament, validateRanked, withMatch } from "./flow.ts";
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
-import { hasKey } from "@agent-wars/ai-provider";
+import { hasKey, resolveModel } from "@agent-wars/ai-provider";
 import { buildLoginMessage, buildClearCookie, buildSetCookie, handleError, hashToken, isAddress, normalizeAddress, normalizeHandle, NONCE_TTL_MS, readSessionCookie, SESSION_TTL_MS, verifyWalletSignature } from "@agent-wars/auth";
 
 // Per-route sliding windows. Memory-only; a restart clears history.
@@ -314,6 +314,11 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         } catch (err) {
           send(res, 404, { error: (err as Error).message });
         }
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/v1/ai/provider") {
+        const status = (task: "compile" | "portrait") => ({ provider: hasKey(task, process.env) ? "meta" : "mock", model: resolveModel(task, process.env), keyed: hasKey(task, process.env) });
+        send(res, 200, { compile: status("compile"), portrait: status("portrait"), explainer: status("compile") });
         return;
       }
       if (req.method === "GET" && url.pathname === "/v1/leaderboard") {

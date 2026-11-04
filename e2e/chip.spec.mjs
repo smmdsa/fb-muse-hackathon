@@ -30,6 +30,7 @@ test("chip lab shows loading until the session resolves", async ({ browser }) =>
     await expect(page.locator("#train-card")).toBeHidden();
     await expect(page.locator("#train-card")).toBeVisible({ timeout: 15000 });
     await expect(page.locator("#session-loading")).toBeHidden();
+    await expect(page.locator("#model-badge")).toContainText("MOCK");
     expect(bad).toEqual([]);
   } finally {
     await ctx.close();

@@ -346,7 +346,27 @@ $("fight-btn").addEventListener("click", async () => {
   await refresh();
 });
 
+// The badge names the live compiler: Meta when keyed, mock else.
+async function paintModelBadge() {
+  const badge = $("model-badge");
+  if (!badge) return;
+  try {
+    const res = await fetch("/v1/ai/provider");
+    const data = await res.json();
+    const c = data && data.compile ? data.compile : null;
+    if (c && c.provider === "meta") {
+      badge.textContent = `META · ${c.model}`;
+      badge.classList.add("live");
+    } else {
+      badge.textContent = "MOCK · set META_SPARK_KEY for Meta";
+    }
+  } catch {
+    badge.textContent = "MODEL · unreachable";
+  }
+}
+
 async function boot() {
+  paintModelBadge();
   const sess = await window.AWSession.refreshIdentity();
   show($("session-loading"), false);
   if (!sess.ok) {

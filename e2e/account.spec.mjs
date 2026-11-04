@@ -52,6 +52,7 @@ test("legal footer links ride every key page and open the legal pages", async ({
     const pages = [
       "index.html", "profile.html", "arena.html", "chip.html", "armory.html",
       "tournaments.html", "auth.html", "public.html", "privacy.html", "terms.html",
+      "paper.html",
     ];
     for (const name of pages) {
       await page.goto(`${srv.url}/${name}`);
