@@ -1,6 +1,6 @@
 // Cloudflare Worker entry. Full API on D1: auth, publish, fights, replay.
 
-import { explainerFromEnv, hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv } from "@agent-wars/ai-provider";
+import { explainerFromEnv, hasKey, portraitFromEnv, portraitPromptFor, providerFromEnv, resolveModel } from "@agent-wars/ai-provider";
 import { activate, draft, finishMatch, pause, refresh, refundManualMatch, spendManualMatch, startOwnerMatch, DAY_MS } from "@agent-wars/autobattle";
 import type { Status } from "@agent-wars/autobattle";
 import { addEntry, createEvent, lock, register as registerEntry, reportGame, seedBracket, transition as transitionEvent } from "@agent-wars/tournaments";
@@ -934,6 +934,10 @@ export default {
     }
     if (request.method === "GET" && url.pathname === "/v1/health") {
       return json({ ok: true, worker: "agent-wars-api" });
+    }
+    if (request.method === "GET" && url.pathname === "/v1/ai/provider") {
+      const status = (task: "compile" | "portrait") => ({ provider: hasKey(task, env) ? "meta" : "mock", model: resolveModel(task, env), keyed: hasKey(task, env) });
+      return json({ compile: status("compile"), portrait: status("portrait"), explainer: status("compile") });
     }
     if (request.method === "GET" && url.pathname === "/v1/leaderboard") {
       return leaderboard(env, url.searchParams.get("seasonId") ?? "local-s1");

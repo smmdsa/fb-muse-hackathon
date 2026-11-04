@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Wars — Paper</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="./style.css" />
+<link rel="stylesheet" href="./shell.css" />
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+<p class="logo">AGENT<span>///</span>WARS</p>
+<p class="micro">The robot combat league</p>
+<nav class="nav" aria-label="Navigation">
+<a href="./index.html"><b>⌂</b> COMMAND</a>
+<a href="./profile.html"><b>◇</b> BARRACKS</a>
+<a href="./chip.html"><b>▦</b> CHIP LAB</a>
+<a href="./arena.html"><b>◉</b> ARENA</a>
+<a href="./public.html"><b>⬡</b> RANKS</a>
+<a href="./tournaments.html"><b>⚑</b> CUP</a>
+<a href="./armory.html"><b>◈</b> ARMORY</a>
+<a href="./auth.html"><b>◍</b> ACCOUNT</a>
+<a class="on" href="./paper.html"><b>▤</b> PAPER</a>
+</nav>
+<div class="season"><span class="micro">Season 01</span><strong>The Forge</strong><small>Your strategy starts here.</small></div>
+</aside>
+<div>
+<div class="crumb"><span>AGENT WARS / <strong>PAPER</strong></span><span>COMMANDER</span></div>
+<main class="shell content">
+<header class="top">
+<div>
+<p class="eyebrow">Design paper — read before you fork</p>
+<h1>PAPER</h1>
+<p class="sub">What this game is, how it uses Meta models, and how to reuse the pattern.</p>
+</div>
+<div class="pills">
+<span class="pill" id="paper-model">COMPILER · …</span>
+<span class="pill" id="pill-who">signed out</span>
+</div>
+</header>
+<section class="panel">
+<h2>1 · What this is</h2>
+<p class="sub">Agent Wars is a 1v1 robot arena played in best-of-3 series. Each robot runs a chip: a small JSON policy of if-then rules that reads arena sensors and picks moves every tick.</p>
+<p class="sub">Players write battle plans in plain words. A Meta model compiles those words into a chip. A deterministic simulator runs the fight. Nobody prompts at fight time — the chip fights alone, and ranks follow results.</p>
+</section>
+<section class="panel">
+<h2>2 · The model is a compiler, not a chatbot</h2>
+<p class="sub">The game makes three Meta calls, and none of them chat:</p>
+<ul class="why">
+<li><strong>Strategy compiler.</strong> Words in, chip JSON out. A system brief teaches the arena as law: map, ranges, energy costs, all 17 sensors, every legal move. Output that breaks the schema fails validation, gets one repair attempt, then dies with named errors. Every draft stores its token spend and latency.</li>
+<li><strong>Portrait painter.</strong> One locked house style; the birth concept changes only the subject. No key means a faceless hero that still fights.</li>
+<li><strong>Battle explainer.</strong> Prose grounded in the stored match row. If the model drifts from the facts, a template answers instead.</li>
+</ul>
+<p class="sub">Ranked fights and AutoBattle never call a model. The sim settles everything, so results stay reproducible and free.</p>
+</section>
+<section class="panel">
+<h2>3 · The pipeline</h2>
+<ol class="why">
+<li>Player writes a battle plan (one build per 24 hours, so plans stay thoughtful).</li>
+<li>The server sends plan plus system brief to the Meta model.</li>
+<li>The validator checks schema, operands, moves, rule depth, and node count.</li>
+<li>One repair attempt on failure; then accept or reject with reasons.</li>
+<li>Accepted chips hash (SHA-256), log cost, install, and fight in the sim.</li>
+</ol>
+<p class="sub">A mock compiler ships for keyless dev and tests. It reads the mood, not the paragraphs — Meta reads the whole plan.</p>
+</section>
+<section class="panel">
+<h2>4 · Why this generalizes</h2>
+<p class="sub">The pattern has four parts: a <strong>constrained compiler</strong> (brief as law), a <strong>strict validator</strong> (fail closed, name errors), a <strong>deterministic simulator</strong> (no model at runtime), and a <strong>cost audit</strong> (every draft carries spend). Swap the simulator and the brief, keep the loop, and the same shape runs a new game:</p>
+<ul class="why">
+<li><strong>Tower defense:</strong> prompts compile to wave scripts and tower rules; the sim plays the siege.</li>
+<li><strong>Racing:</strong> prompts compile to tuning setups and racing lines; the sim runs the laps.</li>
+<li><strong>Puzzles:</strong> prompts compile to level seeds plus solution checks; the validator proves solvability.</li>
+<li><strong>Training sims:</strong> warehouse bots, rescue drills, traffic drills — prompts compile to drill scripts, the sim scores them.</li>
+<li><strong>Classrooms:</strong> physics duels where students argue in words and chips settle the debate.</li>
+</ul>
+</section>
+<section class="panel">
+<h2>5 · Reuse checklist</h2>
+<ul class="why">
+<li>Write the world brief first: distances, costs, clocks, win rules. The model only knows what the brief says.</li>
+<li>Define the schema second: sensors, moves, operators, limits. Ship the validator before the first prompt.</li>
+<li>Keep the sim ignorant of prose: it reads JSON, ignores unknown fields, and never calls a model.</li>
+<li>Audit every draft: tokens, latency, hash. Cap builds so players think.</li>
+<li>Ship a mock provider so tests and demos run keyless.</li>
+</ul>
+</section>
+<section class="panel">
+<h2>6 · Honest limits</h2>
+<ul class="why">
+<li>Models emit invalid JSON sometimes. That is what the validator and the repair pass are for.</li>
+<li>DNA traits here are descriptive; all behavior lives in rules. Say what your numbers do.</li>
+<li>This paper is a design note, not legal, safety, or balance advice for other domains.</li>
+</ul>
+</section>
+</main>
+<footer class="legal-foot"><span>Agent Wars demo · Season 01</span><span><a href="./privacy.html">Privacy</a> · <a href="./terms.html">Terms</a></span></footer>
+</div>
+</div>
+<script src="./ui.js"></script>
+<script src="./session.js"></script>
+<script src="./paper.js"></script>
+</body>
+</html>
