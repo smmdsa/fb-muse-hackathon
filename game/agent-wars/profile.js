@@ -353,29 +353,81 @@ async function renderAuto() {
   $("auto-status").textContent = d.optIn
     ? `Running — ${d.state}, ${lease}, ${d.stopReason}. Free fights, stop anytime.`
     : `Off — ${d.stopReason}. Press start for a 24h lease.`;
-  const box = $("auto-recent");
-  box.textContent = "";
-  for (const h of d.recent || []) {
-    const p = document.createElement("p");
-    p.className = "sub";
-    p.textContent = `${h.winner} ${h.mode === "arena" ? "takes the series" : "wins"} in ${h.ticks} ticks — AP ${h.myDelta >= 0 ? "+" : ""}${h.myDelta} · ${h.myPaid} AC `;
-    const a = document.createElement("a");
-    a.href = `./arena.html?replay=${h.matchId}`;
-    a.className = "link-quiet";
-    a.textContent = "replay";
-    p.appendChild(a);
-    box.appendChild(p);
-    window.factoryCooldown?.render();
-  }
+  paintAutoLive(d);
+  paintAutoButtons(d);
   show($("auto-card"), true);
+}
+
+function autoLive(d) {
+  return d.optIn === true && d.state !== "PAUSED_MANUAL" && (!d.leaseExpiresAt || Date.now() < d.leaseExpiresAt);
+}
+
+function paintAutoLive(d) {
+  const el = $("auto-live");
+  if (d.queue) {
+    el.textContent = `IN QUEUE - ${d.queue.mode === "ranked" ? "RANKED" : "NORMAL"} - ${d.queue.ageSec}s`;
+    show(el, true);
+    return;
+  }
+  if (d.optIn && d.state === "IN_MATCH") {
+    el.textContent = "Fight running now - result lands in history.";
+    show(el, true);
+    return;
+  }
+  show(el, false);
+}
+
+function paintAutoButtons(d) {
+  const live = autoLive(d);
+  const pairs = [["auto-opt", "casual"], ["auto-opt-ranked", "ranked"]];
+  for (const [id, mode] of pairs) {
+    const b = $(id);
+    if (!b) continue;
+    const mine = live && d.autoMode === mode;
+    b.textContent = mine ? "Stop auto-battle" : "Start auto-battle";
+    b.classList.toggle("danger", mine);
+  }
+}
+
+async function toggleAuto(mode) {
+  const r = await call("GET", "/v1/autobattle/digest");
+  if (r.status !== 200) return;
+  if (autoLive(r.data) && r.data.autoMode === mode) {
+    await call("POST", "/v1/autobattle/pause");
+    await refresh();
+    return;
+  }
+  await startAuto(mode);
+}
+
+let histTab = "normal";
+let latestHist = [];
+
+function paintHistTabs() {
+  const n = latestHist.filter((h) => !h.rated).length;
+  const r = latestHist.length - n;
+  const bn = $("hist-normal");
+  const br = $("hist-ranked");
+  if (bn) {
+    bn.textContent = `Normal (${n})`;
+    bn.classList.toggle("btn-primary", histTab === "normal");
+    bn.classList.toggle("btn-ghost", histTab !== "normal");
+  }
+  if (br) {
+    br.textContent = `Ranked (${r})`;
+    br.classList.toggle("btn-primary", histTab === "ranked");
+    br.classList.toggle("btn-ghost", histTab !== "ranked");
+  }
 }
 
 function renderHist(d) {
   const box = $("hist");
   box.textContent = "";
-  const rows = d.history || [];
+  latestHist = d.history || [];
+  paintHistTabs();
+  const rows = latestHist.filter((h) => (histTab === "ranked" ? h.rated : !h.rated));
   if (!rows.length) {
-    box.innerHTML = "<p class='sub'>No fights yet — queue from the arena.</p>";
+    box.innerHTML = `<p class='sub'>No ${histTab} fights yet — queue from the arena.</p>`;
   }
   for (const h of rows) {
     const p = document.createElement("p");
@@ -481,6 +533,15 @@ for (const stage of [1, 2, 3]) {
 
 $("tour-btn").addEventListener("click", () => startTour(false));
 
+for (const [id, tab] of [["hist-normal", "normal"], ["hist-ranked", "ranked"]]) {
+  const btn = $(id);
+  if (btn) btn.addEventListener("click", () => {
+    histTab = tab;
+    paintHistTabs();
+    if (latestDash) renderHist(latestDash);
+  });
+}
+
 $("breed-btn").addEventListener("click", async () => {
   $("breed-msg").textContent = "Breeding… the image model paints the portrait now.";
   const r = await call("POST", "/v1/agents", {
@@ -503,7 +564,7 @@ $("breed-btn").addEventListener("click", async () => {
 
 async function startAuto(mode) {
   $("auto-status").textContent = "Starting the 24h lease...";
-  const r = await call("POST", "/v1/autobattle/opt-in");
+  const r = await call("POST", "/v1/autobattle/opt-in", { mode });
   if (r.status !== 200) {
     $("auto-status").textContent = `Start failed: ${r.data.error || r.status}.`;
     return;
@@ -511,13 +572,8 @@ async function startAuto(mode) {
   location.href = `./arena.html?auto=${mode}`;
 }
 
-$("auto-opt").addEventListener("click", () => startAuto("casual"));
-$("auto-opt-ranked").addEventListener("click", () => startAuto("ranked"));
-
-$("auto-pause").addEventListener("click", async () => {
-  await call("POST", "/v1/autobattle/pause");
-  await refresh();
-});
+$("auto-opt").addEventListener("click", () => toggleAuto("casual"));
+$("auto-opt-ranked").addEventListener("click", () => toggleAuto("ranked"));
 
 $("retry-btn").addEventListener("click", async () => {
   if (!agentId) return;

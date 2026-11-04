@@ -38,6 +38,68 @@ test("barracks shows loading until the session resolves", async ({ browser }) =>
   }
 });
 
+test("auto buttons toggle per running mode", async ({ browser, request }) => {
+  const srv = await startE2EServer();
+  const users = seedE2E(srv.store);
+  const ctx = await browser.newContext();
+  await loginAs(ctx, users.alice);
+  const page = await ctx.newPage();
+  const bad = [];
+  page.on("pageerror", (e) => bad.push(String(e).slice(0, 160)));
+  try {
+    await page.goto(`${srv.url}/profile.html`);
+    await expect(page.locator("#auto-opt")).toHaveText("Start auto-battle", { timeout: 15000 });
+    await expect(page.locator("#auto-opt-ranked")).toHaveText("Start auto-battle");
+    await expect(page.locator("#auto-recent")).toHaveCount(0);
+    await expect(page.locator("#auto-pause")).toHaveCount(0);
+    const opt = await request.post(`${srv.url}/v1/autobattle/opt-in`, {
+      headers: { authorization: `Bearer ${users.alice.token}` },
+      data: { mode: "ranked" },
+    });
+    expect(opt.status()).toBe(200);
+    await page.reload();
+    await expect(page.locator("#auto-opt-ranked")).toHaveText("Stop auto-battle", { timeout: 15000 });
+    await expect(page.locator("#auto-opt")).toHaveText("Start auto-battle");
+    await page.click("#auto-opt-ranked");
+    await expect(page.locator("#auto-opt-ranked")).toHaveText("Start auto-battle", { timeout: 15000 });
+    await expect(page.locator("#auto-opt")).toHaveText("Start auto-battle");
+    expect(bad).toEqual([]);
+  } finally {
+    await ctx.close();
+    await srv.close();
+  }
+});
+
+test("history splits normal and ranked tabs", async ({ browser, request }) => {
+  const srv = await startE2EServer();
+  const users = seedE2E(srv.store);
+  const ctx = await browser.newContext();
+  await loginAs(ctx, users.alice);
+  const page = await ctx.newPage();
+  const bad = [];
+  page.on("pageerror", (e) => bad.push(String(e).slice(0, 160)));
+  try {
+    const ranked = await request.post(`${srv.url}/v1/matches/ranked`, {
+      headers: { authorization: `Bearer ${users.alice.token}` },
+      data: { aVersionId: users.alice.versionId, bVersionId: users.bob.versionId, seed: "e2e-tab-1", key: "e2e-tab-1" },
+    });
+    expect(ranked.status()).toBe(201);
+    await page.goto(`${srv.url}/profile.html`);
+    await expect(page.locator("#hist-normal")).toContainText("Normal (1)", { timeout: 15000 });
+    await expect(page.locator("#hist-ranked")).toContainText("Ranked (1)");
+    await expect(page.locator("#hist > p")).toHaveCount(1);
+    await page.click("#hist-ranked");
+    await expect(page.locator("#hist > p")).toHaveCount(1);
+    await expect(page.locator("#hist")).toContainText("AP ");
+    await page.click("#hist-normal");
+    await expect(page.locator("#hist > p")).toHaveCount(1);
+    expect(bad).toEqual([]);
+  } finally {
+    await ctx.close();
+    await srv.close();
+  }
+});
+
 test("signed-in barracks opens the forge with autobattle inside", async ({ browser }) => {
   const srv = await startE2EServer();
   const users = seedE2E(srv.store);

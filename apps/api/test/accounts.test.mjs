@@ -156,6 +156,13 @@ describe("accounts", () => {
       const after = await soloCall("GET", "/v1/autobattle/digest", null, s.json.token);
       assert.equal(after.json.stopReason, "paused");
       assert.equal(after.json.leaseExpiresAt, digest.json.leaseExpiresAt);
+      const bad = await soloCall("POST", "/v1/autobattle/opt-in", { mode: "royale" }, s.json.token);
+      assert.equal(bad.status, 422);
+      const ranked = await soloCall("POST", "/v1/autobattle/opt-in", { mode: "ranked" }, s.json.token);
+      assert.equal(ranked.status, 200);
+      const digestRanked = await soloCall("GET", "/v1/autobattle/digest", null, s.json.token);
+      assert.equal(digestRanked.json.autoMode, "ranked");
+      assert.equal(digestRanked.json.optIn, true);
     } finally {
       solo.close();
     }

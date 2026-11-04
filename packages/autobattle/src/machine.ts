@@ -19,6 +19,7 @@ export function draft(leaderId: string, now: number): Status {
     optIn: false,
     published: false,
     leaseExpiresAt: null,
+    autoMode: null,
     stamina: STAMINA_MAX,
     staminaMax: STAMINA_MAX,
     lastStaminaAt: now,
@@ -29,9 +30,10 @@ export function draft(leaderId: string, now: number): Status {
 }
 
 // Explicit activation only. Reads never call this function.
-export function activate(status: Status, now: number): Status {
+export function activate(status: Status, now: number, mode: "casual" | "ranked" = "casual"): Status {
   const next = { ...status, attackAt: [...status.attackAt], defenseAt: [...status.defenseAt] };
   next.optIn = true;
+  next.autoMode = mode;
   next.leaseExpiresAt = now + LEASE_MS;
   next.lastStaminaAt = next.lastStaminaAt ?? now;
   next.state = restState(next, now);

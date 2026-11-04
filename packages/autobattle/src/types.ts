@@ -15,6 +15,7 @@ export type Status = {
   optIn: boolean;
   published: boolean;
   leaseExpiresAt: number | null;
+  autoMode: "casual" | "ranked" | null;
   stamina: number;
   staminaMax: number;
   lastStaminaAt: number;

@@ -402,7 +402,12 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
       }
       if (req.method === "POST" && url.pathname === "/v1/autobattle/opt-in") {
         try {
-          const opt = optInAutobattle(ctx.store, me.id as string);
+          const mode = body.mode ?? "casual";
+          if (mode !== "casual" && mode !== "ranked") {
+            send(res, 422, { error: "mode must be casual or ranked" });
+            return;
+          }
+          const opt = optInAutobattle(ctx.store, me.id as string, Date.now(), mode);
           const tick = autobattleTick(ctx.store, me.id as string, Date.now(), 3);
           send(res, 200, { ...opt, ran: tick.ran, matches: tick.matches });
         } catch (err) {
