@@ -434,14 +434,82 @@ describe("worker writes", () => {
     assert.equal(opt.json.matches.length, 3);
     const me = await call("GET", "/v1/me");
     assert.equal(me.json.auto.optIn, true);
-    assert.equal(me.json.auto.ran, 10);
+    assert.equal(me.json.auto.ran, 0);
     const pause = await call("POST", "/v1/autobattle/pause");
     assert.equal(pause.json.state, "PAUSED_MANUAL");
     const before = await call("GET", "/v1/autobattle/digest");
     const after = await call("GET", "/v1/autobattle/digest");
     assert.equal(before.json.leaseExpiresAt, after.json.leaseExpiresAt);
     assert.equal(after.json.stopReason, "paused");
-    assert.equal(after.json.recent.length, 10);
+    assert.equal(after.json.recent.length, 3);
+  });
+
+  it("sweeps live leases on the cron schedule", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0012_match_mode", "0013_ai_cooldowns", "0016_ticket_single", "0017_ticket_spent"]) {
+      db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
+    }
+    db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l40", "cron40", "t40");
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a40", "l40", "v40");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v40", "a40", JSON.stringify({ schemaVersion: 1, agentVersionId: "v40", dna: { aggression: 80, evasion: 40, preferredDistance: 25, energyConservation: 50 }, rules: [{ id: "r", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true }] }), "shim", Date.now(),
+    );
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
+    const call = (method, path, body) => entry.fetch(new Request(`http://local${path}`, {
+      method,
+      headers: { "content-type": "application/json", authorization: "Bearer t40" },
+      body: body ? JSON.stringify(body) : undefined,
+    }), wenv).then(async (r) => ({ status: r.status, json: await r.json() }));
+    const opt = await call("POST", "/v1/autobattle/opt-in", { mode: "casual" });
+    assert.equal(opt.status, 200);
+    const before = await call("GET", "/v1/autobattle/digest");
+    assert.equal(before.json.recent.length, 3);
+    await entry.scheduled({}, wenv);
+    const after = await call("GET", "/v1/autobattle/digest");
+    assert.equal(after.json.recent.length, 5);
+    const pause = await call("POST", "/v1/autobattle/pause");
+    assert.equal(pause.json.state, "PAUSED_MANUAL");
+    await entry.scheduled({}, wenv);
+    const still = await call("GET", "/v1/autobattle/digest");
+    assert.equal(still.json.recent.length, 5);
+  });
+
+  it("pairs and settles queued tickets with nobody watching", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0012_match_mode", "0013_ai_cooldowns", "0016_ticket_single", "0017_ticket_spent"]) {
+      db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
+    }
+    db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l50", "sweep50", "t50");
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a50", "l50", "v50");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v50", "a50", JSON.stringify({ schemaVersion: 1, agentVersionId: "v50", dna: { aggression: 80, evasion: 40, preferredDistance: 25, energyConservation: 50 }, rules: [{ id: "r", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true }] }), "shim", Date.now(),
+    );
+    db.prepare("INSERT INTO leaders (id, handle, token) VALUES (?, ?, ?)").run("l51", "sweep51", "t51");
+    db.prepare("INSERT INTO agents (id, leader_id, active_version_id) VALUES (?, ?, ?)").run("a51", "l51", "v51");
+    db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
+      "v51", "a51", JSON.stringify({ schemaVersion: 1, agentVersionId: "v51", dna: { aggression: 20, evasion: 80, preferredDistance: 60, energyConservation: 50 }, rules: [{ id: "r", when: { operand: "distFoe", op: "lt", value: 6 }, move: "KITE", fire: true }] }), "shim", Date.now(),
+    );
+    const wenv = { DB: shim(db), ASSETS: assetsStub };
+    const now = Date.now();
+    db.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at, spent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "t-sweep-a", "l50", "v50", "ranked", "queued", now, now + 600_000, 0,
+    );
+    db.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at, spent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "t-sweep-b", "l51", "v51", "ranked", "queued", now, now + 600_000, 0,
+    );
+    db.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at, spent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "t-sweep-c", "l50", "v50", "casual", "queued", now - 60_000, now - 30_000, 0,
+    );
+    await entry.scheduled({}, wenv);
+    const a = db.prepare("SELECT * FROM tickets WHERE id = ?").get("t-sweep-a");
+    const b = db.prepare("SELECT * FROM tickets WHERE id = ?").get("t-sweep-b");
+    assert.equal(a.status, "settled");
+    assert.equal(b.status, "settled");
+    assert.equal(a.match_id, b.match_id);
+    assert.equal(db.prepare("SELECT rated FROM matches WHERE id = ?").get(a.match_id).rated, 1);
+    const c = db.prepare("SELECT * FROM tickets WHERE id = ?").get("t-sweep-c");
+    assert.equal(c.status, "settled");
+    assert.ok(String(c.match_id).length > 0);
   });
 
   it("stop cancels open tickets and clears the queue on D1", async () => {

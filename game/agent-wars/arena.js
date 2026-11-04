@@ -9,6 +9,28 @@ const queueRanked = document.getElementById("queue-ranked");
 const lobbyView = document.getElementById("lobby-view");
 const battleView = document.getElementById("battle-view");
 
+// Deep-link intent shows at once, before any round trip: the lobby
+// never flashes while the session and the ticket resolve.
+const autoParam = new URLSearchParams(location.search).get("auto");
+const autoIntent = !new URLSearchParams(location.search).get("replay")
+  && (autoParam === "casual" || autoParam === "ranked") ? autoParam : "";
+if (autoIntent) {
+  lobbyView.hidden = true;
+  battleView.hidden = false;
+  const ab0 = document.getElementById("auto-banner");
+  if (ab0) {
+    ab0.hidden = false;
+    ab0.textContent = autoBannerText(autoIntent);
+  }
+  const qb0 = document.getElementById("auto-queue");
+  if (qb0) {
+    qb0.hidden = false;
+    setText("auto-queue-mode", autoIntent === "ranked" ? "RANKED MODE" : "NORMAL MODE");
+    setText("auto-queue-text", "Contacting matchmaking\u2026");
+  }
+  hideArenaOverlay();
+}
+
 let arenaMode = "casual";
 let arenaVersion = "";
 let arenaTicket = "";
@@ -310,6 +332,7 @@ async function queue(mode, viaAuto = false) {
   if (r.status !== 201 && r.status !== 200) {
     if (viaAuto) {
       haltAuto(`Auto battle stopped: ${r.data.error || r.status}.`);
+      showLobby();
     } else {
       arenaSay(`Queue refused: ${r.data.error || r.status}.`);
     }
@@ -324,6 +347,10 @@ async function queue(mode, viaAuto = false) {
   }
   arenaTicket = r.data.id || "";
   queueBusy(true);
+  // A resumed ticket keeps its true wait: the clock starts at its age.
+  if (viaAuto && r.data.created_at) {
+    showAutoQueue(arenaMode, Math.floor((Date.now() - r.data.created_at) / 1000));
+  }
   pollTicket(r.data.id, arenaMode === "casual" ? 8 : 40);
 }
 
@@ -346,6 +373,15 @@ if (arenaCancel) {
     } else {
       arenaSay(`Cancel failed: ${r.data.error || r.status}.`);
     }
+  });
+}
+
+const autoQueueLobby = document.getElementById("auto-queue-lobby");
+if (autoQueueLobby) {
+  autoQueueLobby.addEventListener("click", () => {
+    haltAuto();
+    showLobby();
+    arenaBoot();
   });
 }
 
@@ -398,15 +434,15 @@ function fmtWait(sec) {
   return `${m}min ${s}sec`;
 }
 
-function showAutoQueue(mode) {
+function showAutoQueue(mode, startSec = 0) {
   const box = document.getElementById("auto-queue");
   if (!box) return;
   setText("auto-queue-mode", mode === "ranked" ? "RANKED MODE" : "NORMAL MODE");
-  setText("auto-queue-text", `Waiting for opponent ${fmtWait(0)}`);
+  autoQueueSec = Math.max(0, startSec | 0);
+  setText("auto-queue-text", `Waiting for opponent ${fmtWait(autoQueueSec)}`);
   box.hidden = false;
   hideArenaOverlay();
   clearInterval(autoQueueTimer);
-  autoQueueSec = 0;
   autoQueueTimer = setInterval(() => {
     autoQueueSec += 1;
     setText("auto-queue-text", `Waiting for opponent ${fmtWait(autoQueueSec)}`);
@@ -505,9 +541,9 @@ arenaBoot();
   if (mode !== "casual" && mode !== "ranked") return;
   if (params.get("replay")) return;
   const sess = await window.AWSession.loadMe();
-  if (!sess.ok) return;
+  if (!sess.ok) { haltAuto(); showLobby(); return; }
   await arenaBoot();
-  if (!arenaVersion) return;
+  if (!arenaVersion) { haltAuto(); showLobby(); return; }
   autoMode = mode;
   markMode(mode);
   watchEndcard();
@@ -515,6 +551,29 @@ arenaBoot();
   paintAutoBanner();
   showAutoQueue(mode);
   await queue(mode, true);
+})();
+
+// Resume without the deeplink: a live lease owns the arena on entry,
+// so a returning commander lands back in queue, never in a dead lobby.
+(async function bootResumeLease() {
+  const params = new URLSearchParams(location.search);
+  if (params.get("auto") || params.get("replay")) return;
+  if (autoMode) return;
+  const sess = await window.AWSession.loadMe();
+  if (!sess.ok) return;
+  await arenaBoot();
+  if (!arenaVersion || autoMode) return;
+  const d = await arenaCall("GET", "/v1/autobattle/digest");
+  const live = d.status === 200 && d.data.optIn && d.data.state !== "PAUSED_MANUAL"
+    && d.data.autoMode && (!d.data.leaseExpiresAt || Date.now() < d.data.leaseExpiresAt);
+  if (!live) return;
+  autoMode = d.data.autoMode;
+  markMode(autoMode);
+  watchEndcard();
+  showBattle();
+  paintAutoBanner();
+  showAutoQueue(autoMode);
+  await queue(autoMode, true);
 })();
 
 // Deep link from history rows: ?replay=<matchId> plays it straight away.

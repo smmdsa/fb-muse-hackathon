@@ -10,7 +10,7 @@ import { CATALOG } from "@agent-wars/economy";
 import { ARENA_1V1, BENCH_POLICY, BOT_PRESETS, buildReplay, DEFAULT_MOBA, ARENA_MOBA, fightPolicies, fightSeries, pickBot } from "@agent-wars/battle-core";
 import type { SeriesResult } from "@agent-wars/battle-core";
 import { MAX_DEFENSE_PER_DAY, recordDefense } from "@agent-wars/autobattle";
-import { pickOpponent } from "@agent-wars/matchmaker";
+import { PAIR_WINDOW_MS, pickOpponent } from "@agent-wars/matchmaker";
 import type { Candidate, History } from "@agent-wars/matchmaker";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
@@ -332,9 +332,11 @@ async function planPay(
 
 // Status reads the persisted machine, refreshes it, and saves it back.
 async function energyFor(env: WorkerEnv, leaderId: string, now = Date.now()): Promise<Status> {
-  const row = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>();
+  const [row, agent] = await Promise.all([
+    env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>(),
+    env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(leaderId).first<Record<string, unknown>>(),
+  ]);
   if (!row) throw new Error("unknown leader");
-  const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(leaderId).first<Record<string, unknown>>();
   let st: Status = row.autobattle_json ? (JSON.parse(row.autobattle_json as string) as Status) : draft(leaderId, now);
   st = { ...st, leaderId, published: !!agent?.active_version_id };
   st = refresh(st, now);
@@ -423,8 +425,8 @@ async function autoTickD1(
 }
 
 // The stop reason in plain words. Reads never change the lease.
-async function autoStopD1(env: WorkerEnv, leaderId: string, now: number): Promise<string> {
-  const st = await energyFor(env, leaderId, now);
+async function autoStopD1(env: WorkerEnv, leaderId: string, now: number, known?: Status): Promise<string> {
+  const st = known ?? (await energyFor(env, leaderId, now));
   if (st.state === "PAUSED_MANUAL" || (st.optIn === false && st.leaseExpiresAt !== null)) return "paused";
   if (!st.optIn) return "opted out";
   if (st.state === "IDLE_EXPIRED" || (st.leaseExpiresAt !== null && now >= st.leaseExpiresAt)) return "lease expired";
@@ -441,26 +443,29 @@ async function queueStatusD1(env: WorkerEnv, leaderId: string, now: number): Pro
 }
 
 async function autoDigestD1(env: WorkerEnv, leaderId: string, now: number): Promise<Record<string, unknown>> {
-  const st = await energyFor(env, leaderId, now);
   const safe = leaderId.replace(/[\\%_]/g, (c) => `\\${c}`);
-  const { results: rows } = await env.DB.prepare(
-    "SELECT * FROM matches WHERE seed LIKE ? ESCAPE '\\' ORDER BY created_at DESC LIMIT 10",
-  ).bind(`ab-${safe}-%`).all<Record<string, unknown>>();
-  const { results: vrows } = await env.DB.prepare(
-    "SELECT id FROM versions WHERE agent_id IN (SELECT id FROM agents WHERE leader_id = ?)",
-  ).bind(leaderId).all<Record<string, unknown>>();
+  const [st, rows, vrows, queue] = await Promise.all([
+    energyFor(env, leaderId, now),
+    env.DB.prepare(
+      "SELECT * FROM matches WHERE seed LIKE ? ESCAPE '\\' ORDER BY created_at DESC LIMIT 10",
+    ).bind(`ab-${safe}-%`).all<Record<string, unknown>>().then((r) => r.results),
+    env.DB.prepare(
+      "SELECT id FROM versions WHERE agent_id IN (SELECT id FROM agents WHERE leader_id = ?)",
+    ).bind(leaderId).all<Record<string, unknown>>().then((r) => r.results),
+    queueStatusD1(env, leaderId, now),
+  ]);
   const owned = new Set(vrows.map((v) => v.id as string));
   return {
     optIn: st.optIn,
     autoMode: st.autoMode ?? null,
-    queue: await queueStatusD1(env, leaderId, now),
+    queue,
     leaseExpiresAt: st.leaseExpiresAt,
     state: st.state,
     defense: {
       used: st.defenseAt.filter((t) => now - t < DAY_MS).length,
       max: MAX_DEFENSE_PER_DAY,
     },
-    stopReason: await autoStopD1(env, leaderId, now),
+    stopReason: await autoStopD1(env, leaderId, now, st),
     recent: rows.map((m) => {
       const mine = owned.has(m.a_version as string) ? "a" : "b";
       return {
@@ -616,25 +621,29 @@ export const RANKED_TICKET_MS = 10 * 60_000;
 
 // Nearest ELO human with a published version. Never self, never over the pair cap.
 async function findHumanOpponent(env: WorkerEnv, leaderId: string, now: number): Promise<{ leaderId: string; versionId: string } | null> {
-  const me = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>();
+  const me = await env.DB.prepare("SELECT rating_milli FROM leaders WHERE id = ?").bind(leaderId).first<Record<string, unknown>>();
   if (!me) return null;
+  // Pair caps only count the last week, so the history scan stops there.
   const { results: rows } = await env.DB.prepare(
     `SELECT m.created_at AS at, aa.leader_id AS a, ab.leader_id AS b FROM matches m
      JOIN versions va ON va.id = m.a_version JOIN agents aa ON aa.id = va.agent_id
      JOIN versions vb ON vb.id = m.b_version JOIN agents ab ON ab.id = vb.agent_id
-     WHERE m.rated = 1`
-  ).bind().all<Record<string, unknown>>();
+     WHERE m.rated = 1 AND m.created_at > ? ORDER BY m.created_at DESC`
+  ).bind(now - PAIR_WINDOW_MS).all<Record<string, unknown>>();
   const history: History = { marks: rows.map((m) => ({ a: m.a as string, b: m.b as string, at: m.at as number })) };
-  const { results: agents } = await env.DB.prepare("SELECT * FROM agents WHERE active_version_id IS NOT NULL").bind().all<Record<string, unknown>>();
+  // One joined read builds the whole pool: no query per leader.
+  const { results: cands } = await env.DB.prepare(
+    `SELECT l.id, l.rating_milli, l.autobattle_json, a.active_version_id FROM agents a
+     JOIN leaders l ON l.id = a.leader_id WHERE a.active_version_id IS NOT NULL AND l.id != ?`
+  ).bind(leaderId).all<Record<string, unknown>>();
   const pool: Candidate[] = [];
-  for (const a of agents) {
-    const other = a.leader_id as string;
-    if (other === leaderId) continue;
-    const row = await env.DB.prepare("SELECT * FROM leaders WHERE id = ?").bind(other).first<Record<string, unknown>>();
-    if (!row) continue;
+  const gear = new Map<string, string>();
+  for (const row of cands) {
+    const other = row.id as string;
     const st: Record<string, unknown> = row.autobattle_json ? JSON.parse(row.autobattle_json as string) : {};
     const defenses = Array.isArray(st.defenseAt) ? (st.defenseAt as number[]).length : 0;
     if (defenses >= MAX_DEFENSE_PER_DAY) continue;
+    gear.set(other, row.active_version_id as string);
     pool.push({
       leaderId: other,
       ratingMilli: row.rating_milli as number,
@@ -653,8 +662,7 @@ async function findHumanOpponent(env: WorkerEnv, leaderId: string, now: number):
   if (!foe) return null;
   const stamped = recordDefense(await energyFor(env, foe.leaderId, now), now);
   await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(stamped.status), foe.leaderId).run();
-  const agent = await env.DB.prepare("SELECT active_version_id FROM agents WHERE leader_id = ?").bind(foe.leaderId).first<Record<string, unknown>>();
-  return { leaderId: foe.leaderId, versionId: agent?.active_version_id as string };
+  return { leaderId: foe.leaderId, versionId: gear.get(foe.leaderId) as string };
 }
 
 async function runCasualD1(
@@ -850,8 +858,10 @@ async function requestMatchD1(
   now: number,
 ): Promise<Record<string, unknown>> {
   if (input.mode !== "casual" && input.mode !== "ranked") throw new Error("unknown mode");
-  const owned = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(input.leaderId).first<Record<string, unknown>>();
-  const version = await env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(input.versionId).first<Record<string, unknown>>();
+  const [owned, version] = await Promise.all([
+    env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(input.leaderId).first<Record<string, unknown>>(),
+    env.DB.prepare("SELECT * FROM versions WHERE id = ?").bind(input.versionId).first<Record<string, unknown>>(),
+  ]);
   if (!version || !owned || version.agent_id !== owned.id) throw new Error("unknown version");
   if (owned.active_version_id !== input.versionId) throw new Error("queue your active version");
   const open = await env.DB.prepare("SELECT * FROM tickets WHERE leader_id = ? AND mode = ? AND status = 'queued'").bind(input.leaderId, input.mode).first();
@@ -960,7 +970,78 @@ async function withMatchD1(env: WorkerEnv, ticket: Record<string, unknown>): Pro
   return out;
 }
 
+// One unattended ticket pass. Same rules as a poll read: live pairs win,
+// ranked takes a standing foe, casual falls back to a bot past the
+// deadline, lone ranked expires. True when the row moved on.
+async function sweepTicket(env: WorkerEnv, t: Record<string, unknown>, now: number): Promise<boolean> {
+  const fresh = await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(t.id as string).first<Record<string, unknown>>();
+  if (!fresh || fresh.status !== "queued") return false;
+  if (now < (fresh.settle_at as number)) {
+    const live = await findLiveTicketD1(env, { mode: fresh.mode as string, leaderId: fresh.leader_id as string }, now);
+    if (live) {
+      await settlePairD1(env, fresh, live);
+      return true;
+    }
+    if (fresh.mode === "ranked") {
+      const foe = await findHumanOpponent(env, fresh.leader_id as string, now);
+      if (foe) {
+        await settleTicketD1(env, fresh, foe.versionId);
+        return true;
+      }
+    }
+    return false;
+  }
+  if (fresh.mode === "casual") {
+    await settleTicketD1(env, fresh, null);
+    return true;
+  }
+  await env.DB.prepare("UPDATE tickets SET status = 'expired' WHERE id = ?").bind(fresh.id as string).run();
+  if (fresh.spent) await refundEnergy(env, fresh.leader_id as string, now);
+  return true;
+}
+
+// One scheduler sweep. Bounded per run so a crowd of leases never
+// blows the cron wall clock; one bad lease never stops the rest.
+async function cronTick(env: WorkerEnv, now: number): Promise<{ leases: number; matches: number; tickets: number }> {
+  const { results } = await env.DB.prepare(
+    "SELECT id, autobattle_json FROM leaders WHERE autobattle_json IS NOT NULL ORDER BY id LIMIT 25",
+  ).bind().all<{ id: string; autobattle_json: string }>();
+  let leases = 0;
+  let matches = 0;
+  for (const row of results) {
+    try {
+      const st = JSON.parse(row.autobattle_json) as Status;
+      if (!st.optIn || !st.published || st.state === "PAUSED_MANUAL") continue;
+      if (st.leaseExpiresAt === null || now >= st.leaseExpiresAt) continue;
+      const tick = await autoTickD1(env, row.id, now, 2);
+      leases += 1;
+      matches += tick.matches.length;
+    } catch {
+      continue;
+    }
+  }
+  // Ticket sweep: queued tickets pair and settle with nobody watching.
+  // Oldest first, bounded per sweep so the backlog drains over runs.
+  const { results: queued } = await env.DB.prepare(
+    "SELECT * FROM tickets WHERE status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 10",
+  ).bind().all<Record<string, unknown>>();
+  let tickets = 0;
+  for (const t of queued) {
+    try {
+      if (await sweepTicket(env, t, now)) tickets += 1;
+    } catch {
+      continue;
+    }
+  }
+  return { leases, matches, tickets };
+}
+
 export default {
+  // Cron accrual. Reads never fight, so the scheduler ticks live leases
+  // every few minutes while pages stay instant.
+  async scheduled(_event: unknown, env: WorkerEnv): Promise<void> {
+    await cronTick(env, Date.now());
+  },
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
     // The viewer is a static asset. Anything outside /v1/ serves the game.
@@ -1225,10 +1306,11 @@ export default {
     }
     if (request.method === "GET" && url.pathname === "/v1/ai/cooldown") return json(await cooldownStatus(env, me.id as string));
     if (request.method === "GET" && url.pathname === "/v1/me") {
+      // Reads never fight: the scheduler accrues background bouts, so
+      // this read stays at a few queries and every page loads fast.
       const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(me.id as string).first<Record<string, unknown>>();
-      const auto = await autoTickD1(env, me.id as string, Date.now());
       const st = await energyFor(env, me.id as string);
-      return json({ leader: me, agent, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: auto.ran }, handleSet: (me.handle_set as number) === 1 }, 200);
+      return json({ leader: me, agent, auto: { optIn: st.optIn, leaseExpiresAt: st.leaseExpiresAt, state: st.state, ran: 0 }, handleSet: (me.handle_set as number) === 1 }, 200);
     }
     if (request.method === "GET" && url.pathname === "/v1/me/export") {
       if (limited(authHits, `gdpr:${me.id as string}`, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);
