@@ -18,6 +18,8 @@ let arenaClockTimer = 0;
 let autoMode = "";
 let autoCooldownTick = 0;
 let autoEndObserver = null;
+let autoQueueTimer = 0;
+let autoQueueSec = 0;
 
 const ARENA_REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const FADE_MS = ARENA_REDUCED ? 0 : 450;
@@ -213,6 +215,7 @@ function onSettled(m, instant) {
   arenaTicket = "";
   queueBusy(false);
   clockStop();
+  hideAutoQueue();
   showBattle();
   paintAutoBanner();
   playSettled(m);
@@ -266,6 +269,7 @@ async function pollTicket(ticketId, left, fails = 0) {
   }
   if (r.data.status === "canceled") {
     haltAuto();
+    showLobby();
     arenaSay("Ticket canceled. The slot is freed. Queue again when ready.");
     arenaTicket = "";
     queueBusy(false);
@@ -331,6 +335,7 @@ if (arenaCancel) {
     if (!arenaTicket) return;
     clearTimeout(arenaTimer);
     haltAuto();
+    showLobby();
     const r = await arenaCall("POST", `/v1/matchmaking/${arenaTicket}/cancel`);
     arenaTicket = "";
     queueBusy(false);
@@ -385,6 +390,34 @@ for (const id of ["start-btn", "restart-btn"]) {
 // Auto battle loop. The barracks deeplinks here with ?auto=<mode>.
 // Tickets settle, the replay plays, the endcard fires a 10s cooldown,
 // then the loop requeues while the 24h lease stays live.
+// The loop never shows the lobby: the battle view carries a queue
+// panel with a wait clock until the match settles.
+function fmtWait(sec) {
+  const m = String(Math.floor(sec / 60)).padStart(2, "0");
+  const s = String(sec % 60).padStart(2, "0");
+  return `${m}min ${s}sec`;
+}
+
+function showAutoQueue(mode) {
+  const box = document.getElementById("auto-queue");
+  if (!box) return;
+  setText("auto-queue-mode", mode === "ranked" ? "RANKED MODE" : "NORMAL MODE");
+  setText("auto-queue-text", `Waiting for opponent ${fmtWait(0)}`);
+  box.hidden = false;
+  hideArenaOverlay();
+  clearInterval(autoQueueTimer);
+  autoQueueSec = 0;
+  autoQueueTimer = setInterval(() => {
+    autoQueueSec += 1;
+    setText("auto-queue-text", `Waiting for opponent ${fmtWait(autoQueueSec)}`);
+  }, 1000);
+}
+
+function hideAutoQueue() {
+  clearInterval(autoQueueTimer);
+  const box = document.getElementById("auto-queue");
+  if (box) box.hidden = true;
+}
 function autoBannerText(mode) {
   return `${mode === "ranked" ? "RANKED" : "NORMAL"} MODE · AUTO BATTLE ON`;
 }
@@ -404,6 +437,7 @@ function haltAuto(msg) {
   autoMode = "";
   clearInterval(autoCooldownTick);
   clearTimeout(arenaTimer);
+  hideAutoQueue();
   paintAutoBanner();
   if (msg) arenaSay(msg);
 }
@@ -419,7 +453,8 @@ async function requeueAuto() {
     await arenaBoot();
     return;
   }
-  showLobby();
+  showBattle();
+  showAutoQueue(autoMode);
   await queue(autoMode, true);
 }
 
@@ -476,6 +511,9 @@ arenaBoot();
   autoMode = mode;
   markMode(mode);
   watchEndcard();
+  showBattle();
+  paintAutoBanner();
+  showAutoQueue(mode);
   await queue(mode, true);
 })();
 

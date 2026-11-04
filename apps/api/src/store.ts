@@ -80,6 +80,9 @@ export function openStore(path: string): Store {
       created_at INTEGER NOT NULL,
       settle_at INTEGER NOT NULL
     );
+    CREATE UNIQUE INDEX IF NOT EXISTS tickets_open_single ON tickets(leader_id, mode) WHERE status = 'queued';
+
+
     CREATE TABLE IF NOT EXISTS tournaments (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

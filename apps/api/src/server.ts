@@ -629,6 +629,15 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           const ticket = requestMatch(ctx.store, { leaderId: me.id as string, versionId, mode: mode as TicketMode });
           send(res, 201, withMatch(ctx.store, ticket));
         } catch (err) {
+          // A lost insert race still tracks the same row: the winner's
+          // ticket resumes with 200 instead of a 409 dead end.
+          if ((err as Error).message.includes("ticket already open")) {
+            const again = openTicket(ctx.store, { leaderId: me.id as string, mode: mode as TicketMode });
+            if (again) {
+              send(res, 200, withMatch(ctx.store, again));
+              return;
+            }
+          }
           send(res, 409, { error: (err as Error).message });
         }
         return;

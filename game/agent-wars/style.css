@@ -340,6 +340,15 @@ textarea {
 .auto-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
 .auto-mode .eyebrow { margin: 0 0 6px; }
 .auto-mode .btn-primary { width: 100%; }
+.auto-starting { margin: 0; padding: 12px 0; font-weight: 700; letter-spacing: 0.04em; color: #8affec; }
+.spin { display: inline-block; width: 14px; height: 14px; margin-right: 8px; border: 2px solid #8affec; border-top-color: transparent; border-radius: 50%; vertical-align: -2px; animation: spin-in 0.8s linear infinite; }
+@keyframes spin-in { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+.auto-queue { margin: 12px 0 0; padding: 18px; text-align: center; border: 1px solid #8affec; border-radius: 3px; background: #0a141b; }
+.auto-queue .eyebrow { margin: 0 0 8px; }
+.auto-queue-big { margin: 0 0 6px; font-family: var(--display); font-size: 34px; letter-spacing: 2px; color: #8affec; }
+.auto-queue-big .spin { width: 22px; height: 22px; vertical-align: -3px; }
+.auto-queue .sub { margin: 0; }
 .auto-banner { margin: 8px 0 0; padding: 10px 14px; text-align: center; font-weight: 800; letter-spacing: 0.1em; border: 1px solid #8affec; border-radius: 3px; background: #0a141b; color: #8affec; }
 .compile-progress { margin-top: 12px; border: 1px solid var(--line); border-radius: 3px; background: #0a141b; padding: 14px 16px; }
 .compile-bar { height: 10px; background: #16232b; border-radius: 2px; overflow: hidden; }

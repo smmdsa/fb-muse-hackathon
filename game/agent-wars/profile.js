@@ -563,10 +563,21 @@ $("breed-btn").addEventListener("click", async () => {
 });
 
 async function startAuto(mode) {
+  const box = mode === "ranked" ? $("auto-mode-ranked") : $("auto-mode-casual");
+  const saved = box ? box.innerHTML : "";
+  // The mode section swaps to a starting line at once, so the press
+  // answers before the lease round trip lands.
+  if (box) box.innerHTML = '<p class="auto-starting"><span class="spin" aria-hidden="true"></span>Starting auto battle\u2026</p>';
   $("auto-status").textContent = "Starting the 24h lease...";
   const r = await call("POST", "/v1/autobattle/opt-in", { mode });
   if (r.status !== 200) {
+    if (box) {
+      box.innerHTML = saved;
+      const btn = $(mode === "ranked" ? "auto-opt-ranked" : "auto-opt");
+      if (btn) btn.addEventListener("click", () => toggleAuto(mode));
+    }
     $("auto-status").textContent = `Start failed: ${r.data.error || r.status}.`;
+    await refresh();
     return;
   }
   location.href = `./arena.html?auto=${mode}`;
