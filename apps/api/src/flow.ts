@@ -889,10 +889,18 @@ export function autobattleTick(
     const agent = store.db.prepare("SELECT * FROM agents WHERE leader_id = ?").get(leaderId) as Record<string, unknown> | null;
     const seed = `ab-${leaderId}-${now}-${(abSeq += 1)}`;
     const foe = findHumanOpponent(store, leaderId, now);
-    const match = foe
-      ? runRanked(store, { aVersionId: agent?.active_version_id as string, bVersionId: foe.versionId, seed, key: `abm-${seed}` })
-      : runCasual(store, { aVersionId: agent?.active_version_id as string, bBot: true, seed, leaderId });
-    matches.push(match);
+    try {
+      const match = foe
+        ? runRanked(store, { aVersionId: agent?.active_version_id as string, bVersionId: foe.versionId, seed, key: `abm-${seed}` })
+        : runCasual(store, { aVersionId: agent?.active_version_id as string, bBot: true, seed, leaderId });
+      matches.push(match);
+    } catch (err) {
+      // A foe row that vanished mid-tick must not brick the lease in
+      // IN_MATCH: heal to rest and stop the pass.
+      const healed = refresh({ ...go.status, state: "ACTIVE_READY", inMatchAt: null }, now);
+      store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(healed), leaderId);
+      break;
+    }
     ran += 1;
     const done = finishMatch(go.status, now);
     store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(done), leaderId);

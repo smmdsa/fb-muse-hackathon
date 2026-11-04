@@ -44,10 +44,28 @@ describe("lease", () => {
     let s = live(0);
     s = startOwnerMatch(s, 23 * H).status;
     assert.equal(s.state, "IN_MATCH");
-    s = refresh(s, 25 * H);
+    s = refresh(s, 23 * H + 30_000);
     assert.equal(s.state, "IN_MATCH");
-    s = finishMatch(s, 25 * H);
+    s = finishMatch(s, 23 * H + 60_000);
+    assert.equal(s.state, "ACTIVE_READY");
+  });
+
+  it("heals a stale match lock back to rest", () => {
+    let s = live(0);
+    s = startOwnerMatch(s, 23 * H).status;
+    assert.equal(s.state, "IN_MATCH");
+    s = refresh(s, 25 * H);
     assert.equal(s.state, "IDLE_EXPIRED");
+    assert.equal(s.inMatchAt, null);
+  });
+
+  it("pauses even over a stuck match", () => {
+    let s = live(0);
+    s = startOwnerMatch(s, 1000).status;
+    assert.equal(s.state, "IN_MATCH");
+    s = pause(s);
+    assert.equal(s.state, "PAUSED_MANUAL");
+    assert.equal(s.inMatchAt, null);
   });
 
   it("stores the mode and keeps it past pause", () => {

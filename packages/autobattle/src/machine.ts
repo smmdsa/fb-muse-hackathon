@@ -10,6 +10,7 @@ export const STAMINA_MAX = 10;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const MAX_ATTACK_PER_DAY = 10;
 export const MAX_DEFENSE_PER_DAY = 3;
+export const STALE_MATCH_MS = 5 * 60 * 1000;
 
 // The factory builds a fresh draft. Time starts at the given instant.
 export function draft(leaderId: string, now: number): Status {
@@ -20,6 +21,7 @@ export function draft(leaderId: string, now: number): Status {
     published: false,
     leaseExpiresAt: null,
     autoMode: null,
+    inMatchAt: null,
     stamina: STAMINA_MAX,
     staminaMax: STAMINA_MAX,
     lastStaminaAt: now,
@@ -35,15 +37,16 @@ export function activate(status: Status, now: number, mode: "casual" | "ranked" 
   next.optIn = true;
   next.autoMode = mode;
   next.leaseExpiresAt = now + LEASE_MS;
+  next.inMatchAt = null;
   next.lastStaminaAt = next.lastStaminaAt ?? now;
   next.state = restState(next, now);
   return next;
 }
 
-// Explicit pause only. Resume needs activate.
+// Explicit pause only. Resume needs activate. The stop always wins,
+// even over a stuck match: a crashed tick must never brick the lease.
 export function pause(status: Status): Status {
-  if (status.state === "IN_MATCH") return status;
-  return { ...status, state: "PAUSED_MANUAL" };
+  return { ...status, state: "PAUSED_MANUAL", inMatchAt: null };
 }
 
 // A read refreshes derived values but never extends the lease.
@@ -53,7 +56,12 @@ export function refresh(status: Status, now: number): Status {
     attackAt: prune(status.attackAt, now),
     defenseAt: prune(status.defenseAt, now),
   };
-  if (next.state !== "IN_MATCH" && next.state !== "PAUSED_MANUAL" && next.state !== "TOURNAMENT_LOCKED") {
+  if (next.state === "IN_MATCH" && now - (next.inMatchAt ?? 0) > STALE_MATCH_MS) {
+    // A synchronous tick holds the match lock for milliseconds. Anything
+    // older is a crashed tick: heal it so the lease answers again.
+    next.state = restState(next, now);
+    next.inMatchAt = null;
+  } else if (next.state !== "IN_MATCH" && next.state !== "PAUSED_MANUAL" && next.state !== "TOURNAMENT_LOCKED") {
     next.state = restState(next, now);
   } else if (next.state === "TOURNAMENT_LOCKED" && !next.lockedTournament) {
     next.state = restState(next, now);
@@ -71,7 +79,7 @@ export function startOwnerMatch(status: Status, now: number): { status: Status; 
   if (cur.state !== "ACTIVE_READY") {
     return { status: cur, guard: { ok: false, reason: `state ${cur.state} blocks matches` } };
   }
-  const next: Status = { ...cur, state: "IN_MATCH" };
+  const next: Status = { ...cur, state: "IN_MATCH", inMatchAt: now };
   return { status: next, guard: { ok: true } };
 }
 
@@ -99,7 +107,7 @@ export function refundManualMatch(status: Status, now: number): Status {
 // Match end. Expiry wins over a return to ready.
 export function finishMatch(status: Status, now: number): Status {
   if (status.state !== "IN_MATCH") return refresh(status, now);
-  const next = refresh({ ...status, state: "ACTIVE_READY" }, now);
+  const next = refresh({ ...status, state: "ACTIVE_READY", inMatchAt: null }, now);
   return next;
 }
 

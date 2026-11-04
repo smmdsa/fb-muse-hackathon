@@ -410,7 +410,7 @@ async function toggleAuto(mode) {
     $("auto-status").textContent = "Stopping auto battle — freeing the queue slot…";
     const p = await call("POST", "/v1/autobattle/pause");
     await refresh();
-    if (p.status !== 200) {
+    if (p.status !== 200 || p.data.state !== "PAUSED_MANUAL") {
       $("auto-status").textContent = `Stop failed: ${p.data.error || p.status}. Press stop again.`;
       toastSay("Stop failed — press stop again.");
       return;
