@@ -55,14 +55,14 @@
 <div class="mode-card" id="mode-ranked">
 <p class="eyebrow">Rated · humans only</p>
 <h3>RANKED</h3>
-<p class="sub">Same-ELO humans only. Ten-minute ticket, refunded on expiry.</p>
+<p class="sub">Same-ELO humans only. Ten-minute ticket, freed on expiry.</p>
 <button id="queue-ranked" class="btn-primary" type="button">Find ranked fight</button>
 </div>
 </div>
 <div class="row">
 <button id="qm-cancel" class="btn-ghost" type="button" hidden>Cancel ticket</button>
 </div>
-<p class="sub" id="qm-status">One energy per fight. Cancel keeps your energy.</p>
+<p class="sub" id="qm-status">Fights are free. Cancel frees the slot.</p>
 <p class="sub" id="qm-result" hidden></p>
 <details class="diag">
 <summary>Warm up in the sandbox (optional)</summary>
@@ -86,6 +86,7 @@
 </section>
 <section class="panel view" id="battle-view" hidden>
 <h2>Live battle</h2>
+<p class="auto-banner" id="auto-banner" hidden></p>
 <div class="score" aria-live="polite">
 <div class="side"><img id="score-a-img" alt="Cyan agent" src="" hidden /><div><span class="name tag-a" id="score-a-name">CYAN</span><div class="bar"><div class="fill hp-a" id="hp-a"></div></div><div class="bar thin"><div class="fill en-a" id="en-a"></div></div></div></div>
 <div class="clock"><span id="arena-clock">90</span><span id="arena-clock-unit">s</span><br /><span class="pill" id="pill-winner">no winner yet</span> <span class="pill live" id="moba-live" hidden title="Jump to live">● LIVE</span></div>

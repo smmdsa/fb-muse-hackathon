@@ -302,6 +302,61 @@ $("factory-start-btn").addEventListener("click", () => {
 
 setInterval(updateFactoryGate, 1000);
 
+// Compile feedback. The form swaps for a progress box while the
+// model works: the bar eases toward 90% and the log narrates
+// the real pipeline stages. The response settles it at 100%.
+let compileTimer = 0;
+
+function compileLines(chars) {
+  return [
+    `uplink battle plan (${chars} chars)…`,
+    "briefing model: arena law + 17 sensors…",
+    "streaming draft tokens…",
+    "validating schema, operands, moves…",
+    "auditing cost + hashing draft…",
+    "minting version…",
+  ];
+}
+
+function compileProgressStart(chars) {
+  show($("factory-form"), false);
+  show($("compile-progress"), true);
+  const fill = $("compile-bar-fill");
+  const log = $("compile-log");
+  log.textContent = "";
+  const lines = compileLines(chars);
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    fill.style.width = "100%";
+    const p = document.createElement("p");
+    p.textContent = "> compiling — waiting for the model.";
+    log.appendChild(p);
+    return;
+  }
+  let pct = 0;
+  let li = 0;
+  fill.style.width = "0%";
+  const step = () => {
+    pct = Math.min(90, pct + (90 - pct) * 0.12 + 1);
+    fill.style.width = `${pct.toFixed(0)}%`;
+    if (li < lines.length && pct > ((li + 1) * 90) / lines.length) {
+      const p = document.createElement("p");
+      p.textContent = `> ${lines[li]}`;
+      log.appendChild(p);
+      li += 1;
+    }
+  };
+  step();
+  clearInterval(compileTimer);
+  compileTimer = setInterval(step, 220);
+}
+
+function compileProgressStop() {
+  clearInterval(compileTimer);
+  $("compile-bar-fill").style.width = "100%";
+  show($("compile-progress"), false);
+  show($("factory-form"), true);
+}
+
 $("compile-btn").addEventListener("click", async () => {
   const prompt = $("prompt").value.trim();
   if (!prompt) {
@@ -310,7 +365,9 @@ $("compile-btn").addEventListener("click", async () => {
   }
   $("train-msg").textContent = "Compiling…";
   $("fight-btn").disabled = true;
+  compileProgressStart(prompt.length);
   const r = await call("POST", `/v1/agents/${agentId}/policies/compile`, { prompt });
+  compileProgressStop();
   if (r.status !== 201) {
     if (r.status === 429) {
       factoryFormOpen = false;

@@ -337,6 +337,15 @@ textarea {
 .forge-auto { margin-top: 14px; border: 1px solid var(--line); border-radius: 3px; background: var(--panel-low); padding: 14px 16px; }
 .forge-auto h3 { margin: 0 0 6px; font-size: 15px; letter-spacing: 0.12em; }
 #hero-card .forge-stats { grid-template-columns: 1fr; }
+.auto-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+.auto-mode .eyebrow { margin: 0 0 6px; }
+.auto-mode .btn-primary { width: 100%; }
+.auto-banner { margin: 8px 0 0; padding: 10px 14px; text-align: center; font-weight: 800; letter-spacing: 0.1em; border: 1px solid #8affec; border-radius: 3px; background: #0a141b; color: #8affec; }
+.compile-progress { margin-top: 12px; border: 1px solid var(--line); border-radius: 3px; background: #0a141b; padding: 14px 16px; }
+.compile-bar { height: 10px; background: #16232b; border-radius: 2px; overflow: hidden; }
+#compile-bar-fill { display: block; height: 100%; width: 0; background: #8affec; transition: width 0.2s linear; }
+.compile-log { margin-top: 10px; display: grid; gap: 3px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--dim); }
+.compile-log p { margin: 0; }
 .forge-auto .row { margin-top: 10px; }
 .forge-status { margin-top: 10px; }
 .forge-cta { display: flex; gap: 10px; margin-top: 14px; }

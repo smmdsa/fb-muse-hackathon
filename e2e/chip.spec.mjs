@@ -38,6 +38,39 @@ test("chip lab shows loading until the session resolves", async ({ browser }) =>
   }
 });
 
+test("compile swaps the form for a progress box until the model answers", async ({ browser }) => {
+  const srv = await startE2EServer();
+  const users = seedE2E(srv.store);
+  const ctx = await browser.newContext();
+  await loginAs(ctx, users.alice);
+  const page = await ctx.newPage();
+  const bad = [];
+  page.on("pageerror", (e) => bad.push(String(e).slice(0, 160)));
+  try {
+    await page.route("**/policies/compile", async (route) => {
+      await new Promise((r) => setTimeout(r, 2500));
+      await route.continue();
+    });
+    await page.goto(`${srv.url}/chip.html`);
+    await expect(page.locator("#train-card")).toBeVisible({ timeout: 15000 });
+    await page.click("#factory-start-btn");
+    await expect(page.locator("#factory-form")).toBeVisible();
+    await page.fill("#prompt", "rush them down up close without fear");
+    await page.click("#compile-btn");
+    await expect(page.locator("#compile-progress")).toBeVisible();
+    await expect(page.locator("#factory-form")).toBeHidden();
+    await expect(page.locator("#compile-log")).toContainText("uplink battle plan");
+    const w1 = await page.locator("#compile-bar-fill").evaluate((el) => parseFloat(el.style.width) || 0);
+    expect(w1).toBeGreaterThan(0);
+    await expect(page.locator("#train-msg")).toContainText("Draft minted", { timeout: 15000 });
+    await expect(page.locator("#compile-progress")).toBeHidden();
+    expect(bad).toEqual([]);
+  } finally {
+    await ctx.close();
+    await srv.close();
+  }
+});
+
 test("chip lab invites a lost session to sign in", async ({ browser }) => {
   const srv = await startE2EServer();
   const users = seedE2E(srv.store);
