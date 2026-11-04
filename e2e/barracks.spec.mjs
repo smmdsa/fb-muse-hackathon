@@ -135,6 +135,39 @@ test("stop surfaces pause failures instead of dying silent", async ({ browser, r
   }
 });
 
+test("stop frees even a match stuck mid-tick", async ({ browser, request }) => {
+  const srv = await startE2EServer();
+  const users = seedE2E(srv.store);
+  const ctx = await browser.newContext();
+  await loginAs(ctx, users.alice);
+  const page = await ctx.newPage();
+  const bad = [];
+  page.on("pageerror", (e) => bad.push(String(e).slice(0, 160)));
+  try {
+    const opt = await request.post(`${srv.url}/v1/autobattle/opt-in`, {
+      headers: { authorization: `Bearer ${users.alice.token}` },
+      data: { mode: "ranked" },
+    });
+    expect(opt.status()).toBe(200);
+    // A crashed tick leaves IN_MATCH behind; the stop must still land.
+    const stuck = srv.store.db.prepare("SELECT id, autobattle_json FROM leaders WHERE token = ?").get(users.alice.token);
+    const st = JSON.parse(stuck.autobattle_json);
+    st.state = "IN_MATCH";
+    st.inMatchAt = Date.now();
+    srv.store.db.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").run(JSON.stringify(st), stuck.id);
+    await page.goto(`${srv.url}/profile.html`);
+    await expect(page.locator("#auto-live")).toContainText("Fight running now", { timeout: 15000 });
+    await expect(page.locator("#auto-opt-ranked")).toHaveText("Stop auto-battle");
+    await page.click("#auto-opt-ranked");
+    await expect(page.locator("#auto-opt-ranked")).toHaveText("Start auto-battle", { timeout: 15000 });
+    await expect(page.locator("#auto-status")).toContainText("Paused");
+    expect(bad).toEqual([]);
+  } finally {
+    await ctx.close();
+    await srv.close();
+  }
+});
+
 test("history splits normal and ranked tabs", async ({ browser, request }) => {
   const srv = await startE2EServer();
   const users = seedE2E(srv.store);

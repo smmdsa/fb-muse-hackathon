@@ -399,13 +399,21 @@ async function autoTickD1(
     const agent = await env.DB.prepare("SELECT * FROM agents WHERE leader_id = ?").bind(leaderId).first<Record<string, unknown>>();
     const seed = `ab-${leaderId}-${now}-${(abSeqD1 += 1)}`;
     const foe = await findHumanOpponent(env, leaderId, now);
-    if (foe) {
-      const settled = await settleRankedD1(env, { aVersionId: agent?.active_version_id as string, bVersionId: foe.versionId, seed, key: `abm-${seed}` });
-      matches.push(settled as Record<string, unknown>);
-    } else {
-      const casual = await runCasualD1(env, { aVersionId: agent?.active_version_id as string, leaderId, useBot: true, seed });
-      const row = await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(casual.matchId).first<Record<string, unknown>>();
-      if (row) matches.push(row);
+    try {
+      if (foe) {
+        const settled = await settleRankedD1(env, { aVersionId: agent?.active_version_id as string, bVersionId: foe.versionId, seed, key: `abm-${seed}` });
+        matches.push(settled as Record<string, unknown>);
+      } else {
+        const casual = await runCasualD1(env, { aVersionId: agent?.active_version_id as string, leaderId, useBot: true, seed });
+        const row = await env.DB.prepare("SELECT * FROM matches WHERE id = ?").bind(casual.matchId).first<Record<string, unknown>>();
+        if (row) matches.push(row);
+      }
+    } catch (err) {
+      // A foe row that vanished mid-tick must not brick the lease in
+      // IN_MATCH: heal to rest and stop the pass.
+      const healed = refresh({ ...go.status, state: "ACTIVE_READY", inMatchAt: null }, now);
+      await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(healed), leaderId).run();
+      break;
     }
     ran += 1;
     const done = finishMatch(go.status, now);

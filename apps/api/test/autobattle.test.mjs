@@ -80,4 +80,25 @@ describe("autobattle scheduler", () => {
       db.close();
     })();
   });
+
+  it("heals the lease when a tick settle throws mid-match", () => {
+    const db = openStore(":memory:");
+    const t0 = 4_000_000;
+    return (async () => {
+      const d = await leader(db, "owner",);
+      const foe = await leader(db, "ghost",);
+      optInAutobattle(db, d.id, t0);
+      optInAutobattle(db, foe.id, t0);
+      // The foe queue picks an active version row that no longer exists.
+      db.db.prepare("DELETE FROM versions WHERE id = ?").run(foe.version);
+      const tick = autobattleTick(db, d.id, t0 + 1, 3);
+      assert.equal(tick.ran, 0);
+      assert.deepEqual(tick.matches, []);
+      const st = JSON.parse(db.db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get(d.id).autobattle_json);
+      assert.equal(st.state, "ACTIVE_READY");
+      const out = pauseAutobattle(db, d.id, t0 + 2);
+      assert.equal(out.state, "PAUSED_MANUAL");
+      db.close();
+    })();
+  });
 });
