@@ -115,7 +115,7 @@ describe("accounts", () => {
       const a = await soloCall("POST", "/v1/agents", { name: "Q", concept: "waits" }, s.json.token);
       const v = await soloCall("POST", `/v1/agents/${a.json.agentId}/policies/compile`, { prompt: "hold the center patiently" }, s.json.token);
       await soloCall("POST", `/v1/agents/${a.json.agentId}/policies/install`, { versionId: v.json.versionId }, s.json.token);
-      const q = await soloCall("POST", "/v1/matchmaking/request", { versionId: v.json.versionId, mode: "ranked" }, s.json.token);
+      const q = await soloCall("POST", "/v1/matchmaking/request", { versionId: v.json.versionId, mode: "casual" }, s.json.token);
       assert.equal(q.status, 201);
       assert.equal(q.json.status, "queued");
       const spent = solo.db.prepare("SELECT autobattle_json FROM leaders WHERE handle = ?").get("quitter");
@@ -148,6 +148,8 @@ describe("accounts", () => {
       assert.equal(retry.json.status, "queued");
       const rows = solo.db.prepare("SELECT id FROM tickets WHERE status = 'queued'").all();
       assert.deepEqual(rows.map((r) => r.id), [first.json.id]);
+      const spent = solo.db.prepare("SELECT autobattle_json FROM leaders WHERE handle = ?").get("resumer");
+      assert.equal(JSON.parse(spent.autobattle_json).attackAt.length, 1);
     } finally {
       solo.close();
     }

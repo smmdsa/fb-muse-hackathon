@@ -78,7 +78,8 @@ export function openStore(path: string): Store {
       foe_version TEXT,
       match_id TEXT,
       created_at INTEGER NOT NULL,
-      settle_at INTEGER NOT NULL
+      settle_at INTEGER NOT NULL,
+      spent INTEGER NOT NULL DEFAULT 0
     );
     CREATE UNIQUE INDEX IF NOT EXISTS tickets_open_single ON tickets(leader_id, mode) WHERE status = 'queued';
 

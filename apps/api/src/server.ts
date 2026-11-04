@@ -416,7 +416,11 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         return;
       }
       if (req.method === "POST" && url.pathname === "/v1/autobattle/pause") {
-        send(res, 200, pauseAutobattle(ctx.store, me.id as string));
+        try {
+          send(res, 200, pauseAutobattle(ctx.store, me.id as string));
+        } catch (err) {
+          send(res, 500, { error: (err as Error).message });
+        }
         return;
       }
       if (req.method === "GET" && url.pathname === "/v1/autobattle/digest") {
@@ -598,11 +602,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
           send(res, msg.includes("self match") ? 422 : 404, { error: msg });
           return;
         }
-        const spent = spendEnergy(ctx.store, me.id as string);
-        if (!spent.ok) {
-          send(res, 409, { error: spent.reason });
-          return;
-        }
+        // Ranked fights are free: no daily slot, the season ladder decides.
         try {
           send(res, 201, runRanked(ctx.store, { aVersionId, bVersionId, seed, key }));
         } catch (err) {

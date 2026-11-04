@@ -98,9 +98,9 @@ describe("matches", () => {
     assert.equal(row.latency_ms, v.json.latencyMs);
   });
 
-  it("takes one daily slot per ranked fight", async () => {
+  it("leaves the daily count alone on ranked fights", async () => {
     const row = store.db.prepare("SELECT autobattle_json FROM leaders WHERE handle = ?").get("alpha");
-    assert.equal(JSON.parse(row.autobattle_json).attackAt.length, 1);
+    assert.equal(JSON.parse(row.autobattle_json).attackAt.length, 0);
   });
 
   it("stores payouts and lists recent fights with replay links", async () => {
@@ -118,8 +118,8 @@ describe("matches", () => {
     assert.equal(typeof first.replay, "string");
   });
 
-  it("denies ranked past the daily cap", async () => {
-    for (let i = 2; i <= 10; i += 1) {
+  it("runs ranked past the old daily cap", async () => {
+    for (let i = 2; i <= 11; i += 1) {
       const r = await call(
         "POST",
         "/v1/matches/ranked",
@@ -128,13 +128,7 @@ describe("matches", () => {
       );
       assert.equal(r.status, 201);
     }
-    const out = await call(
-      "POST",
-      "/v1/matches/ranked",
-      { aVersionId: keys.a.version, bVersionId: keys.b.version, seed: "rank-11", key: "rank-11" },
-      keys.a.token,
-    );
-    assert.equal(out.status, 409);
-    assert.match(out.json.error, /daily match cap reached/);
+    const row = store.db.prepare("SELECT autobattle_json FROM leaders WHERE handle = ?").get("alpha");
+    assert.equal(JSON.parse(row.autobattle_json).attackAt.length, 0);
   });
 });
