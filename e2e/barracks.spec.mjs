@@ -107,6 +107,34 @@ test("stop clears the queue line and frees the slot", async ({ browser, request 
   }
 });
 
+test("stop surfaces pause failures instead of dying silent", async ({ browser, request }) => {
+  const srv = await startE2EServer();
+  const users = seedE2E(srv.store);
+  const ctx = await browser.newContext();
+  await loginAs(ctx, users.alice);
+  const page = await ctx.newPage();
+  const bad = [];
+  page.on("pageerror", (e) => bad.push(String(e).slice(0, 160)));
+  try {
+    const opt = await request.post(`${srv.url}/v1/autobattle/opt-in`, {
+      headers: { authorization: `Bearer ${users.alice.token}` },
+      data: { mode: "ranked" },
+    });
+    expect(opt.status()).toBe(200);
+    await page.goto(`${srv.url}/profile.html`);
+    await expect(page.locator("#auto-opt-ranked")).toHaveText("Stop auto-battle", { timeout: 15000 });
+    await page.route("**/v1/autobattle/pause", (route) => route.fulfill({ status: 500, body: '{"error":"boom"}' }));
+    await page.click("#auto-opt-ranked");
+    await expect(page.locator("#auto-status")).toContainText("Stop failed", { timeout: 15000 });
+    await expect(page.locator("#auto-opt-ranked")).toHaveText("Stop auto-battle");
+    await expect(page.locator("#auto-opt-ranked")).toBeEnabled();
+    expect(bad).toEqual([]);
+  } finally {
+    await ctx.close();
+    await srv.close();
+  }
+});
+
 test("history splits normal and ranked tabs", async ({ browser, request }) => {
   const srv = await startE2EServer();
   const users = seedE2E(srv.store);

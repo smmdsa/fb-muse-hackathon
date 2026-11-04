@@ -350,9 +350,12 @@ async function renderAuto() {
   }
   const d = r.data;
   const lease = d.leaseExpiresAt ? `lease ends ${new Date(d.leaseExpiresAt).toLocaleString()}` : "no lease";
-  $("auto-status").textContent = d.optIn
-    ? `Running — ${d.state}, ${lease}, ${d.stopReason}. Free fights, stop anytime.`
-    : `Off — ${d.stopReason}. Press start for a 24h lease.`;
+  const paused = d.optIn && d.state === "PAUSED_MANUAL";
+  $("auto-status").textContent = !d.optIn
+    ? `Off — ${d.stopReason}. Press start for a 24h lease.`
+    : paused
+    ? `Paused — ${lease}, ${d.stopReason}. Press start to resume.`
+    : `Running — ${d.state}, ${lease}, ${d.stopReason}. Free fights, stop anytime.`;
   paintAutoLive(d);
   paintAutoButtons(d);
   show($("auto-card"), true);
@@ -386,15 +389,33 @@ function paintAutoButtons(d) {
     const mine = live && d.autoMode === mode;
     b.textContent = mine ? "Stop auto-battle" : "Start auto-battle";
     b.classList.toggle("danger", mine);
+    b.disabled = false;
   }
 }
 
 async function toggleAuto(mode) {
+  const btn = $(mode === "ranked" ? "auto-opt-ranked" : "auto-opt");
+  if (btn) btn.disabled = true;
   const r = await call("GET", "/v1/autobattle/digest");
-  if (r.status !== 200) return;
+  if (r.status !== 200) {
+    if (btn) btn.disabled = false;
+    $("auto-status").textContent = r.status === 401
+      ? "Session expired — sign in again to manage auto battle."
+      : `AutoBattle unavailable (${r.data.error || r.status}). Press stop again.`;
+    toastSay("Auto battle did not answer — see the status line.");
+    return;
+  }
   if (autoLive(r.data) && r.data.autoMode === mode) {
-    await call("POST", "/v1/autobattle/pause");
+    if (btn) btn.textContent = "Stopping…";
+    $("auto-status").textContent = "Stopping auto battle — freeing the queue slot…";
+    const p = await call("POST", "/v1/autobattle/pause");
     await refresh();
+    if (p.status !== 200) {
+      $("auto-status").textContent = `Stop failed: ${p.data.error || p.status}. Press stop again.`;
+      toastSay("Stop failed — press stop again.");
+      return;
+    }
+    toastSay("Auto battle stopped — the slot is freed.");
     return;
   }
   await startAuto(mode);

@@ -163,7 +163,7 @@ describe("matchmaking queue", () => {
     arena.db.prepare("INSERT INTO versions (id, agent_id, policy_json, sha, created_at) VALUES (?, ?, ?, ?, ?)").run(
       "v-quit", a.id, JSON.stringify({ schemaVersion: 1, agentVersionId: "v-quit", dna: { aggression: 50, evasion: 50, preferredDistance: 50, energyConservation: 50 }, rules: [] }), "shim", t0,
     );
-    const q = requestMatch(arena, { leaderId: "l-quit", versionId: "v-quit", mode: "ranked" }, t0);
+    const q = requestMatch(arena, { leaderId: "l-quit", versionId: "v-quit", mode: "casual" }, t0);
     assert.equal(q.status, "queued");
     const spent = arena.db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get("l-quit");
     assert.equal(JSON.parse(spent.autobattle_json).attackAt.length, 1);
@@ -218,6 +218,27 @@ describe("matchmaking queue", () => {
     assert.equal(digest.stopReason, "paused");
     const back = arena.db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get(d.id);
     assert.equal(JSON.parse(back.autobattle_json).attackAt.length, 0);
+    arena.close();
+  });
+
+  it("queues ranked and leased casual without spending a daily slot", async () => {
+    const arena = openStore(":memory:");
+    const t0 = 7_000_000;
+    const d = await leader("freeloader", "rush them down up close", arena);
+    installVersion(arena, { leaderId: d.id, agentId: d.agentId, versionId: d.version });
+    const q = requestMatch(arena, { leaderId: d.id, versionId: d.version, mode: "ranked" }, t0);
+    assert.equal(q.status, "queued");
+    assert.equal(q.spent, 0);
+    optInAutobattle(arena, d.id, t0 + 1, "casual");
+    const c = requestMatch(arena, { leaderId: d.id, versionId: d.version, mode: "casual" }, t0 + 2);
+    assert.equal(c.status, "queued");
+    assert.equal(c.spent, 0);
+    const kept = arena.db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get(d.id);
+    assert.equal(JSON.parse(kept.autobattle_json).attackAt.length, 0);
+    cancelTicket(arena, { ticketId: q.id, leaderId: d.id }, t0 + 3);
+    cancelTicket(arena, { ticketId: c.id, leaderId: d.id }, t0 + 4);
+    const still = arena.db.prepare("SELECT autobattle_json FROM leaders WHERE id = ?").get(d.id);
+    assert.equal(JSON.parse(still.autobattle_json).attackAt.length, 0);
     arena.close();
   });
 });

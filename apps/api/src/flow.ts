@@ -778,21 +778,29 @@ export function requestMatch(
   if ((owned.active_version_id as string) !== input.versionId) throw new Error("queue your active version");
   const open = store.db.prepare("SELECT * FROM tickets WHERE leader_id = ? AND mode = ? AND status = 'queued'").get(input.leaderId, input.mode);
   if (open) throw new Error("ticket already open for this mode");
-  const spent = spendEnergy(store, input.leaderId, now);
-  if (!spent.ok) throw new Error((spent as { reason: string }).reason);
+  // Ranked never spends: the 24h lease is the only gate. Casual spends
+  // one daily slot unless the lease already runs this mode.
+  const lease = energyFor(store, input.leaderId, now);
+  const leased = lease.optIn && lease.state !== "PAUSED_MANUAL" && lease.autoMode === input.mode
+    && (lease.leaseExpiresAt === null || now < lease.leaseExpiresAt);
+  const free = input.mode === "ranked" || leased;
+  if (!free) {
+    const spent = spendEnergy(store, input.leaderId, now);
+    if (!spent.ok) throw new Error((spent as { reason: string }).reason);
+  }
   const id = mintId("t");
   const wait = input.mode === "casual" ? BOT_SETTLE_MS : RANKED_TICKET_MS;
   // The partial unique index admits one queued row per leader and mode.
   // A rival request that wins the insert race leaves its row behind,
   // so the loser refunds its charge and resumes that row.
   try {
-    store.db.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)").run(
-      id, input.leaderId, input.versionId, input.mode, now, now + wait,
+    store.db.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at, spent) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)").run(
+      id, input.leaderId, input.versionId, input.mode, now, now + wait, free ? 0 : 1,
     );
   } catch (err) {
     const winner = openTicket(store, { leaderId: input.leaderId, mode: input.mode });
     if (winner && String((err as Error).message || "").includes("tickets.leader_id")) {
-      refundEnergy(store, input.leaderId, now);
+      if (!free) refundEnergy(store, input.leaderId, now);
       return winner;
     }
     throw err;
@@ -834,7 +842,7 @@ export function readTicket(
   }
   // Ranked expiry with no foe: no fight started, so the charge returns.
   store.db.prepare("UPDATE tickets SET status = 'expired' WHERE id = ?").run(input.ticketId);
-  refundEnergy(store, input.leaderId, now);
+  if (ticket.spent) refundEnergy(store, input.leaderId, now);
   return { ...(store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(input.ticketId) as Record<string, unknown>) };
 }
 
@@ -1357,7 +1365,7 @@ export function cancelTicket(
   if (!ticket || ticket.leader_id !== input.leaderId) throw new Error("unknown ticket");
   if (ticket.status !== "queued") throw new Error(`ticket is ${ticket.status}, nothing to cancel`);
   store.db.prepare("UPDATE tickets SET status = 'canceled' WHERE id = ?").run(input.ticketId);
-  refundEnergy(store, input.leaderId, now);
+  if (ticket.spent) refundEnergy(store, input.leaderId, now);
   return store.db.prepare("SELECT * FROM tickets WHERE id = ?").get(input.ticketId) as Record<string, unknown>;
 }
 

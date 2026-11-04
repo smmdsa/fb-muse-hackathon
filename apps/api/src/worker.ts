@@ -371,10 +371,10 @@ async function pauseAutoD1(env: WorkerEnv, leaderId: string, now: number): Promi
   await env.DB.prepare("UPDATE leaders SET autobattle_json = ? WHERE id = ?").bind(JSON.stringify(next), leaderId).run();
   // Stop frees the queue slot too: every open ticket cancels and
   // refunds, so the digest never reports a queue behind a paused lease.
-  const open = await env.DB.prepare("SELECT id FROM tickets WHERE leader_id = ? AND status = 'queued'").bind(leaderId).all<{ id: string }>();
+  const open = await env.DB.prepare("SELECT id, spent FROM tickets WHERE leader_id = ? AND status = 'queued'").bind(leaderId).all<{ id: string; spent: number }>();
   for (const t of open.results) {
     await env.DB.prepare("UPDATE tickets SET status = 'canceled' WHERE id = ?").bind(t.id).run();
-    await refundEnergy(env, leaderId, now);
+    if (t.spent) await refundEnergy(env, leaderId, now);
   }
   return { state: next.state };
 }
@@ -848,21 +848,29 @@ async function requestMatchD1(
   if (owned.active_version_id !== input.versionId) throw new Error("queue your active version");
   const open = await env.DB.prepare("SELECT * FROM tickets WHERE leader_id = ? AND mode = ? AND status = 'queued'").bind(input.leaderId, input.mode).first();
   if (open) throw new Error("ticket already open for this mode");
-  const spent = await spendEnergy(env, input.leaderId, now);
-  if (!spent.ok) throw new Error(spent.reason ?? "energy empty");
+  // Ranked never spends: the 24h lease is the only gate. Casual spends
+  // one daily slot unless the lease already runs this mode.
+  const lease = await energyFor(env, input.leaderId, now);
+  const leased = lease.optIn && lease.state !== "PAUSED_MANUAL" && lease.autoMode === input.mode
+    && (lease.leaseExpiresAt === null || now < (lease.leaseExpiresAt as number));
+  const free = input.mode === "ranked" || leased;
+  if (!free) {
+    const spent = await spendEnergy(env, input.leaderId, now);
+    if (!spent.ok) throw new Error(spent.reason ?? "energy empty");
+  }
   const id = mintId("t");
   const wait = input.mode === "casual" ? BOT_SETTLE_MS : RANKED_TICKET_MS;
   // The partial unique index admits one queued row per leader and mode.
   // A rival request that wins the insert race leaves its row behind,
   // so the loser refunds its charge and resumes that row.
   try {
-    await env.DB.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)").bind(
-      id, input.leaderId, input.versionId, input.mode, now, now + wait,
+    await env.DB.prepare("INSERT INTO tickets (id, leader_id, version_id, mode, status, created_at, settle_at, spent) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)").bind(
+      id, input.leaderId, input.versionId, input.mode, now, now + wait, free ? 0 : 1,
     ).run();
   } catch (err) {
     const winner = await env.DB.prepare("SELECT * FROM tickets WHERE leader_id = ? AND mode = ? AND status = 'queued'").bind(input.leaderId, input.mode).first<Record<string, unknown>>();
     if (winner && String((err as Error).message || "").includes("tickets.leader_id")) {
-      await refundEnergy(env, input.leaderId, now);
+      if (!free) await refundEnergy(env, input.leaderId, now);
       return winner;
     }
     throw err;
@@ -895,7 +903,7 @@ async function readTicketD1(
   if (ticket.mode === "casual") return withMatchD1(env, await settleTicketD1(env, ticket, null));
   // Ranked expiry with no foe: no fight started, so the charge returns.
   await env.DB.prepare("UPDATE tickets SET status = 'expired' WHERE id = ?").bind(input.ticketId).run();
-  await refundEnergy(env, input.leaderId, now);
+  if (ticket.spent) await refundEnergy(env, input.leaderId, now);
   return (await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(input.ticketId).first<Record<string, unknown>>()) as Record<string, unknown>;
 }
 
@@ -1236,7 +1244,11 @@ export default {
       }
     }
     if (request.method === "POST" && url.pathname === "/v1/autobattle/pause") {
-      return json(await pauseAutoD1(env, me.id as string, Date.now()), 200);
+      try {
+        return json(await pauseAutoD1(env, me.id as string, Date.now()), 200);
+      } catch (err) {
+        return json({ error: (err as Error).message }, 500);
+      }
     }
     if (request.method === "GET" && url.pathname === "/v1/autobattle/digest") {
       return json(await autoDigestD1(env, me.id as string, Date.now()), 200);
@@ -1496,8 +1508,7 @@ export default {
       const bAgent = await env.DB.prepare("SELECT * FROM agents WHERE id = ?").bind(b.agent_id as string).first<Record<string, unknown>>();
       if (!aAgent || !bAgent) return json({ error: "unknown agent" }, 404);
       if (aAgent.leader_id === bAgent.leader_id) return json({ error: "self match denied" }, 422);
-      const spent = await spendEnergy(env, me.id as string);
-      if (!spent.ok) return json({ error: spent.reason }, 409);
+      // Ranked fights are free: no daily slot, the season ladder decides.
       try {
         return json(await settleRankedD1(env, { aVersionId, bVersionId, seed, key }), 201);
       } catch (err) {
@@ -1782,7 +1793,7 @@ export default {
         if (!ticket || ticket.leader_id !== me.id) return json({ error: "unknown ticket" }, 404);
         if (ticket.status !== "queued") return json({ error: `ticket is ${ticket.status}, nothing to cancel` }, 404);
         await env.DB.prepare("UPDATE tickets SET status = 'canceled' WHERE id = ?").bind(ticketId).run();
-        await refundEnergy(env, me.id as string, Date.now());
+        if (ticket.spent) await refundEnergy(env, me.id as string, Date.now());
         const row = await env.DB.prepare("SELECT * FROM tickets WHERE id = ?").bind(ticketId).first<Record<string, unknown>>();
         return json(row, 200);
       } catch (err) {
