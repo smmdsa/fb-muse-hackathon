@@ -432,6 +432,8 @@ table.chips th { font-family: var(--body); color: var(--dim); font-weight: 700; 
 .rank-emblem img { width: 64px; height: 64px; object-fit: contain; }
 .rank-bar { height: 8px; border: 1px solid var(--outline); border-radius: 2px; background: var(--panel-low); overflow: hidden; margin-top: 8px; }
 .rank-bar i { display: block; height: 100%; background: var(--gold); }
+#lobby-progress { width: 0%; }
+#confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
 .score { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center; margin-bottom: 12px; }
 .score .side { display: flex; gap: 8px; align-items: center; }
 .score .side.right { justify-content: end; text-align: right; }

@@ -42,7 +42,13 @@ export async function startE2EServer() {
     }
     readFile(file).then(
       (body) => {
-        res.writeHead(200, { "content-type": MIME[extname(file).toLowerCase()] ?? "application/octet-stream" });
+        res.writeHead(200, {
+          "content-type": MIME[extname(file).toLowerCase()] ?? "application/octet-stream",
+          "content-security-policy": "default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+          "x-frame-options": "DENY",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "strict-origin-when-cross-origin",
+        });
         res.end(body);
       },
       () => {

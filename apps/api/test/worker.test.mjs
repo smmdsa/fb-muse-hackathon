@@ -101,6 +101,24 @@ describe("worker reads", () => {
     assert.match(res.headers.get("content-type"), /text\/html/);
     assert.match(await res.text(), /Agent Wars/);
   });
+
+  it("sends security headers on api and static responses", async () => {
+    const api = await entry.fetch(new Request("http://local/v1/me"), env);
+    assert.equal(api.headers.get("x-frame-options"), "DENY");
+    assert.match(api.headers.get("content-security-policy") ?? "", /script-src 'self'/);
+    assert.match(api.headers.get("strict-transport-security") ?? "", /max-age/);
+    const page = await entry.fetch(new Request("http://local/"), env);
+    assert.equal(page.headers.get("x-frame-options"), "DENY");
+    assert.match(page.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+  });
+
+  it("restricts cross-origin reads to the site origin", async () => {
+    const evil = await entry.fetch(new Request("http://local/v1/leaderboard", { headers: { origin: "https://evil.example" } }), env);
+    assert.equal(evil.status, 200);
+    assert.equal(evil.headers.get("access-control-allow-origin"), null);
+    const own = await entry.fetch(new Request("http://local/v1/leaderboard", { headers: { origin: "https://play-agent-wars.nwart.app" } }), env);
+    assert.equal(own.headers.get("access-control-allow-origin"), "https://play-agent-wars.nwart.app");
+  });
 });
 
 describe("worker writes", () => {

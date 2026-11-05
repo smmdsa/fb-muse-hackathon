@@ -15,7 +15,7 @@ import type { Candidate, History } from "@agent-wars/matchmaker";
 import type { AgentPolicy } from "@agent-wars/behavior-dna";
 import { validatePolicy } from "@agent-wars/behavior-dna";
 import { checkLimit } from "./ids.ts";
-import { buildLoginMessage, buildClearCookie, buildSetCookie, handleError, hashToken, isAddress, normalizeAddress, normalizeHandle, NONCE_TTL_MS, readSessionCookie, SESSION_TTL_MS, verifyWalletSignature } from "@agent-wars/auth";
+import { buildLoginMessage, buildClearCookie, buildSetCookie, demoHandleError, handleError, hashToken, isAddress, normalizeAddress, normalizeHandle, NONCE_TTL_MS, readSessionCookie, SESSION_TTL_MS, verifyWalletSignature } from "@agent-wars/auth";
 
 // Per-route sliding windows. Memory-only per isolate.
 const authHits = new Map<string, number[]>();
@@ -54,12 +54,47 @@ type D1Database = {
   };
 };
 
+// One security header set for every response the worker serves.
+const SECURITY_HEADERS: Record<string, string> = {
+  "content-security-policy": "default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+  "x-frame-options": "DENY",
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "strict-origin-when-cross-origin",
+};
+
+const ALLOWED_ORIGINS = new Set([
+  "https://play-agent-wars.nwart.app",
+  "https://fb-muse-hackathon.smmdsa.workers.dev",
+]);
+
+// CORS allowlist in one place: same-origin needs no header, listed
+// origins echo back, anything else loses the header entirely.
+function withCors(request: Request, res: Response): Response {
+  if (res.headers.get("access-control-allow-origin") === null) return res;
+  const origin = (request.headers.get("origin") ?? "").trim();
+  const headers = new Headers(res.headers);
+  headers.delete("access-control-allow-origin");
+  if (ALLOWED_ORIGINS.has(origin)) {
+    headers.set("access-control-allow-origin", origin);
+    headers.set("vary", "Origin");
+  }
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
+function withSecurity(res: Response): Response {
+  const headers = new Headers(res.headers);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 function json(body: unknown, code = 200, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status: code,
     headers: {
       "content-type": "application/json",
       ...extraHeaders,
+      ...SECURITY_HEADERS,
       "access-control-allow-origin": "*",
       "access-control-allow-headers": "authorization, content-type",
     },
@@ -1043,10 +1078,15 @@ export default {
     await cronTick(env, Date.now());
   },
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+    return withCors(request, await handleApi(request, env));
+  },
+};
+
+async function handleApi(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
     // The viewer is a static asset. Anything outside /v1/ serves the game.
-    if (url.pathname === "/auth") return env.ASSETS.fetch(new Request(new URL("/auth.html", request.url), request));
-    if (!url.pathname.startsWith("/v1/")) return env.ASSETS.fetch(request);
+    if (url.pathname === "/auth") return withSecurity(await env.ASSETS.fetch(new Request(new URL("/auth.html", request.url), request)));
+    if (!url.pathname.startsWith("/v1/")) return withSecurity(await env.ASSETS.fetch(request));
     if (request.method === "OPTIONS") {
       return new Response(null, {
         status: 204,
@@ -1061,7 +1101,7 @@ export default {
       return json({ ok: true, worker: "agent-wars-api" });
     }
     if (request.method === "GET" && url.pathname === "/v1/ai/provider") {
-      const status = (task: "compile" | "portrait") => ({ provider: hasKey(task, env) ? "meta" : "mock", model: resolveModel(task, env), keyed: hasKey(task, env) });
+      const status = (task: "compile" | "portrait") => ({ provider: hasKey(task, env) ? "meta" : "mock", model: resolveModel(task, env) });
       return json({ compile: status("compile"), portrait: status("portrait"), explainer: status("compile") });
     }
     if (request.method === "GET" && url.pathname === "/v1/leaderboard") {
@@ -1146,14 +1186,24 @@ export default {
     if (request.method === "POST" && url.pathname === "/v1/auth/session") {
       const body = await readBody(request);
       if (body === null) return json({ error: "bad json" }, 400);
-      const handle = typeof body.handle === "string" ? body.handle.trim() : "";
-      if (!handle) return json({ error: "handle is required" }, 400);
-      const found = await env.DB.prepare("SELECT * FROM leaders WHERE handle = ?").bind(handle).first<Record<string, unknown>>();
-      if (found) return json({ token: found.token, leaderId: found.id });
-      if (limited(authHits, handle, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);
+      const raw = typeof body.handle === "string" ? body.handle.trim().toLowerCase() : "";
+      if (!raw) return json({ error: "handle is required" }, 400);
+      const invalid = demoHandleError(raw);
+      if (invalid) return json({ error: invalid }, 422);
+      const ip = (request.headers.get("cf-connecting-ip") ?? "").trim();
+      if (limited(authHits, ip ? `ip:${ip}` : `new:${raw}`, 60_000, 10)) return json({ error: "rate limited, retry later" }, 429);
+      const found = await env.DB.prepare("SELECT id FROM leaders WHERE handle = ?").bind(raw).first<Record<string, unknown>>();
+      // Never hand out another leader's token: taken handles sign in
+      // with their wallet instead.
+      if (found) return json({ error: "handle taken: sign in with wallet" }, 409);
       const id = mintId("leader");
       const token = newToken("demo");
-      await env.DB.prepare("INSERT INTO leaders (id, handle, token, handle_set) VALUES (?, ?, ?, 1)").bind(id, handle, token).run();
+      try {
+        await env.DB.prepare("INSERT INTO leaders (id, handle, token, handle_set) VALUES (?, ?, ?, 1)").bind(id, raw, token).run();
+      } catch (err) {
+        if (!/UNIQUE/i.test((err as Error).message)) throw err;
+        return json({ error: "handle taken: sign in with wallet" }, 409);
+      }
       return json({ token, leaderId: id });
     }
     if (request.method === "POST" && url.pathname === "/v1/auth/challenge") {
@@ -1891,5 +1941,4 @@ export default {
       }
     }
     return json({ error: "unknown route" }, 404);
-  },
-};
+  }
