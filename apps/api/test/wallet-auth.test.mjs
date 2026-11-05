@@ -140,6 +140,23 @@ describe("wallet login on the dev server", () => {
     const s = await call("POST", "/v1/auth/session", { handle: "wallet-legacy" });
     assert.equal((await call("GET", "/v1/me", null, s.json.token)).status, 200);
   });
+
+  it("never hands out another leader's token", async () => {
+    const first = await call("POST", "/v1/auth/session", { handle: "takeover-me" });
+    assert.equal(first.status, 200);
+    const again = await call("POST", "/v1/auth/session", { handle: "takeover-me" });
+    assert.equal(again.status, 409);
+    assert.equal(again.json.token, undefined);
+    const upper = await call("POST", "/v1/auth/session", { handle: "Takeover-Me" });
+    assert.equal(upper.status, 409);
+  });
+
+  it("rejects wild demo handles", async () => {
+    assert.equal((await call("POST", "/v1/auth/session", { handle: "x".repeat(41) })).status, 422);
+    assert.equal((await call("POST", "/v1/auth/session", { handle: "no spaces here" })).status, 422);
+    assert.equal((await call("POST", "/v1/auth/session", { handle: "admin" })).status, 422);
+    assert.equal((await call("POST", "/v1/auth/session", { handle: "-lead" })).status, 422);
+  });
 });
 
 describe("wallet login on the worker mirror", () => {
@@ -170,7 +187,7 @@ describe("wallet login on the worker mirror", () => {
 
   before(() => {
     db = new DatabaseSync(":memory:");
-    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0010_reports", "0011_version_labels", "0012_match_mode", "0013_ai_cooldowns", "0014_wallet_auth"]) {
+    for (const m of ["0001_schema", "0002_platform", "0003_matchmaking", "0004_cost_audit", "0005_portrait_status", "0006_match_payouts", "0007_tournaments", "0008_armory", "0009_season_archives", "0010_reports", "0011_version_labels", "0012_match_mode", "0013_ai_cooldowns", "0014_wallet_auth", "0015_handle_set"]) {
       db.exec(readFileSync(new URL(`../../../migrations/${m}.sql`, import.meta.url), "utf8"));
     }
     wenv = { DB: shim(db), ASSETS: assetsStub };
@@ -211,5 +228,22 @@ describe("wallet login on the worker mirror", () => {
     const sig = signLoginMessage(c.json.message, KEY_A);
     const r = await wcall("POST", "/v1/auth/wallet", { address: ADDR_B, message: c.json.message, signature: sig, nonce: c.json.nonce });
     assert.equal(r.status, 401);
+  });
+
+  it("never hands out another leader's token", async () => {
+    const first = await wcall("POST", "/v1/auth/session", { handle: "takeover-w" });
+    assert.equal(first.status, 200);
+    const again = await wcall("POST", "/v1/auth/session", { handle: "takeover-w" });
+    assert.equal(again.status, 409);
+    assert.equal(again.json.token, undefined);
+  });
+
+  it("limits demo signups per client address", async () => {
+    for (let i = 0; i < 10; i += 1) {
+      const r = await wcall("POST", "/v1/auth/session", { handle: `spamw-${i}` }, { "cf-connecting-ip": "9.9.9.9" });
+      assert.equal(r.status, 200);
+    }
+    const capped = await wcall("POST", "/v1/auth/session", { handle: "spamw-10" }, { "cf-connecting-ip": "9.9.9.9" });
+    assert.equal(capped.status, 429);
   });
 });

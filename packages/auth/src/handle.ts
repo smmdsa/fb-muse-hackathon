@@ -30,3 +30,13 @@ export function handleError(name: string): string | null {
   if (RESERVED.has(name)) return "that name is reserved";
   return null;
 }
+
+const DEMO_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+
+// Demo signup rule. Wider than claim (scripts and tests use short and
+// hyphenated names), but still bounded, lowercase, and reservation-aware.
+export function demoHandleError(name: string): string | null {
+  if (!DEMO_RE.test(name)) return "use 1-40 chars: a-z, 0-9, underscore, hyphen, starting with a letter or digit";
+  if (RESERVED.has(name)) return "that name is reserved";
+  return null;
+}

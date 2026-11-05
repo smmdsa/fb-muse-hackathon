@@ -10,7 +10,7 @@ import { analyzeBattle, armoryView, autobattleDigest, autobattleTick, battleConf
 import { checkLimit, newToken } from "./ids.ts";
 import type { TicketMode } from "./flow.ts";
 import { hasKey, resolveModel } from "@agent-wars/ai-provider";
-import { buildLoginMessage, buildClearCookie, buildSetCookie, handleError, hashToken, isAddress, normalizeAddress, normalizeHandle, NONCE_TTL_MS, readSessionCookie, SESSION_TTL_MS, verifyWalletSignature } from "@agent-wars/auth";
+import { buildLoginMessage, buildClearCookie, buildSetCookie, demoHandleError, handleError, hashToken, isAddress, normalizeAddress, normalizeHandle, NONCE_TTL_MS, readSessionCookie, SESSION_TTL_MS, verifyWalletSignature } from "@agent-wars/auth";
 
 // Per-route sliding windows. Memory-only; a restart clears history.
 const authHits = new Map<string, number[]>();
@@ -52,6 +52,23 @@ function send(res: ServerResponse, code: number, body: unknown, extraHeaders: Re
     ...extraHeaders,
   });
   res.end(text);
+}
+
+// CORS allowlist in one place. The dev server answers loopback only,
+// so loopback origins echo back and anything else loses the header.
+function corsWrap(req: IncomingMessage, res: ServerResponse): void {
+  const origin = typeof req.headers?.origin === "string" ? req.headers.origin.trim() : "";
+  const ok = /^(https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?)$/.test(origin);
+  const writeHead = res.writeHead.bind(res);
+  res.writeHead = ((code: number, headers?: Record<string, string | string[] | number>) => {
+    const out: Record<string, unknown> = { ...(headers as Record<string, unknown>) };
+    delete out["access-control-allow-origin"];
+    if (ok) {
+      out["access-control-allow-origin"] = origin;
+      out["vary"] = "Origin";
+    }
+    return writeHead(code, out as never);
+  }) as typeof res.writeHead;
 }
 
 function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -205,6 +222,7 @@ function deleteAccount(ctx: Ctx, leaderId: string, handle: string, wallet: strin
 // The router matches method plus path and answers with JSON.
 export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerResponse) => void {
   return async (req, res) => {
+    corsWrap(req, res);
     try {
       const url = new URL(req.url ?? "/", "http://local");
       const body = await readBody(req).catch(() => null);
@@ -213,20 +231,35 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         return;
       }
       if (req.method === "POST" && url.pathname === "/v1/auth/session") {
-        const handle = typeof body.handle === "string" ? body.handle.trim() : "";
-        if (!handle) {
+        const raw = typeof body.handle === "string" ? body.handle.trim().toLowerCase() : "";
+        if (!raw) {
           send(res, 400, { error: "handle is required" });
           return;
         }
-        if (limited(res, authHits, handle, 60_000, 10)) return;
-        const found = ctx.store.db.prepare("SELECT * FROM leaders WHERE handle = ?").get(handle) as Record<string, unknown> | null;
+        const invalid = demoHandleError(raw);
+        if (invalid) {
+          send(res, 422, { error: invalid });
+          return;
+        }
+        const sock = (req as unknown as { socket?: { remoteAddress?: string } }).socket;
+        const ip = sock?.remoteAddress ?? "";
+        if (limited(res, authHits, ip ? `ip:${ip}` : `new:${raw}`, 60_000, 10)) return;
+        const found = ctx.store.db.prepare("SELECT id FROM leaders WHERE handle = ?").get(raw) as Record<string, unknown> | null;
+        // Never hand out another leader's token: taken handles sign in
+        // with their wallet instead.
         if (found) {
-          send(res, 200, { token: found.token, leaderId: found.id });
+          send(res, 409, { error: "handle taken: sign in with wallet" });
           return;
         }
         const id = mintId("leader");
         const token = newToken("demo");
-        ctx.store.db.prepare("INSERT INTO leaders (id, handle, token, handle_set) VALUES (?, ?, ?, 1)").run(id, handle, token);
+        try {
+          ctx.store.db.prepare("INSERT INTO leaders (id, handle, token, handle_set) VALUES (?, ?, ?, 1)").run(id, raw, token);
+        } catch (err) {
+          if (!/UNIQUE/i.test((err as Error).message)) throw err;
+          send(res, 409, { error: "handle taken: sign in with wallet" });
+          return;
+        }
         send(res, 200, { token, leaderId: id });
         return;
       }
@@ -317,7 +350,7 @@ export function buildRouter(ctx: Ctx): (req: IncomingMessage, res: ServerRespons
         return;
       }
       if (req.method === "GET" && url.pathname === "/v1/ai/provider") {
-        const status = (task: "compile" | "portrait") => ({ provider: hasKey(task, process.env) ? "meta" : "mock", model: resolveModel(task, process.env), keyed: hasKey(task, process.env) });
+        const status = (task: "compile" | "portrait") => ({ provider: hasKey(task, process.env) ? "meta" : "mock", model: resolveModel(task, process.env) });
         send(res, 200, { compile: status("compile"), portrait: status("portrait"), explainer: status("compile") });
         return;
       }

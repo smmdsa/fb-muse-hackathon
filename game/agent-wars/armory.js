@@ -83,7 +83,8 @@ async function renderArmory() {
 
 async function boot() {
   const handle = localStorage.getItem(HANDLE_KEY) || "";
-  if (handle) $("handle").value = handle;
+  const handleInput = $("handle");
+  if (handle && handleInput) handleInput.value = handle;
   const sess = await window.AWSession.refreshIdentity();
   if (!sess.ok) {
     if (token) { token = ""; localStorage.removeItem(TOKEN_KEY); }
@@ -94,22 +95,6 @@ async function boot() {
   await renderArmory();
 }
 
-$("login-btn").addEventListener("click", async () => {
-  const handle = $("handle").value.trim();
-  if (!handle) {
-    $("login-msg").textContent = "Type a handle first.";
-    return;
-  }
-  $("login-msg").textContent = "Signing in…";
-  const r = await call("POST", "/v1/auth/session", { handle });
-  if (r.status !== 200) {
-    $("login-msg").textContent = "Sign in failed. Run the API and retry.";
-    return;
-  }
-  token = r.data.token;
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(HANDLE_KEY, handle);
-  await boot();
-});
+// Sign-in rides the wallet wall: the login card links to auth.html.
 
 boot();

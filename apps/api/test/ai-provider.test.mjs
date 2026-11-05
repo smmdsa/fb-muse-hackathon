@@ -21,7 +21,7 @@ describe("ai provider status", () => {
       assert.equal(r.status, 200);
       assert.equal(r.json.compile.provider, "mock");
       assert.equal(r.json.compile.model, "muse-spark-1.3");
-      assert.equal(r.json.compile.keyed, false);
+      assert.equal("keyed" in r.json.compile, false);
       assert.ok(!JSON.stringify(r.json).includes("META_"));
     } finally {
       if (saved === undefined) delete process.env.META_SPARK_KEY;
@@ -35,7 +35,7 @@ describe("ai provider status", () => {
     try {
       const r = await call("GET", "/v1/ai/provider");
       assert.equal(r.json.compile.provider, "meta");
-      assert.equal(r.json.compile.keyed, true);
+      assert.equal("keyed" in r.json.compile, false);
       assert.ok(!JSON.stringify(r.json).includes("test-key"));
     } finally {
       if (saved === undefined) delete process.env.META_SPARK_KEY;

@@ -155,6 +155,14 @@ describe("accounts", () => {
     }
   });
 
+  it("restricts cross-origin reads to loopback", async () => {
+    const evil = await call("GET", "/v1/leaderboard", null, null, { origin: "https://evil.example" });
+    assert.equal(evil.status, 200);
+    assert.equal(evil.headers["access-control-allow-origin"], undefined);
+    const own = await call("GET", "/v1/leaderboard", null, null, { origin: "http://localhost:8787" });
+    assert.equal(own.headers["access-control-allow-origin"], "http://localhost:8787");
+  });
+
   it("opts in, digests, and pauses autobattle", async () => {
     const solo = openStore(":memory:");
     const soloCall = makeCaller(buildRouter({ store: solo }));
